@@ -1,0 +1,17 @@
+{
+  "name": "OxyHyperbaric Clinic POS",
+  "short_name": "OxyPOS",
+  "description": "Sistema Empresarial de Agenda y Auditoría Clínica",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/1c3300f3-f5e7-4682-b627-257e868ed467.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ]
+}
