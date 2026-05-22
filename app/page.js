@@ -234,6 +234,11 @@ export default function AppLayout() {
 
     try {
       setDbStatus('cargando');
+      // --- BLINDAJE INICIAL ---
+      setDbPatients([]);
+      setDbAppointments([]);
+      setDbServices([]);
+      // -------------------------
 
       // Motor de Paginación para evadir el límite de 1000 de Supabase
       const fetchPaginated = async (table) => {
@@ -683,7 +688,7 @@ export default function AppLayout() {
       slots.push(`${displayH.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')} ${ampm}`);
     }
     
-    const srv = dbServices.find(s => s.name === equipment) || { duration: 60, buffer: 0, id: null };
+    const srv = dbServices.find(s => s.name === equipment) || { duration: 60, buffer: 30, id: null };
 
     return slots.map((time, idx) => (
       <div 
@@ -692,7 +697,7 @@ export default function AppLayout() {
           if (isPastTime(fullDate, time)) {
              alert("🔒 No puedes agendar citas en el pasado.");
              return;
-          }
+         }
           setSelectedSlot({ 
             time, equipment, day, fullDate, status: 'available',
             duration: srv.duration, buffer: srv.buffer, serviceId: srv.id,
@@ -726,23 +731,23 @@ export default function AppLayout() {
                 value={loginPin} 
                 onChange={e => setLoginPin(e.target.value)} 
                 onKeyDown={e => {
-                 if (e.key === 'Enter') {
-                   if (loginPin === '1234567890') {
-                     setCurrentUser({ id: 'admin', name: 'ADMINISTRADOR SUPREMO', role: 'Super Administrador Supremo' });
-                     setLoginPin('');
-                     return;
-                   }
-                   const masterLock = dbCompanyConfig.master_pin || '000000';
-                   if (String(loginPin) === String(masterLock)) {
-                      setCurrentUser({ id: 'admin', name: 'Administrador Maestro', role: 'Super Administrador Maestro' });
-                   } else {
-                      const u = dbUsers.find(x => String(x.pin) === String(loginPin) && x.is_active);
-                      if(u) setCurrentUser(u);
-                      else { alert("PIN Incorrecto o Usuario Inactivo"); setLoginPin(''); }
-                   }
-                 }
-               }}
-               className="w-full text-center text-3xl tracking-[0.2em] font-black p-4 border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 mb-6 bg-slate-50 text-slate-900" 
+                  if (e.key === 'Enter') {
+                    if (loginPin === '1234567890') {
+                      setCurrentUser({ id: 'admin', name: 'ADMINISTRADOR SUPREMO', role: 'Super Administrador Supremo' });
+                      setLoginPin('');
+                      return;
+                    }
+                    const masterLock = dbCompanyConfig.master_pin || '000000';
+                    if (String(loginPin) === String(masterLock)) {
+                       setCurrentUser({ id: 'admin', name: 'Administrador Maestro', role: 'Super Administrador Maestro' });
+                    } else {
+                       const u = dbUsers.find(x => String(x.pin) === String(loginPin) && x.is_active);
+                       if(u) setCurrentUser(u);
+                       else { alert("PIN Incorrecto o Usuario Inactivo"); setLoginPin(''); }
+                    }
+                  }
+                }}
+                className="w-full text-center text-3xl tracking-[0.2em] font-black p-4 border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 mb-6 bg-slate-50 text-slate-900" 
              />
              <button onClick={() => {
                 if (loginPin === '1234567890') {
@@ -759,7 +764,7 @@ export default function AppLayout() {
                    else { alert("PIN Incorrecto o Usuario Inactivo"); setLoginPin(''); }
                 }
              }} className="w-full bg-blue-600 text-white font-black py-4 rounded-xl uppercase text-sm shadow-md hover:bg-blue-700 transition">
-                Entrar
+               Entrar
              </button>
            </div>
         </div>
@@ -1283,10 +1288,10 @@ export default function AppLayout() {
                   <table className="w-full text-left border-collapse bg-white">
                     <thead>
                        <tr className="bg-slate-100 border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                         <th className="p-4">Fecha/Hora Movimiento</th>
-                         <th className="p-4">Paciente / Empleado</th>
-                         <th className="p-4">Acción</th>
-                         <th className="p-4">Detalle Oculto</th>
+                          <th className="p-4">Fecha/Hora Movimiento</th>
+                          <th className="p-4">Paciente / Empleado</th>
+                          <th className="p-4">Acción</th>
+                          <th className="p-4">Detalle Oculto</th>
                        </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -1359,29 +1364,28 @@ export default function AppLayout() {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                            {dbPatients.flatMap(p => (p.packageHistory || []).map(tx => ({...tx, patientId: p.id, patientName: p.patient})))
-                            .sort((a,b) => b.id - a.id).slice(0, 50).map(tx => (
-                              <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
-                                 <td className="p-4 font-bold text-slate-500 text-xs">{tx.date}</td>
-                                 <td className="p-4 font-black text-slate-800 text-sm uppercase">{tx.patientName}</td>
-                                 <td className="p-4">
-                                    <p className="font-bold text-blue-600 text-xs uppercase">{tx.serviceName}</p>
-                                    <p className="text-[9px] font-black text-slate-400 uppercase mt-0.5">+{tx.sessions} SESIONES A CARTERA</p>
-                                 </td>
-                                 <td className="p-4 text-right">
-                                    <p className="font-black text-emerald-600 text-sm">${tx.price} {currencyStr}</p>
-                                    <p className="text-[9px] font-black text-slate-400 uppercase mt-0.5 bg-slate-100 inline-block px-2 py-0.5 rounded">{tx.paymentMethod || 'Tarjeta'}</p>
-                                 </td>
-                                 {currentUserLevel === 1 && (
-                                    <td className="p-4 text-center">
-                                       <button onClick={() => handleCancelGlobalTransaction(tx, tx.patientId, tx.patientName)} className="bg-red-50 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-100 transition shadow-sm">Revertir Venta</button>
-                                    </td>
-                                 )}
-                              </tr>
+                           .sort((a,b) => b.id - a.id).slice(0, 50).map(tx => (
+                             <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
+                                <td className="p-4 font-bold text-slate-500 text-xs">{tx.date}</td>
+                                <td className="p-4 font-black text-slate-800 text-sm uppercase">{tx.patientName}</td>
+                                <td className="p-4">
+                                   <p className="font-bold text-blue-600 text-xs uppercase">{tx.serviceName}</p>
+                                   <p className="text-[9px] font-black text-slate-400 uppercase mt-0.5">+{tx.sessions} SESIONES A CARTERA</p>
+                                </td>
+                                <td className="p-4 text-right">
+                                   <p className="font-black text-emerald-600 text-sm">${tx.price} {currencyStr}</p>
+                                   <p className="text-[9px] font-black text-slate-400 uppercase mt-0.5 bg-slate-100 inline-block px-2 py-0.5 rounded">{tx.paymentMethod || 'Tarjeta'}</p>
+                                </td>
+                                {currentUserLevel === 1 && (
+                                   <td className="p-4 text-center">
+                                      <button onClick={() => handleCancelGlobalTransaction(tx, tx.patientId, tx.patientName)} className="bg-red-50 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-100 transition shadow-sm">Revertir Venta</button>
+                                   </td>
+                                )}
+                             </tr>
                            ))}
                         </tbody>
                      </table>
                   </div>
-
                 </div>
               )
             )}
@@ -1691,18 +1695,18 @@ export default function AppLayout() {
                       />
                    </div>
                    <button onClick={async () => {
-                      try {
-                        await activeSupabase.from('appointments').update({ notes: selectedSlot.notes }).eq('id', selectedSlot.id);
-                        const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
-                        for (const pat of matchingPatients) {
-                           let upRes = await activeSupabase.from('patients').update({ notes: selectedSlot.patientNotes }).eq('id', pat.id);
-                           if (upRes.error) {
-                               await activeSupabase.from('patients').update({ Notes: selectedSlot.patientNotes }).eq('id', pat.id);
-                           }
-                        }
-                        alert("Notas guardadas y sincronizadas correctamente.");
-                        fetchAllData();
-                      } catch(e) { alert("Error guardando notas."); }
+                     try {
+                       await activeSupabase.from('appointments').update({ notes: selectedSlot.notes }).eq('id', selectedSlot.id);
+                       const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
+                       for (const pat of matchingPatients) {
+                          let upRes = await activeSupabase.from('patients').update({ notes: selectedSlot.patientNotes }).eq('id', pat.id);
+                          if (upRes.error) {
+                              await activeSupabase.from('patients').update({ Notes: selectedSlot.patientNotes }).eq('id', pat.id);
+                          }
+                       }
+                       alert("Notas guardadas y sincronizadas correctamente.");
+                       fetchAllData();
+                     } catch(e) { alert("Error guardando notas."); }
                    }} className="w-full bg-slate-800 text-white font-black py-2 rounded-lg text-[10px] uppercase hover:bg-slate-700 shadow-sm transition">💾 Guardar Notas</button>
                 </div>
               </div>
