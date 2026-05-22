@@ -507,8 +507,8 @@ export default function AppLayout() {
       const newHistory = (p.packageHistory || []).filter(t => String(t.id) !== String(tx.id));
 
       await activeSupabase.from('patients').update({
-         wallets: currentWallets,
-         package_history: newHistory
+          wallets: currentWallets,
+          package_history: newHistory
       }).eq('id', p.id);
 
       await logAudit(null, patientName, 'REVERSIÓN DE VENTA', `Se canceló ticket por $${tx.price} y se restaron ${tx.sessions} sesiones de ${eqName}.`);
@@ -697,7 +697,7 @@ export default function AppLayout() {
           if (isPastTime(fullDate, time)) {
              alert("🔒 No puedes agendar citas en el pasado.");
              return;
-         }
+          }
           setSelectedSlot({ 
             time, equipment, day, fullDate, status: 'available',
             duration: srv.duration, buffer: srv.buffer, serviceId: srv.id,
@@ -726,43 +726,43 @@ export default function AppLayout() {
              <h2 className="text-2xl font-black uppercase mb-2 text-slate-800">🔒 Acceso</h2>
              <p className="text-xs font-bold text-slate-500 mb-8 uppercase">Ingresa tu NIP de 6 dígitos</p>
              <input 
-                type="password" 
-                maxLength="10" 
-                value={loginPin} 
-                onChange={e => setLoginPin(e.target.value)} 
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    if (loginPin === '1234567890') {
-                      setCurrentUser({ id: 'admin', name: 'ADMINISTRADOR SUPREMO', role: 'Super Administrador Supremo' });
-                      setLoginPin('');
-                      return;
-                    }
-                    const masterLock = dbCompanyConfig.master_pin || '000000';
-                    if (String(loginPin) === String(masterLock)) {
-                       setCurrentUser({ id: 'admin', name: 'Administrador Maestro', role: 'Super Administrador Maestro' });
-                    } else {
-                       const u = dbUsers.find(x => String(x.pin) === String(loginPin) && x.is_active);
-                       if(u) setCurrentUser(u);
-                       else { alert("PIN Incorrecto o Usuario Inactivo"); setLoginPin(''); }
-                    }
-                  }
-                }}
-                className="w-full text-center text-3xl tracking-[0.2em] font-black p-4 border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 mb-6 bg-slate-50 text-slate-900" 
+               type="password" 
+               maxLength="10" 
+               value={loginPin} 
+               onChange={e => setLoginPin(e.target.value)} 
+               onKeyDown={e => {
+                 if (e.key === 'Enter') {
+                   if (loginPin === '1234567890') {
+                     setCurrentUser({ id: 'admin', name: 'ADMINISTRADOR SUPREMO', role: 'Super Administrador Supremo' });
+                     setLoginPin('');
+                     return;
+                   }
+                   const masterLock = dbCompanyConfig.master_pin || '000000';
+                   if (String(loginPin) === String(masterLock)) {
+                      setCurrentUser({ id: 'admin', name: 'Administrador Maestro', role: 'Super Administrador Maestro' });
+                   } else {
+                      const u = dbUsers.find(x => String(x.pin) === String(loginPin) && x.is_active);
+                      if(u) setCurrentUser(u);
+                      else { alert("PIN Incorrecto o Usuario Inactivo"); setLoginPin(''); }
+                   }
+                 }
+               }}
+               className="w-full text-center text-3xl tracking-[0.2em] font-black p-4 border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 mb-6 bg-slate-50 text-slate-900" 
              />
              <button onClick={() => {
-                if (loginPin === '1234567890') {
-                  setCurrentUser({ id: 'admin', name: 'ADMINISTRADOR SUPREMO', role: 'Super Administrador Supremo' });
-                  setLoginPin('');
-                  return;
-                }
-                const masterLock = dbCompanyConfig.master_pin || '000000';
-                if (String(loginPin) === String(masterLock)) {
-                   setCurrentUser({ id: 'admin', name: 'Administrador Maestro', role: 'Super Administrador Maestro' });
-                } else {
-                   const u = dbUsers.find(x => String(x.pin) === String(loginPin) && x.is_active);
-                   if(u) setCurrentUser(u);
-                   else { alert("PIN Incorrecto o Usuario Inactivo"); setLoginPin(''); }
-                }
+               if (loginPin === '1234567890') {
+                 setCurrentUser({ id: 'admin', name: 'ADMINISTRADOR SUPREMO', role: 'Super Administrador Supremo' });
+                 setLoginPin('');
+                 return;
+               }
+               const masterLock = dbCompanyConfig.master_pin || '000000';
+               if (String(loginPin) === String(masterLock)) {
+                  setCurrentUser({ id: 'admin', name: 'Administrador Maestro', role: 'Super Administrador Maestro' });
+               } else {
+                  const u = dbUsers.find(x => String(x.pin) === String(loginPin) && x.is_active);
+                  if(u) setCurrentUser(u);
+                  else { alert("PIN Incorrecto o Usuario Inactivo"); setLoginPin(''); }
+               }
              }} className="w-full bg-blue-600 text-white font-black py-4 rounded-xl uppercase text-sm shadow-md hover:bg-blue-700 transition">
                Entrar
              </button>
@@ -907,7 +907,6 @@ export default function AppLayout() {
                             {/* CITAS */}
                             {dbAppointments.filter(app => app.equipment === eqName && app.full_date === currentDayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
                               <div key={app.id} onClick={() => { 
-                                   // USO DE RADAR MÚLTIPLE PARA ENCONTRAR CLONES CON NOTAS
                                    const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(app.patient));
                                    const patInfo = matchingPatients.find(x => x.notes && x.notes.trim() !== '') || matchingPatients[0];
                                    setSelectedSlot({...app, status: 'booked', patientNotes: patInfo ? patInfo.notes : ''}); 
@@ -958,7 +957,6 @@ export default function AppLayout() {
 
                                 {dbAppointments.filter(app => app.equipment === eqName && app.full_date === dayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
                                   <div key={app.id} onClick={() => { 
-                                       // USO DE RADAR MÚLTIPLE PARA ENCONTRAR CLONES CON NOTAS
                                        const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(app.patient));
                                        const patInfo = matchingPatients.find(x => x.notes && x.notes.trim() !== '') || matchingPatients[0];
                                        setSelectedSlot({...app, status: 'booked', patientNotes: patInfo ? patInfo.notes : ''}); 
@@ -1002,26 +1000,26 @@ export default function AppLayout() {
                  {filteredPatients.map(p => (
                    <div key={p.id} className={`bg-slate-50 border ${p.is_blocked ? 'border-red-300 bg-red-50 opacity-80' : 'border-slate-200'} p-4 rounded-2xl hover:shadow-lg transition flex flex-col relative`}>
 
-                      <p className="font-black text-slate-900 uppercase text-base truncate pr-6">
-                        {p.is_blocked && <span title="Paciente Bloqueado" className="mr-2">🚫</span>}
-                        {p.patient}
-                      </p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{p.phone || 'Sin teléfono'}</p>
-                      <div className="flex justify-between items-center mt-2 mb-4">
-                        <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-1 rounded">{p.protocol}</p>
-                        <p className="text-[9px] font-black text-slate-500 bg-slate-200 px-2 py-1 rounded">SESIONES: {p.historicoSesiones}</p>
-                      </div>
-                      <div className="mt-auto flex gap-2">
-                         <button onClick={() => { 
-                           setSelectedSlot(p); 
-                           setShowPatientProfile(true); 
-                         }} className="flex-1 bg-emerald-600 text-white text-[9px] font-black uppercase py-2 rounded hover:bg-emerald-700 transition shadow-sm">💳 Expediente</button>
-                         <button onClick={() => { 
-                           if (p.is_blocked) {
-                              alert("🚫 Paciente Bloqueado por Administración. No se pueden agendar citas ni servicios. Requiere desbloqueo de Superusuario en su Expediente.");
-                              return;
-                           }
-                           setSelectedSlot({ 
+                     <p className="font-black text-slate-900 uppercase text-base truncate pr-6">
+                       {p.is_blocked && <span title="Paciente Bloqueado" className="mr-2">🚫</span>}
+                       {p.patient}
+                     </p>
+                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{p.phone || 'Sin teléfono'}</p>
+                     <div className="flex justify-between items-center mt-2 mb-4">
+                       <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-1 rounded">{p.protocol}</p>
+                       <p className="text-[9px] font-black text-slate-500 bg-slate-200 px-2 py-1 rounded">SESIONES: {p.historicoSesiones}</p>
+                     </div>
+                     <div className="mt-auto flex gap-2">
+                        <button onClick={() => { 
+                          setSelectedSlot(p); 
+                          setShowPatientProfile(true); 
+                        }} className="flex-1 bg-emerald-600 text-white text-[9px] font-black uppercase py-2 rounded hover:bg-emerald-700 transition shadow-sm">💳 Expediente</button>
+                        <button onClick={() => { 
+                          if (p.is_blocked) {
+                             alert("🚫 Paciente Bloqueado por Administración. No se pueden agendar citas ni servicios. Requiere desbloqueo de Superusuario en su Expediente.");
+                             return;
+                          }
+                          setSelectedSlot({ 
                              patient: p.patient, 
                              phone: p.phone, 
                              protocol: p.protocol, 
@@ -1029,10 +1027,10 @@ export default function AppLayout() {
                              status: 'available',
                              patientNotes: p.notes,
                              is_new_patient: false 
-                           }); 
-                           setShowNewAppointment(true); 
-                         }} className="flex-1 bg-blue-600 text-white text-[9px] font-black uppercase py-2 rounded hover:bg-blue-700 transition shadow-sm">📅 Agendar</button>
-                      </div>
+                          }); 
+                          setShowNewAppointment(true); 
+                        }} className="flex-1 bg-blue-600 text-white text-[9px] font-black uppercase py-2 rounded hover:bg-blue-700 transition shadow-sm">📅 Agendar</button>
+                     </div>
                    </div>
                  ))}
                  {filteredPatients.length === 0 && <div className="col-span-full py-20 text-center"><p className="text-slate-400 font-black uppercase text-lg">No se encontraron clientes.</p></div>}
@@ -1098,7 +1096,7 @@ export default function AppLayout() {
                     {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true });}} className="w-1/3 bg-slate-300 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-400">Cancelar</button>}
                     <button onClick={async () => {
                       if(!newSrv.name) return alert("Falta el nombre");
-                      const p = { name: newSrv.name, duration: newSrv.duration, buffer: newSrv.buffer, price: newSrv.price, color: newSrv.color, is_active: newSrv.is_active };
+                      const p = { name: newSrv.name, duration: newSrv.duration, buffer: newSrv.buffer, price: newSrv.price, color: newSrv.color, is_active: newSrv.is_active, equipment: newSrv.equipment || null };
                       if(isEditingSrv && newSrv.id) {
                         await activeSupabase.from('services').update(p).eq('id', newSrv.id);
                       } else {
@@ -1147,66 +1145,6 @@ export default function AppLayout() {
                 </table>
               </div>
             </div>
-
-            {/* SECCIÓN DE PROTOCOLOS */}
-            <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight mb-4 pb-2 border-b border-slate-200 mt-8">Gestión de Tipos de Protocolos</h3>
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              
-              <div className="col-span-1 bg-slate-50 p-6 rounded-2xl border border-slate-200 h-fit shadow-sm">
-                <h3 className="font-black text-slate-800 uppercase text-sm mb-4 pb-2 border-b">{isEditingProtocol ? '✏️ Editar Protocolo' : '✨ Nuevo Protocolo'}</h3>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Nombre del Protocolo</label>
-                    <input type="text" placeholder="Ej. Médico Especial" className="w-full p-2.5 rounded-lg border border-slate-300 font-bold text-sm outline-none uppercase focus:border-blue-500 text-slate-900 bg-white" value={newProtocol.name} onChange={e => setNewProtocol({...newProtocol, name: e.target.value})} />
-                  </div>
-                  <div className="flex items-center gap-2 bg-white p-3 rounded-xl border">
-                    <input type="checkbox" checked={newProtocol.is_active} onChange={e => setNewProtocol({...newProtocol, is_active: e.target.checked})} className="w-4 h-4" />
-                    <label className="text-xs font-black uppercase text-slate-700">Activo (Visible en Listas)</label>
-                  </div>
-                  <div className="flex gap-2 pt-2">
-                    {isEditingProtocol && <button onClick={() => {setIsEditingProtocol(false); setNewProtocol({ id: null, name: '', is_active: true });}} className="w-1/3 bg-slate-300 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-400">Cancelar</button>}
-                    <button onClick={async () => {
-                      if(!newProtocol.name) return alert("Falta el nombre");
-                      const p = { name: newProtocol.name, is_active: newProtocol.is_active };
-                      if(isEditingProtocol && newProtocol.id) {
-                        await activeSupabase.from('protocols').update(p).eq('id', newProtocol.id);
-                      } else {
-                        await activeSupabase.from('protocols').insert([p]);
-                      }
-                      setIsEditingProtocol(false); 
-                      setNewProtocol({ id: null, name: '', is_active: true }); 
-                      fetchAllData();
-                    }} className="flex-1 bg-blue-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-lg hover:bg-blue-700 transition">{isEditingProtocol ? 'Actualizar' : 'Guardar Protocolo'}</button>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="col-span-2 bg-white rounded-2xl border border-slate-200 overflow-hidden h-fit shadow-sm">
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-slate-100 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                    <tr><th className="p-4">Nombre del Protocolo</th><th className="p-4">Estatus</th><th className="p-4 text-right">Acciones</th></tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {(dbProtocols || []).map(p => (
-                      <tr key={p.id} className={`hover:bg-slate-50 transition-colors ${!p.is_active ? 'opacity-50 grayscale' : ''}`}>
-                        <td className="p-4 font-black text-slate-800 uppercase">{p.name}</td>
-                        <td className="p-4 font-bold text-slate-500 uppercase text-[10px]">{p.is_active ? 'ACTIVO' : 'INACTIVO'}</td>
-                        <td className="p-4 text-right">
-                          <button onClick={() => {setNewProtocol(p); setIsEditingProtocol(true);}} className="bg-blue-50 border border-blue-200 text-blue-600 px-3 py-1.5 rounded text-[10px] font-black uppercase hover:bg-blue-100 mr-2">Editar</button>
-                          <button onClick={async () => { 
-                            if(window.confirm('¿Borrar Protocolo?')) { 
-                              await activeSupabase.from('protocols').delete().eq('id', p.id); 
-                              fetchAllData(); 
-                            } 
-                          }} className="bg-red-50 border border-red-200 text-red-600 px-3 py-1.5 rounded text-[10px] font-black uppercase hover:bg-red-100">Borrar</button>
-                        </td>
-                      </tr>
-                    ))}
-                    {(!dbProtocols || dbProtocols.length === 0) && <tr><td colSpan="3" className="p-8 text-center text-slate-400 font-bold uppercase">Sin protocolos configurados.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </div>
         )}
 
@@ -1243,7 +1181,7 @@ export default function AppLayout() {
                 </div>
               </div>
             )}
-
+            
             {reportFilter === 'Paciente' && (
               <div className="flex-1 flex flex-col">
                 <div className="flex flex-col md:flex-row gap-4 mb-4 items-end">
@@ -1351,40 +1289,40 @@ export default function AppLayout() {
                   
                   {/* LIBRO MAYOR DE VENTAS CON BOTÓN DE CANCELACIÓN */}
                   <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 overflow-auto shadow-inner">
-                     <h3 className="bg-slate-100 p-3 text-[10px] font-black uppercase text-slate-500 border-b border-slate-200 tracking-widest sticky top-0">Libro Mayor de Ventas (Últimos Movimientos)</h3>
-                     <table className="w-full text-left border-collapse bg-white">
-                        <thead className="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-200 sticky top-10 shadow-sm">
-                           <tr>
-                              <th className="p-4">Fecha Ticket</th>
-                              <th className="p-4">Paciente</th>
-                              <th className="p-4">Paquete Vendido</th>
-                              <th className="p-4 text-right">Monto / Método</th>
-                              {currentUserLevel === 1 && <th className="p-4 text-center">Auditoría</th>}
-                           </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                           {dbPatients.flatMap(p => (p.packageHistory || []).map(tx => ({...tx, patientId: p.id, patientName: p.patient})))
-                           .sort((a,b) => b.id - a.id).slice(0, 50).map(tx => (
-                             <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="p-4 font-bold text-slate-500 text-xs">{tx.date}</td>
-                                <td className="p-4 font-black text-slate-800 text-sm uppercase">{tx.patientName}</td>
-                                <td className="p-4">
-                                   <p className="font-bold text-blue-600 text-xs uppercase">{tx.serviceName}</p>
-                                   <p className="text-[9px] font-black text-slate-400 uppercase mt-0.5">+{tx.sessions} SESIONES A CARTERA</p>
-                                </td>
-                                <td className="p-4 text-right">
-                                   <p className="font-black text-emerald-600 text-sm">${tx.price} {currencyStr}</p>
-                                   <p className="text-[9px] font-black text-slate-400 uppercase mt-0.5 bg-slate-100 inline-block px-2 py-0.5 rounded">{tx.paymentMethod || 'Tarjeta'}</p>
-                                </td>
-                                {currentUserLevel === 1 && (
-                                   <td className="p-4 text-center">
-                                      <button onClick={() => handleCancelGlobalTransaction(tx, tx.patientId, tx.patientName)} className="bg-red-50 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-100 transition shadow-sm">Revertir Venta</button>
-                                   </td>
-                                )}
-                             </tr>
-                           ))}
-                        </tbody>
-                     </table>
+                       <h3 className="bg-slate-100 p-3 text-[10px] font-black uppercase text-slate-500 border-b border-slate-200 tracking-widest sticky top-0">Libro Mayor de Ventas (Últimos Movimientos)</h3>
+                       <table className="w-full text-left border-collapse bg-white">
+                         <thead className="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-200 sticky top-10 shadow-sm">
+                            <tr>
+                               <th className="p-4">Fecha Ticket</th>
+                               <th className="p-4">Paciente</th>
+                               <th className="p-4">Paquete Vendido</th>
+                               <th className="p-4 text-right">Monto / Método</th>
+                               {currentUserLevel === 1 && <th className="p-4 text-center">Auditoría</th>}
+                            </tr>
+                         </thead>
+                         <tbody className="divide-y divide-slate-100">
+                            {dbPatients.flatMap(p => (p.packageHistory || []).map(tx => ({...tx, patientId: p.id, patientName: p.patient})))
+                            .sort((a,b) => b.id - a.id).slice(0, 50).map(tx => (
+                              <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
+                                 <td className="p-4 font-bold text-slate-500 text-xs">{tx.date}</td>
+                                 <td className="p-4 font-black text-slate-800 text-sm uppercase">{tx.patientName}</td>
+                                 <td className="p-4">
+                                    <p className="font-bold text-blue-600 text-xs uppercase">{tx.serviceName}</p>
+                                    <p className="text-[9px] font-black text-slate-400 uppercase mt-0.5">+{tx.sessions} SESIONES A CARTERA</p>
+                                 </td>
+                                 <td className="p-4 text-right">
+                                    <p className="font-black text-emerald-600 text-sm">${tx.price} {currencyStr}</p>
+                                    <p className="text-[9px] font-black text-slate-400 uppercase mt-0.5 bg-slate-100 inline-block px-2 py-0.5 rounded">{tx.paymentMethod || 'Tarjeta'}</p>
+                                 </td>
+                                 {currentUserLevel === 1 && (
+                                    <td className="p-4 text-center">
+                                       <button onClick={() => handleCancelGlobalTransaction(tx, tx.patientId, tx.patientName)} className="bg-red-50 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-100 transition shadow-sm">Revertir Venta</button>
+                                    </td>
+                                 )}
+                              </tr>
+                            ))}
+                         </tbody>
+                       </table>
                   </div>
                 </div>
               )
