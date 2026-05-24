@@ -11,6 +11,7 @@ import {
 import BitacoraModal from '../components/BitacoraModal';
 import PatientProfileModal from '../components/PatientProfileModal';
 import GFEManager from '../components/GFEManager';
+import { InstallGuideLink } from '../components/InstallGuide';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -927,6 +928,9 @@ export default function AppLayout() {
              <button onClick={handleLoginSubmit} disabled={isLoggingIn || !loginPin.trim()} className="w-full bg-blue-600 text-white font-black py-4 rounded-xl uppercase text-sm shadow-md hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed">
                 {isLoggingIn ? 'Verificando…' : 'Entrar'}
              </button>
+             <div className="mt-5 pt-4 border-t border-slate-100">
+               <InstallGuideLink className="text-[11px] font-bold text-blue-600 hover:text-blue-800 underline underline-offset-2 transition w-full text-center block leading-relaxed" />
+             </div>
            </div>
         </div>
       )}
@@ -1114,6 +1118,13 @@ export default function AppLayout() {
                                    setSelectedSlot({
                                      ...app,
                                      status: 'booked',
+                                     patientId: patInfo?.id,
+                                     phone: patInfo?.phone || app.phone,
+                                     email: patInfo?.email,
+                                     protocol: patInfo?.protocol || app.protocol,
+                                     wallets: patInfo?.wallets || {},
+                                     historicoSesiones: patInfo?.historicoSesiones || 0,
+                                     packageHistory: patInfo?.packageHistory || [],
                                      patientNotes: patInfo ? patInfo.notes : '',
                                      sessionPreset: getPresetFromTimes(app.duration, app.buffer).id
                                    });
@@ -1170,6 +1181,13 @@ export default function AppLayout() {
                                        setSelectedSlot({
                                      ...app,
                                      status: 'booked',
+                                     patientId: patInfo?.id,
+                                     phone: patInfo?.phone || app.phone,
+                                     email: patInfo?.email,
+                                     protocol: patInfo?.protocol || app.protocol,
+                                     wallets: patInfo?.wallets || {},
+                                     historicoSesiones: patInfo?.historicoSesiones || 0,
+                                     packageHistory: patInfo?.packageHistory || [],
                                      patientNotes: patInfo ? patInfo.notes : '',
                                      sessionPreset: getPresetFromTimes(app.duration, app.buffer).id
                                    });

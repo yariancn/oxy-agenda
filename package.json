@@ -8,7 +8,13 @@
     "start": "next start",
     "lint": "eslint",
     "health-check": "node --env-file=.env.local scripts/health-check.mjs",
-    "health-check:db": "node --env-file=.env.local scripts/health-check.mjs --skip-http"
+    "health-check:db": "node --env-file=.env.local scripts/health-check.mjs --skip-http",
+    "seed-demo:gdl": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs",
+    "seed-demo:gdl:dry": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs --dry-run",
+    "seed-demo:gdl:clear": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs --clear",
+    "seed-demo:gdl:next": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs --week=next",
+    "seed-demo:gdl:next:dry": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs --week=next --dry-run",
+    "seed-demo:gdl:both": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs --both"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1",
