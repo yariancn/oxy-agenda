@@ -143,25 +143,64 @@ function MockupScene({ type }) {
   }
 
   if (type === 'share-sheet-add') {
+    return <MockupScene type="share-sheet-scroll" />;
+  }
+
+  if (type === 'safari-required') {
+    return (
+      <PhoneChrome>
+        <div className="flex flex-col items-center justify-center h-full p-6 text-center gap-3">
+          <div className="w-16 h-16 rounded-2xl bg-blue-100 flex items-center justify-center text-3xl">🧭</div>
+          <p className="text-xs font-black text-slate-700 uppercase">Safari</p>
+          <p className="text-[10px] text-slate-500 font-bold">Chrome no puede instalar apps en iPhone</p>
+        </div>
+      </PhoneChrome>
+    );
+  }
+
+  if (type === 'share-sheet-scroll') {
     return (
       <PhoneChrome urlBar="">
-        <div className="absolute inset-x-0 bottom-0 rounded-t-2xl bg-white border-t border-slate-200 shadow-2xl p-3 z-10">
-          <div className="w-10 h-1 bg-slate-300 rounded mx-auto mb-3" />
-          <p className="text-[9px] font-black text-slate-400 uppercase text-center mb-2">Compartir</p>
-          <div className="flex gap-3 overflow-x-auto pb-2 px-1">
-            {['AirDrop', 'Mensajes', 'Mail'].map((l) => (
-              <div key={l} className="shrink-0 flex flex-col items-center gap-1 opacity-40">
-                <div className="w-11 h-11 rounded-xl bg-slate-200" />
-                <span className="text-[8px] font-bold text-slate-500">{l}</span>
-              </div>
-            ))}
-            <div className="shrink-0 flex flex-col items-center gap-1">
-              <div className="w-11 h-11 rounded-xl bg-emerald-500 text-white flex items-center justify-center text-xl font-black ring-4 ring-amber-400 animate-pulse">⊞</div>
-              <span className="text-[8px] font-black text-emerald-700 text-center leading-tight">Agregar a<br />Inicio</span>
+        <div className="absolute inset-0 bg-black/20 z-0" />
+        <div className="absolute inset-x-1 bottom-0 rounded-t-2xl bg-white shadow-2xl z-10 max-h-[210px] flex flex-col overflow-hidden text-[9px]">
+          <div className="w-10 h-1 bg-slate-300 rounded mx-auto mt-2 mb-2 shrink-0" />
+          <div className="px-3 pb-1 flex items-center gap-2 border-b border-slate-100 shrink-0">
+            <div className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center text-white text-[8px]">📲</div>
+            <div>
+              <p className="font-black text-slate-800 text-[10px]">OXY Agenda</p>
+              <p className="text-slate-400 font-semibold">oxy-agenda.vercel.app</p>
             </div>
           </div>
+          <div className="px-2 py-2 flex gap-3 overflow-hidden shrink-0 opacity-80">
+            {['AirDrop', 'Mensajes', 'Mail', 'Notas'].map((l) => (
+              <div key={l} className="shrink-0 flex flex-col items-center gap-0.5 w-12">
+                <div className="w-9 h-9 rounded-xl bg-slate-200" />
+                <span className="text-[7px] font-bold text-slate-500 text-center">{l}</span>
+              </div>
+            ))}
+          </div>
+          <div className="px-2 pb-1 flex gap-2 shrink-0 opacity-70">
+            {['Copiar', 'Lecturas'].map((l) => (
+              <div key={l} className="flex flex-col items-center w-12">
+                <div className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200" />
+                <span className="text-[7px] text-slate-500 mt-0.5">{l}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex-1 overflow-hidden relative border-t border-slate-100 mt-1">
+            <div className="px-3 py-1.5 text-slate-400 border-b border-slate-50">Abrir en Chrome</div>
+            <div className="px-3 py-1.5 text-slate-400 border-b border-slate-50">Buscar en Google</div>
+            <div className="px-3 py-2.5 flex items-center gap-2 bg-emerald-50 text-emerald-800 font-black ring-2 ring-amber-400 animate-pulse">
+              <span className="w-6 h-6 rounded-md bg-emerald-600 text-white flex items-center justify-center text-sm">+</span>
+              Agregar a pantalla de inicio
+            </div>
+            <div className="absolute top-0 inset-x-0 h-6 bg-gradient-to-b from-white to-transparent pointer-events-none" />
+          </div>
         </div>
-        <Arrow className="absolute bottom-28 right-6" label="Toca aquí" flip />
+        <Arrow className="absolute bottom-[4.5rem] left-1/2 -translate-x-1/2" label="Desliza arriba ↑" />
+        <p className="absolute bottom-1 left-0 right-0 text-center text-[8px] font-black text-amber-300 uppercase z-20">
+          No está arriba con AirDrop — baja en la lista
+        </p>
       </PhoneChrome>
     );
   }
@@ -196,7 +235,6 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone, className = '
   const [stepIndex, setStepIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [shareHint, setShareHint] = useState(false);
 
   const step = wizard.steps[stepIndex];
   const isLast = stepIndex >= wizard.steps.length - 1;
@@ -206,15 +244,7 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone, className = '
     if (!action) return;
     setBusy(true);
     try {
-      if (action === 'web-share' && navigator.share) {
-        await navigator.share({
-          title: 'OXY Agenda',
-          text: 'Instala OXY Agenda en tu pantalla de inicio',
-          url: wizard.url,
-        });
-        setShareHint(true);
-        setStepIndex((i) => Math.min(i + 1, wizard.steps.length - 1));
-      } else if (action === 'copy-url') {
+      if (action === 'copy-url') {
         await navigator.clipboard.writeText(wizard.url);
         setCopied(true);
         window.setTimeout(() => setCopied(false), 2500);
@@ -257,15 +287,21 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone, className = '
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col items-center justify-center min-h-0">
+        {step.warn && (
+          <p className="text-xs text-amber-200 font-bold text-center max-w-sm mb-4 bg-amber-950/60 border border-amber-600/50 rounded-xl px-3 py-2.5 leading-relaxed">
+            ⚠️ {step.warn}
+          </p>
+        )}
+
         <p className="text-sm text-slate-300 text-center leading-relaxed max-w-sm mb-5 font-medium">
           {step.body}
         </p>
 
         <MockupScene type={step.mockup} />
 
-        {shareHint && step.autoAction === 'web-share' && (
-          <p className="mt-4 text-xs text-emerald-400 font-bold text-center max-w-xs bg-emerald-950/50 border border-emerald-800 rounded-xl px-3 py-2">
-            ✓ Se abrió Compartir. Ahora baja en ese menú y toca «Agregar a Inicio».
+        {step.id === 'share' && (
+          <p className="mt-4 text-[11px] text-blue-200 font-bold text-center max-w-xs">
+            Tip: toca «Después» arriba a la derecha para ver la barra de Safari.
           </p>
         )}
       </div>
@@ -288,9 +324,7 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone, className = '
             onClick={() => setStepIndex((i) => i + 1)}
             className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-2xl text-sm uppercase transition"
           >
-            {step.autoAction === 'web-share' && !shareHint
-              ? 'Prefiero hacerlo manual →'
-              : 'Listo, siguiente paso →'}
+            Listo, siguiente paso →
           </button>
         ) : (
           <button
