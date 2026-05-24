@@ -17,6 +17,7 @@ export default function AppLayout() {
   const [currentUser, setCurrentUser] = useState(null);
   const [loginPin, setLoginPin] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
 
   // --- ESTADOS PRINCIPALES ---
   const [activeClinic, setActiveClinic] = useState('Guadalajara'); 
@@ -881,13 +882,34 @@ export default function AppLayout() {
 
   const isNewPatientInline = selectedSlot?.patient && selectedSlot.patient.length > 0 && !dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
 
+  const selectTab = (tab) => {
+    setActiveTab(tab);
+    setMobileMoreOpen(false);
+  };
+
+  const mobilePrimaryTabs = [
+    { id: 'Agenda', icon: '📅', label: 'Agenda' },
+    { id: 'Pacientes', icon: '👥', label: 'Clientes' },
+    { id: 'GFE', icon: '🩺', label: 'GFE' },
+  ];
+
+  const mobileAdminTabs = currentUserLevel <= 2
+    ? [
+        { id: 'Servicios', icon: '⚙️', label: 'Catálogo' },
+        { id: 'Reportes', icon: '📊', label: 'Reportes' },
+        { id: 'Admin', icon: '🔒', label: 'Ajustes' },
+      ]
+    : [];
+
+  const mobileMoreActive = mobileAdminTabs.some(t => t.id === activeTab);
+
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden relative">
       
       {/* CAPA DE BLOQUEO: INICIAR TURNO Y LLAVE MAESTRA */}
       {!currentUser && (
         <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md flex items-center justify-center z-[99999]">
-           <div className="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-sm text-center border">
+           <div className="bg-white p-6 sm:p-10 rounded-3xl shadow-2xl w-full max-w-sm text-center border mx-4">
              <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" className="h-20 mx-auto mb-6 rounded-xl shadow-sm" alt="Logo"/>
              <h2 className="text-2xl font-black uppercase mb-2 text-slate-800">🔒 Acceso</h2>
              <p className="text-xs font-bold text-slate-500 mb-8 uppercase">Ingresa tu NIP de 6 dígitos</p>
@@ -909,11 +931,11 @@ export default function AppLayout() {
         </div>
       )}
 
-      {/* SIDEBAR */}
-      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shadow-2xl z-30 shrink-0">
-        <div className="p-6 border-b border-slate-800 bg-slate-950 flex flex-col items-center">
-          <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" alt="Logo" className="h-16 w-auto object-contain mb-3 bg-white rounded p-1" />
-          <h1 className="text-lg font-black text-white uppercase tracking-widest text-center">OxyHyperbaric</h1>
+      {/* SIDEBAR — solo escritorio / tablet horizontal */}
+      <aside className="hidden lg:flex w-56 xl:w-64 bg-slate-900 text-slate-300 flex-col shadow-2xl z-30 shrink-0">
+        <div className="p-4 xl:p-6 border-b border-slate-800 bg-slate-950 flex flex-col items-center">
+          <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" alt="Logo" className="h-12 xl:h-16 w-auto object-contain mb-2 xl:mb-3 bg-white rounded p-1" />
+          <h1 className="text-sm xl:text-lg font-black text-white uppercase tracking-widest text-center">OxyHyperbaric</h1>
         </div>
         
         {currentUser && (
@@ -960,61 +982,83 @@ export default function AppLayout() {
         
         <nav className="flex-1 overflow-y-auto py-2 px-3 space-y-1">
           <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 px-3 mt-2">Operación</div>
-          <button onClick={() => setActiveTab('Agenda')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition ${activeTab === 'Agenda' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📅 Agenda</button>
-          <button onClick={() => setActiveTab('Pacientes')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition ${activeTab === 'Pacientes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>👥 Clientes</button>
-          <button onClick={() => setActiveTab('GFE')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition ${activeTab === 'GFE' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🩺 Consultas GFE</button>
+          <button onClick={() => selectTab('Agenda')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Agenda' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📅 Agenda</button>
+          <button onClick={() => selectTab('Pacientes')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Pacientes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>👥 Clientes</button>
+          <button onClick={() => selectTab('GFE')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'GFE' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🩺 Consultas GFE</button>
           
           {currentUserLevel <= 2 && (
             <>
               <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 px-3 mt-6">Administración</div>
-              <button onClick={() => setActiveTab('Servicios')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition ${activeTab === 'Servicios' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>⚙️ Catálogo Operativo</button>
-              <button onClick={() => setActiveTab('Reportes')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition ${activeTab === 'Reportes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📊 Reportes y Ventas</button>
-              <button onClick={() => setActiveTab('Admin')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition ${activeTab === 'Admin' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🔒 Ajustes de Clínica</button>
+              <button onClick={() => selectTab('Servicios')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Servicios' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>⚙️ Catálogo Operativo</button>
+              <button onClick={() => selectTab('Reportes')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Reportes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📊 Reportes y Ventas</button>
+              <button onClick={() => selectTab('Admin')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Admin' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🔒 Ajustes de Clínica</button>
             </>
           )}
         </nav>
       </aside>
 
       {/* CONTENIDO PRINCIPAL */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
+      <main className="flex-1 flex flex-col h-screen overflow-hidden relative min-w-0 pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+
+        {/* Barra superior móvil — compacta */}
+        {currentUser && (
+          <div className="lg:hidden shrink-0 bg-slate-950 text-white px-2 py-2 flex items-center gap-2 border-b border-slate-800 z-20">
+            <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" alt="Logo" className="h-8 w-8 object-contain bg-white rounded p-0.5 shrink-0" />
+            {allowedClinics.length > 1 ? (
+              <div className="flex bg-slate-900 p-0.5 rounded-lg border border-slate-700 shrink-0">
+                {allowedClinics.includes('Shenandoah') && (
+                  <button onClick={() => switchClinic('Shenandoah')} className={`px-2 py-1 text-[9px] font-black rounded-md ${activeClinic === 'Shenandoah' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>🇺🇸</button>
+                )}
+                {allowedClinics.includes('Guadalajara') && (
+                  <button onClick={() => switchClinic('Guadalajara')} className={`px-2 py-1 text-[9px] font-black rounded-md ${activeClinic === 'Guadalajara' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}>🇲🇽</button>
+                )}
+              </div>
+            ) : (
+              <span className="text-[9px] font-black uppercase text-slate-300 shrink-0">{allowedClinics[0] === 'Guadalajara' ? '🇲🇽 GDL' : '🇺🇸 TX'}</span>
+            )}
+            <span className="flex-1 truncate text-[10px] font-bold text-slate-200 min-w-0">{currentUser.name}</span>
+            <button onClick={() => setShowNewAppointment(true)} className="shrink-0 h-8 w-8 bg-emerald-600 rounded-lg text-white font-black text-lg leading-none shadow" aria-label="Nueva cita">+</button>
+            <button onClick={handleLogout} className="shrink-0 text-[9px] font-black text-red-400 uppercase px-1">Salir</button>
+          </div>
+        )}
         
         {/* VISTA AGENDA */}
         {activeTab === 'Agenda' && (
           <div className="flex flex-col h-full relative z-10">
-            <header className="bg-white p-4 border-b border-slate-200 flex flex-col xl:flex-row items-center justify-between gap-4 shrink-0 shadow-sm z-20">
-              <div className="flex items-center gap-4">
-                <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-                  <button onClick={() => navigateDate(-1)} className="p-2 hover:bg-white rounded-lg transition text-slate-600">◀️</button>
-                  <div className="px-4 flex flex-col items-center justify-center">
-                    <span className="text-[10px] font-black text-blue-600 uppercase leading-none">{viewMode === 'Día' ? 'Día Actual' : 'Semana Actual'}</span>
-                    <span className="text-xs font-bold text-slate-800">{viewMode === 'Día' ? currentDayInfo.date : `${weekDays[0].date} - ${weekDays[6].date}`}</span>
+            <header className="bg-white p-2 lg:p-4 border-b border-slate-200 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-2 lg:gap-4 shrink-0 shadow-sm z-20">
+              <div className="flex items-center gap-2 lg:gap-4 min-w-0">
+                <div className="flex bg-slate-100 p-0.5 lg:p-1 rounded-lg lg:rounded-xl border border-slate-200 shrink-0">
+                  <button onClick={() => navigateDate(-1)} className="p-1.5 lg:p-2 hover:bg-white rounded-lg transition text-slate-600 text-sm">◀</button>
+                  <div className="px-2 lg:px-4 flex flex-col items-center justify-center min-w-0">
+                    <span className="text-[8px] lg:text-[10px] font-black text-blue-600 uppercase leading-none">{viewMode === 'Día' ? 'Día' : 'Semana'}</span>
+                    <span className="text-[10px] lg:text-xs font-bold text-slate-800 truncate max-w-[7rem] sm:max-w-none">{viewMode === 'Día' ? currentDayInfo.date : `${weekDays[0].date} - ${weekDays[6].date}`}</span>
                   </div>
-                  <button onClick={() => navigateDate(1)} className="p-2 hover:bg-white rounded-lg transition text-slate-600">▶️</button>
+                  <button onClick={() => navigateDate(1)} className="p-1.5 lg:p-2 hover:bg-white rounded-lg transition text-slate-600 text-sm">▶</button>
                 </div>
-                <button onClick={() => setCurrentDate(new Date())} className="text-[10px] font-black uppercase text-slate-400 hover:text-blue-600 transition border px-2 py-1 rounded">Hoy</button>
+                <button onClick={() => setCurrentDate(new Date())} className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 hover:text-blue-600 transition border px-2 py-1 rounded shrink-0">Hoy</button>
               </div>
 
-              <div className="flex items-center gap-4 bg-slate-50 p-1.5 rounded-xl border border-slate-200 flex-wrap">
+              <div className="flex items-center gap-1.5 lg:gap-4 bg-slate-50 p-1 lg:p-1.5 rounded-lg lg:rounded-xl border border-slate-200 flex-wrap">
                 {currentUserLevel <= 2 && (
-                  <button onClick={() => setShowOOOModal(true)} className="bg-red-50 text-red-600 border border-red-200 px-3 py-1.5 text-[10px] font-black rounded-lg hover:bg-red-100 transition uppercase shadow-sm">🚫 Bloquear Espacio</button>
+                  <button onClick={() => setShowOOOModal(true)} className="bg-red-50 text-red-600 border border-red-200 px-2 lg:px-3 py-1 text-[9px] lg:text-[10px] font-black rounded-lg hover:bg-red-100 transition uppercase shadow-sm shrink-0" title="Bloquear espacio"><span className="lg:hidden">🚫</span><span className="hidden lg:inline">🚫 Bloquear Espacio</span></button>
                 )}
-                <div className="flex items-center gap-2 px-2 border-l border-slate-200">
-                  <span className="text-[9px] font-black text-slate-400 uppercase">Zoom</span>
-                  <input type="range" min="20" max="300" value={zoomScale} onChange={(e) => setZoomScale(Number(e.target.value))} className="w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
+                <div className="flex items-center gap-1 lg:gap-2 px-1 lg:px-2 border-l border-slate-200">
+                  <span className="text-[8px] lg:text-[9px] font-black text-slate-400 uppercase hidden sm:inline">Zoom</span>
+                  <input type="range" min="20" max="300" value={zoomScale} onChange={(e) => setZoomScale(Number(e.target.value))} className="w-14 sm:w-20 lg:w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
                 </div>
-                <select value={equipmentFilter} onChange={e => setEquipmentFilter(e.target.value)} className="bg-white border border-slate-300 text-slate-700 font-bold text-xs rounded-md px-2 py-1 outline-none uppercase">
-                  <option value="Todos">Todos los Servicios</option>
+                <select value={equipmentFilter} onChange={e => setEquipmentFilter(e.target.value)} className="bg-white border border-slate-300 text-slate-700 font-bold text-[10px] lg:text-xs rounded-md px-1.5 lg:px-2 py-1 outline-none uppercase max-w-[5.5rem] sm:max-w-none truncate">
+                  <option value="Todos">Todos</option>
                   {dynamicColumns.map(e => <option key={e} value={e}>{e}</option>)}
                 </select>
-                <div className="flex items-center bg-slate-200/50 p-1 rounded-lg">
-                  <button onClick={() => setViewMode('Día')} className={`px-3 py-1 rounded font-black text-[10px] uppercase transition ${viewMode === 'Día' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Día</button>
-                  <button onClick={() => setViewMode('Semana')} className={`px-3 py-1 rounded font-black text-[10px] uppercase transition ${viewMode === 'Semana' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Semana</button>
+                <div className="flex items-center bg-slate-200/50 p-0.5 lg:p-1 rounded-lg shrink-0">
+                  <button onClick={() => setViewMode('Día')} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Día' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Día</button>
+                  <button onClick={() => setViewMode('Semana')} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Semana' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Sem</button>
                 </div>
               </div>
             </header>
 
             {/* --- CONTENEDOR DEL CALENDARIO: SCROLL UNIFICADO (CIRUGÍA CSS) --- */}
-            <div className="flex-1 bg-white overflow-auto relative m-4 rounded-xl shadow-inner border border-slate-200">
+            <div className="flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0">
               <div className="flex min-w-max">
                 
                 <div className="w-16 md:w-20 shrink-0 border-r border-slate-200 bg-slate-50 sticky left-0 z-50">
@@ -1155,7 +1199,7 @@ export default function AppLayout() {
 
         {/* VISTA PACIENTES */}
         {activeTab === 'Pacientes' && (
-          <div className="flex-1 p-6 bg-white overflow-auto flex flex-col relative z-10">
+          <div className="flex-1 p-3 lg:p-6 bg-white overflow-auto flex flex-col relative z-10 min-h-0">
             <div className="flex flex-col md:flex-row md:items-end justify-between border-b pb-4 mb-6 gap-4">
               <div className="flex items-center gap-4">
                 <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Directorio: {activeClinic}</h2>
@@ -2580,6 +2624,52 @@ export default function AppLayout() {
             }} 
           />
         </div>
+      )}
+
+      {/* Navegación inferior móvil — iconos */}
+      {currentUser && (
+        <>
+          {mobileMoreOpen && (
+            <div className="lg:hidden fixed inset-0 z-[60] bg-slate-900/50" onClick={() => setMobileMoreOpen(false)} />
+          )}
+          {mobileMoreOpen && mobileAdminTabs.length > 0 && (
+            <div className="lg:hidden fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom))] inset-x-2 z-[70] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2">
+              {mobileAdminTabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => selectTab(tab.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold ${activeTab === tab.id ? 'bg-blue-600/30 text-blue-300' : 'text-slate-300'}`}
+                >
+                  <span className="text-lg">{tab.icon}</span>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <nav className="lg:hidden fixed bottom-0 inset-x-0 z-[65] bg-slate-950 border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
+            <div className="flex items-stretch justify-around h-14">
+              {mobilePrimaryTabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => selectTab(tab.id)}
+                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-w-0 px-1 ${activeTab === tab.id ? 'text-blue-400' : 'text-slate-500'}`}
+                >
+                  <span className="text-base leading-none">{tab.icon}</span>
+                  <span className="text-[8px] font-black uppercase truncate max-w-full">{tab.label}</span>
+                </button>
+              ))}
+              {mobileAdminTabs.length > 0 && (
+                <button
+                  onClick={() => setMobileMoreOpen(v => !v)}
+                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-w-0 px-1 ${mobileMoreActive || mobileMoreOpen ? 'text-blue-400' : 'text-slate-500'}`}
+                >
+                  <span className="text-base leading-none">⋯</span>
+                  <span className="text-[8px] font-black uppercase">Más</span>
+                </button>
+              )}
+            </div>
+          </nav>
+        </>
       )}
     </div>
   );
