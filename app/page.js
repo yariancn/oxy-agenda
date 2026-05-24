@@ -2,6 +2,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabaseShenandoah, supabaseGdl } from '../lib/supabase';
 import { SESSION_PRESETS, getPresetFromTimes } from '../lib/sessionPresets';
+import {
+  canAccessClinic,
+  getAllowedClinics,
+  getStaffProfileForClinic,
+  resolveStaffLogin,
+} from '../lib/clinicAccess';
 import BitacoraModal from '../components/BitacoraModal';
 import PatientProfileModal from '../components/PatientProfileModal';
 import GFEManager from '../components/GFEManager';
@@ -10,6 +16,7 @@ export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
   const [currentUser, setCurrentUser] = useState(null);
   const [loginPin, setLoginPin] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // --- ESTADOS PRINCIPALES ---
   const [activeClinic, setActiveClinic] = useState('Guadalajara'); 
@@ -76,7 +83,7 @@ export default function AppLayout() {
   const [newRole, setNewRole] = useState({ id: null, name: '', level: 3 });
   const [isEditingRole, setIsEditingRole] = useState(false);
 
-  const [newUser, setNewUser] = useState({ id: null, name: '', role: 'Técnico Certificado IBUM', cert: '', is_active: true, pin: '' });
+  const [newUser, setNewUser] = useState({ id: null, name: '', email: '', role: 'Técnico Certificado IBUM', cert: '', is_active: true, pin: '' });
   const [isEditingUser, setIsEditingUser] = useState(false);
 
   const [showNewPatientModal, setShowNewPatientModal] = useState(false);
@@ -96,8 +103,13 @@ export default function AppLayout() {
 
   const activeSupabase = activeClinic === 'Shenandoah' ? supabaseShenandoah : supabaseGdl;
 
-  // CÁLCULO DE JERARQUÍA
-  const currentUserLevel = currentUser?.id === 'admin' ? 1 : (dbRoles.find(r => r.name === currentUser?.role)?.level || 3);
+  const allowedClinics = getAllowedClinics(currentUser);
+  const activeStaffProfile = getStaffProfileForClinic(currentUser, activeClinic) || currentUser;
+
+  // CÁLCULO DE JERARQUÍA (rol puede variar por clínica)
+  const currentUserLevel = currentUser?.id === 'admin'
+    ? 1
+    : (dbRoles.find(r => r.name === activeStaffProfile?.role)?.level || 3);
 
   // Actualizador de Reloj por Clínica
   useEffect(() => {
@@ -332,26 +344,56 @@ export default function AppLayout() {
     fetchAllData(); 
   }, [activeClinic]);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    const allowed = getAllowedClinics(currentUser);
+    if (allowed.length && !allowed.includes(activeClinic)) {
+      setActiveClinic(allowed[0]);
+    }
+  }, [currentUser, activeClinic]);
+
   // --- MOTORES DE ACCESO Y SEGURIDAD ---
-  const handleLoginSubmit = () => {
-    if (loginPin === '1234567890') {
-      setCurrentUser({ id: 'admin', name: 'ADMINISTRADOR SUPREMO', role: 'Super Administrador Supremo' });
+  const handleLoginSubmit = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
+    try {
+      const result = await resolveStaffLogin(loginPin, supabaseGdl, supabaseShenandoah);
+      if (!result.user) {
+        alert('PIN incorrecto o usuario inactivo');
+        setLoginPin('');
+        return;
+      }
+      setCurrentUser(result.user);
+      setActiveClinic(result.user.allowedClinics[0] || 'Guadalajara');
       setLoginPin('');
+    } catch {
+      alert('No se pudo verificar el acceso. Intenta de nuevo.');
+      setLoginPin('');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const switchClinic = (clinic) => {
+    if (!canAccessClinic(currentUser, clinic)) {
+      alert('No tienes acceso a esta clínica.');
       return;
     }
-    const masterLock = dbCompanyConfig.master_pin || '000000';
-    if (String(loginPin) === String(masterLock)) {
-       setCurrentUser({ id: 'admin', name: 'Administrador Maestro', role: 'Super Administrador Maestro' });
-    } else {
-       const u = dbUsers.find(x => String(x.pin) === String(loginPin) && x.is_active);
-       if(u) setCurrentUser(u);
-       else { alert("PIN Incorrecto o Usuario Inactivo"); setLoginPin(''); }
-    }
+    setActiveClinic(clinic);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setLoginPin('');
+    setActiveTab('Agenda');
+    setIsReportsUnlocked(false);
+    setActiveClinic('Guadalajara');
   };
 
   const handleFinancialUnlock = () => {
     const lock = dbCompanyConfig.financial_pin || '123456';
-    if (String(pinInput) === String(currentUser?.pin) || String(pinInput) === String(lock)) {
+    const staffPin = activeStaffProfile?.pin || currentUser?.pin;
+    if (String(pinInput) === String(staffPin) || String(pinInput) === String(lock)) {
         setIsReportsUnlocked(true); 
     } else { 
         alert('NIP Financiero Incorrecto'); 
@@ -855,40 +897,13 @@ export default function AppLayout() {
                 value={loginPin} 
                 onChange={e => setLoginPin(e.target.value)} 
                 onKeyDown={e => {
-                 if (e.key === 'Enter') {
-                   if (loginPin === '1234567890') {
-                     setCurrentUser({ id: 'admin', name: 'ADMINISTRADOR SUPREMO', role: 'Super Administrador Supremo' });
-                     setLoginPin('');
-                     return;
-                   }
-                   const masterLock = dbCompanyConfig.master_pin || '000000';
-                   if (String(loginPin) === String(masterLock)) {
-                      setCurrentUser({ id: 'admin', name: 'Administrador Maestro', role: 'Super Administrador Maestro' });
-                   } else {
-                      const u = dbUsers.find(x => String(x.pin) === String(loginPin) && x.is_active);
-                      if(u) setCurrentUser(u);
-                      else { alert("PIN Incorrecto o Usuario Inactivo"); setLoginPin(''); }
-                   }
-                 }
+                 if (e.key === 'Enter') handleLoginSubmit();
                }}
-               className="w-full text-center text-3xl tracking-[0.2em] font-black p-4 border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 mb-6 bg-slate-50 text-slate-900" 
+               disabled={isLoggingIn}
+               className="w-full text-center text-3xl tracking-[0.2em] font-black p-4 border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 mb-6 bg-slate-50 text-slate-900 disabled:opacity-60" 
              />
-             <button onClick={() => {
-                if (loginPin === '1234567890') {
-                  setCurrentUser({ id: 'admin', name: 'ADMINISTRADOR SUPREMO', role: 'Super Administrador Supremo' });
-                  setLoginPin('');
-                  return;
-                }
-                const masterLock = dbCompanyConfig.master_pin || '000000';
-                if (String(loginPin) === String(masterLock)) {
-                   setCurrentUser({ id: 'admin', name: 'Administrador Maestro', role: 'Super Administrador Maestro' });
-                } else {
-                   const u = dbUsers.find(x => String(x.pin) === String(loginPin) && x.is_active);
-                   if(u) setCurrentUser(u);
-                   else { alert("PIN Incorrecto o Usuario Inactivo"); setLoginPin(''); }
-                }
-             }} className="w-full bg-blue-600 text-white font-black py-4 rounded-xl uppercase text-sm shadow-md hover:bg-blue-700 transition">
-                Entrar
+             <button onClick={handleLoginSubmit} disabled={isLoggingIn || !loginPin.trim()} className="w-full bg-blue-600 text-white font-black py-4 rounded-xl uppercase text-sm shadow-md hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed">
+                {isLoggingIn ? 'Verificando…' : 'Entrar'}
              </button>
            </div>
         </div>
@@ -905,19 +920,37 @@ export default function AppLayout() {
            <div className="px-4 py-3 bg-slate-800 text-[10px] font-black uppercase text-slate-400 flex flex-col gap-1 border-b border-slate-700">
              <div className="flex justify-between items-center w-full">
                <span className="truncate mr-2 text-white">👤 {currentUser.name}</span>
-               <button onClick={() => { setCurrentUser(null); setLoginPin(''); setActiveTab('Agenda'); }} className="text-red-400 hover:text-red-300 shrink-0">Salir</button>
+               <button onClick={handleLogout} className="text-red-400 hover:text-red-300 shrink-0">Salir</button>
              </div>
              <span className="text-[8px] text-emerald-400">NIVEL DE ACCESO: {currentUserLevel}</span>
+             {allowedClinics.length > 1 && (
+               <span className="text-[8px] text-blue-300">CLÍNICAS: {allowedClinics.map(c => c === 'Guadalajara' ? 'GDL' : 'TX').join(' · ')}</span>
+             )}
            </div>
         )}
 
+        {currentUser && allowedClinics.length > 1 && (
         <div className="p-4 bg-slate-900 border-b border-slate-800">
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Ubicación Activa</p>
           <div className="bg-slate-950 p-1 rounded-xl flex border border-slate-800">
-            <button onClick={() => setActiveClinic('Shenandoah')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeClinic === 'Shenandoah' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>🇺🇸 TX</button>
-            <button onClick={() => setActiveClinic('Guadalajara')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeClinic === 'Guadalajara' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>🇲🇽 GDL</button>
+            {allowedClinics.includes('Shenandoah') && (
+              <button onClick={() => switchClinic('Shenandoah')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeClinic === 'Shenandoah' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>🇺🇸 TX</button>
+            )}
+            {allowedClinics.includes('Guadalajara') && (
+              <button onClick={() => switchClinic('Guadalajara')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeClinic === 'Guadalajara' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>🇲🇽 GDL</button>
+            )}
           </div>
         </div>
+        )}
+
+        {currentUser && allowedClinics.length === 1 && (
+        <div className="p-4 bg-slate-900 border-b border-slate-800">
+          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Ubicación</p>
+          <div className="bg-slate-950 py-2 px-3 rounded-xl border border-slate-800 text-center text-[10px] font-black uppercase text-white">
+            {allowedClinics[0] === 'Guadalajara' ? '🇲🇽 Guadalajara' : '🇺🇸 Shenandoah, TX'}
+          </div>
+        </div>
+        )}
 
         <div className="p-4">
           <button onClick={() => setShowNewAppointment(true)} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition uppercase text-xs">
@@ -1714,37 +1747,61 @@ export default function AppLayout() {
                     <h3 className="font-black text-slate-800 uppercase text-sm mb-4 pb-2 border-b">{isEditingUser ? 'Editar Empleado' : 'Alta de Nuevo Empleado'}</h3>
                     <div className="space-y-4 mb-6">
                       <input type="text" placeholder="Nombre Completo" className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" value={newUser.name} onChange={e => setNewUser({...newUser, name: e.target.value})} />
+                      <input type="email" placeholder="Correo (para invitaciones futuras)" className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" value={newUser.email || ''} onChange={e => setNewUser({...newUser, email: e.target.value})} />
                       <select className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})}>
                         {dbRoles.map(r => <option key={r.id} value={r.name}>{r.name} (Nivel {r.level})</option>)}
                       </select>
                       <input type="text" placeholder="Certificación (Ej. IBUM, D.O.)" className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" value={newUser.cert} onChange={e => setNewUser({...newUser, cert: e.target.value})} />
                       <input type="text" placeholder="PIN Personal (6 Dígitos)" maxLength="6" className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none tracking-widest text-slate-900 bg-white" value={newUser.pin || ''} onChange={e => setNewUser({...newUser, pin: e.target.value})} />
                       <div className="flex gap-2">
-                        {isEditingUser && <button onClick={() => {setIsEditingUser(false); setNewUser({ id: null, name: '', role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' });}} className="w-1/3 bg-slate-300 text-slate-700 font-black py-3 rounded-xl uppercase text-xs">Cancelar</button>}
+                        {isEditingUser && <button onClick={() => {setIsEditingUser(false); setNewUser({ id: null, name: '', email: '', role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' });}} className="w-1/3 bg-slate-300 text-slate-700 font-black py-3 rounded-xl uppercase text-xs">Cancelar</button>}
                         <button onClick={async () => {
                           if (!newUser.name) return alert("Ingresa el nombre.");
                           if (!newUser.pin || newUser.pin.length !== 6) return alert("El PIN debe ser de exactamente 6 dígitos.");
+                          const staffPayload = {
+                            name: newUser.name,
+                            role: newUser.role,
+                            cert: newUser.cert,
+                            is_active: newUser.is_active,
+                            pin: newUser.pin,
+                          };
+                          const email = (newUser.email || '').trim();
+                          if (email) staffPayload.email = email;
+
+                          const saveStaff = async (payload) => {
+                            if (isEditingUser && newUser.id) {
+                              return activeSupabase.from('users_staff').update(payload).eq('id', newUser.id);
+                            }
+                            return activeSupabase.from('users_staff').insert([payload]);
+                          };
+
+                          let res = await saveStaff(staffPayload);
+                          if (res.error && res.error.message.toLowerCase().includes('column') && staffPayload.email) {
+                            const { email: _e, ...rest } = staffPayload;
+                            res = await saveStaff(rest);
+                          }
+                          if (res.error) return alert(`Error al guardar: ${res.error.message}`);
+
                           if (isEditingUser && newUser.id) {
-                            await activeSupabase.from('users_staff').update({ name: newUser.name, role: newUser.role, cert: newUser.cert, is_active: newUser.is_active, pin: newUser.pin }).eq('id', newUser.id);
-                            await logAudit(null, newUser.name, 'EDICIÓN DE EMPLEADO', `Rol: ${newUser.role}`);
+                            await logAudit(null, newUser.name, 'EDICIÓN DE EMPLEADO', `Rol: ${newUser.role} · ${activeClinic}`);
                           } else {
-                            await activeSupabase.from('users_staff').insert([{ name: newUser.name, role: newUser.role, cert: newUser.cert, is_active: newUser.is_active, pin: newUser.pin }]);
-                            await logAudit(null, newUser.name, 'ALTA DE EMPLEADO', `Rol: ${newUser.role}`);
+                            await logAudit(null, newUser.name, 'ALTA DE EMPLEADO', `Rol: ${newUser.role} · ${activeClinic}`);
                           }
                           setIsEditingUser(false); 
-                          setNewUser({ id: null, name: '', role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' }); 
+                          setNewUser({ id: null, name: '', email: '', role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' }); 
                           fetchAllData();
                         }} className="flex-1 bg-slate-900 text-white font-black py-3 rounded-xl uppercase text-xs shadow-md">{isEditingUser ? 'Actualizar' : 'Guardar'}</button>
                       </div>
                     </div>
                     <table className="w-full text-left bg-white border rounded-xl overflow-hidden">
                       <thead className="bg-slate-100 text-[10px] font-black uppercase text-slate-400">
-                        <tr><th className="p-3">Nombre</th><th className="p-3">Rol</th><th className="p-3"></th></tr>
+                        <tr><th className="p-3">Nombre</th><th className="p-3">Correo</th><th className="p-3">Rol</th><th className="p-3"></th></tr>
                       </thead>
                       <tbody className="divide-y text-slate-900">
                         {(dbUsers || []).map(u => (
                           <tr key={u.id} className={`text-xs font-bold uppercase ${!u.is_active && 'opacity-40 grayscale'}`}>
                             <td className="p-3">{u.name}</td>
+                            <td className="p-3 text-slate-500 normal-case text-[10px]">{u.email || '—'}</td>
                             <td className="p-3 text-blue-600">{u.role}</td>
                             <td className="p-3 text-right">
                               <button onClick={() => {setNewUser(u); setIsEditingUser(true);}} className="text-blue-500 mr-2">Edit</button>
