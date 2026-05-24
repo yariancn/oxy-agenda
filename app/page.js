@@ -21,9 +21,9 @@ export default function AppLayout() {
   // --- ESTADOS PRINCIPALES ---
   const [activeClinic, setActiveClinic] = useState('Guadalajara'); 
   const [activeTab, setActiveTab] = useState('Agenda');
-  const [viewMode, setViewMode] = useState('Día'); 
+  const [viewMode, setViewMode] = useState('Semana'); 
   const [equipmentFilter, setEquipmentFilter] = useState('Todos');
-  const [zoomScale, setZoomScale] = useState(100);
+  const [zoomScale, setZoomScale] = useState(20);
   const [currentDate, setCurrentDate] = useState(new Date());
   
   // --- RELOJ MULTIHUSO HORARIO ---
