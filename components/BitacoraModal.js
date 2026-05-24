@@ -94,18 +94,18 @@ export default function BitacoraModal({ selectedSlot, onClose, onSeal }) {
   if (!selectedSlot) return null;
 
   return (
-    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 z-[150] overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full my-8 flex flex-col max-h-[95vh] overflow-hidden">
+    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[150] overflow-y-auto">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-2xl w-full sm:my-8 flex flex-col max-h-[92dvh] sm:max-h-[95vh] overflow-hidden">
         
         {/* Header Legal */}
-        <div className="bg-blue-900 p-6 shrink-0 text-white flex justify-between items-center">
+        <div className="bg-blue-900 p-4 sm:p-6 shrink-0 text-white flex justify-between items-center">
           <div>
-            <h2 className="text-2xl font-black uppercase tracking-widest">Bitácora Médica</h2>
-            <p className="text-blue-200 text-sm mt-1 font-medium">Registro de Sesión y Trazabilidad - OxyHyperbaric</p>
+            <h2 className="text-lg sm:text-2xl font-black uppercase tracking-widest">Bitácora Médica</h2>
+            <p className="text-blue-200 text-xs sm:text-sm mt-1 font-medium">Registro de Sesión - OxyHyperbaric</p>
           </div>
         </div>
 
-        <div className="p-8 space-y-6 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-8 space-y-4 sm:space-y-6 overflow-y-auto flex-1 min-h-0">
           
           {/* Información General */}
           <div className="flex flex-col md:flex-row justify-between bg-slate-50 p-4 rounded-xl border border-slate-200 gap-4">

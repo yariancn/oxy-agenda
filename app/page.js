@@ -1254,7 +1254,7 @@ export default function AppLayout() {
 
         {/* VISTA SERVICIOS Y PROTOCOLOS (CATÁLOGO) */}
         {activeTab === 'Servicios' && currentUserLevel <= 2 && (
-          <div className="flex-1 p-6 bg-slate-50 overflow-auto flex flex-col h-full z-10">
+          <div className="flex-1 p-3 lg:p-6 bg-slate-50 overflow-auto flex flex-col h-full z-10">
             <div className="mb-6">
               <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Catálogo operativo</h2>
               <p className="text-xs font-bold text-slate-500 mt-1">Un registro por equipo o cámara. La duración se elige al agendar.</p>
@@ -1268,7 +1268,7 @@ export default function AppLayout() {
                     <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Nombre en calendario</label>
                     <input type="text" placeholder="Ej. Cámara 1" className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none uppercase focus:border-blue-500 text-slate-900 bg-white" value={newSrv.name} onChange={e => setNewSrv({...newSrv, name: e.target.value})} />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Precio ({currencyStr})</label>
                       <input type="number" className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none text-slate-900 bg-white" value={newSrv.price} onChange={e => setNewSrv({...newSrv, price: Number(e.target.value)})} />
@@ -1439,7 +1439,7 @@ export default function AppLayout() {
 
         {/* VISTA REPORTES */}
         {activeTab === 'Reportes' && currentUserLevel <= 2 && (
-          <div className="flex-1 p-6 overflow-auto bg-white flex flex-col h-full z-10 relative">
+          <div className="flex-1 p-3 lg:p-6 overflow-auto bg-white flex flex-col h-full z-10 relative">
             <div className="flex justify-between items-end mb-6 border-b border-slate-200 pb-4">
               <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Centro de Reportes</h2>
               <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
@@ -1546,7 +1546,7 @@ export default function AppLayout() {
             {reportFilter === 'Ventas' && (
               !isReportsUnlocked ? (
                 <div className="flex-1 flex flex-col items-center justify-center">
-                  <div className="bg-white p-10 rounded-3xl shadow-2xl border text-center max-w-sm w-full">
+                  <div className="bg-white p-6 sm:p-10 rounded-3xl shadow-2xl border text-center max-w-sm w-full mx-4">
                     <h2 className="text-2xl font-black uppercase mb-2 text-slate-800">🔒 Acceso a Ventas</h2>
                     <p className="text-xs font-bold text-slate-500 mb-8 uppercase">Ingresa la Llave Financiera de 6 Dígitos</p>
                     <input type="password" placeholder="******" maxLength="6" value={pinInput} onKeyDown={e => e.key === 'Enter' && handleFinancialUnlock()} onChange={e => setPinInput(e.target.value)} className="w-full text-center text-3xl tracking-[0.2em] font-black p-4 border rounded-xl outline-none focus:border-blue-500 mb-6 bg-slate-50 text-slate-900" />
@@ -1555,9 +1555,9 @@ export default function AppLayout() {
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col">
-                  <div className="flex gap-4 mb-6">
-                    <div><label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Fecha Inicio</label><input type="date" value={reportStartDate} onChange={e => setReportStartDate(e.target.value)} className="p-2 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white" /></div>
-                    <div><label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Fecha Fin</label><input type="date" value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} className="p-2 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white" /></div>
+                  <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6">
+                    <div className="min-w-0 flex-1"><label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Fecha Inicio</label><input type="date" value={reportStartDate} onChange={e => setReportStartDate(e.target.value)} className="w-full min-w-0 p-2 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white text-sm" /></div>
+                    <div className="min-w-0 flex-1"><label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Fecha Fin</label><input type="date" value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} className="w-full min-w-0 p-2 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white text-sm" /></div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6 shrink-0">
                     <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-2xl flex flex-col justify-center items-center shadow-sm">
@@ -1621,11 +1621,11 @@ export default function AppLayout() {
         )}
 
         {/* VISTA GFE */}
-        {activeTab === 'GFE' && <div className="flex-1 p-6 overflow-hidden z-10"><GFEManager patients={dbAppointments} onUpdatePatient={() => {}} /></div>}
+        {activeTab === 'GFE' && <div className="flex-1 p-3 lg:p-6 overflow-hidden z-10 min-h-0"><GFEManager patients={dbAppointments} onUpdatePatient={() => {}} /></div>}
 
         {/* VISTA ADMIN */}
         {activeTab === 'Admin' && currentUserLevel <= 2 && (
-          <div className="flex-1 p-6 bg-white overflow-auto flex flex-col h-full z-10">
+          <div className="flex-1 p-3 lg:p-6 bg-white overflow-auto flex flex-col h-full z-10">
             <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight mb-6 pb-4 border-b border-slate-200">Ajustes de Clínica y Horarios</h2>
             
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -1633,7 +1633,7 @@ export default function AppLayout() {
               <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
                 {/* PANEL DE SEGURIDAD Y CÓDIGOS DE ACCESO */}
                 <h3 className="font-black text-slate-800 uppercase text-sm mb-4 pb-2 border-b">Seguridad y NIPs de Acceso Maestro</h3>
-                <div className="grid grid-cols-2 gap-4 mb-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
                    <div>
                       <label className="text-[10px] font-black text-red-600 uppercase ml-1">NIP de Entrada (Login) - 6 Dígitos</label>
                       <input type="text" maxLength="6" value={dbCompanyConfig.master_pin || ''} onChange={e => setDbCompanyConfig({...dbCompanyConfig, master_pin: e.target.value})} className="w-full p-2.5 border border-red-200 bg-red-50 rounded-lg font-black tracking-[0.5em] text-center outline-none text-slate-900" placeholder="000000" />
@@ -1665,7 +1665,7 @@ export default function AppLayout() {
                 </div>
                 
                 <h3 className="font-black text-slate-800 uppercase text-sm mb-4 pb-2 border-b mt-6">Reglas y Límites de Agenda</h3>
-                <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Anticipación para Agendar (Horas)</label>
                     <input type="number" value={dbCompanyConfig.booking_limit_hours} onChange={e => setDbCompanyConfig({...dbCompanyConfig, booking_limit_hours: Number(e.target.value)})} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" />
@@ -1682,7 +1682,7 @@ export default function AppLayout() {
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Cierre</label>
                     <input type="time" value={dbCompanyConfig.end_time} onChange={e => setDbCompanyConfig({...dbCompanyConfig, end_time: e.target.value})} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" />
                   </div>
-                  <div className="col-span-2">
+                  <div className="col-span-1 sm:col-span-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Intervalos en Cuadrícula</label>
                     <select value={dbCompanyConfig.interval_mins} onChange={e => setDbCompanyConfig({...dbCompanyConfig, interval_mins: Number(e.target.value)})} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white">
                       <option value={15}>15 minutos</option>
@@ -1694,7 +1694,7 @@ export default function AppLayout() {
 
                 {/* NUEVO: CONFIGURACIÓN DE NOTIFICACIONES */}
                 <h3 className="font-black text-slate-800 uppercase text-sm mb-4 pb-2 border-b mt-6">Motor de Notificaciones (Email y SMS)</h3>
-                <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                   <div className="flex items-center gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
                     <input type="checkbox" checked={dbCompanyConfig.notify_on_booking} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_on_booking: e.target.checked})} className="w-4 h-4 cursor-pointer" />
                     <label className="text-[10px] font-black text-slate-700 uppercase cursor-pointer">Notificar al crear cita</label>
@@ -1874,13 +1874,13 @@ export default function AppLayout() {
 
       {/* CAJA NEGRA: VISOR DE AUDITORÍA DE CITA */}
       {showAudit && (
-         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[99999]">
-            <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl border max-h-[85vh] flex flex-col overflow-hidden text-slate-900">
-               <div className="bg-slate-50 px-8 py-5 border-b shrink-0 flex justify-between items-center">
+         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[99999]">
+            <div className="bg-white rounded-t-2xl sm:rounded-3xl w-full max-w-lg shadow-2xl border max-h-[92dvh] sm:max-h-[85vh] flex flex-col overflow-hidden text-slate-900">
+               <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-b shrink-0 flex justify-between items-center">
                   <h3 className="font-black text-lg uppercase text-slate-800">👁️ Auditoría</h3>
                   <button onClick={() => setShowAudit(false)} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
                </div>
-               <div className="p-8 overflow-y-auto flex-1 space-y-3">
+               <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-3 min-h-0">
                   {auditLogs.map(log => (
                      <div key={log.id} className="text-xs p-4 bg-slate-50 border border-slate-200 rounded-xl shadow-sm">
                         <span className="font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{new Date(log.timestamp).toLocaleString()}</span>
@@ -1902,8 +1902,8 @@ export default function AppLayout() {
           {!isRescheduling && (
             <div className="fixed inset-0 bg-slate-900/40 z-[9998]" onClick={closeAppointmentPanel} />
           )}
-          <div className={`fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl flex flex-col overflow-hidden border-l border-slate-200 text-slate-900 ${isRescheduling ? 'z-[9999]' : 'z-[9999]'}`}>
-            <div className="bg-slate-50 px-8 py-5 border-b flex justify-between items-center shrink-0">
+          <div className={`fixed inset-0 sm:inset-y-0 sm:left-auto sm:right-0 h-full w-full sm:max-w-md bg-white shadow-2xl flex flex-col overflow-hidden sm:border-l border-slate-200 text-slate-900 ${isRescheduling ? 'z-[9999]' : 'z-[9999]'}`}>
+            <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-b flex justify-between items-center shrink-0">
               <div>
                 <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight">
                   {isRescheduling ? 'Reprogramar Cita' : 'Detalle de Cita'}
@@ -1915,7 +1915,7 @@ export default function AppLayout() {
               <button onClick={closeAppointmentPanel} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
             </div>
             
-            <div className="p-8 overflow-y-auto flex-1 space-y-5">
+            <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-4 sm:space-y-5 min-h-0">
               <div className="flex flex-wrap gap-2 mb-2">
                  {!isRescheduling && !['Finalizado', 'Devuelto', 'No Asistió', 'Falta Justificada'].includes(selectedSlot.check_in_status) && (
                    <>
@@ -1978,10 +1978,10 @@ export default function AppLayout() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {isRescheduling ? (
                   <>
-                    <div className="col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl space-y-3">
+                    <div className="col-span-1 sm:col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl space-y-3">
                       <div>
                         <label className="block text-[8px] font-black text-blue-700 uppercase mb-1">Servicio / Cámara</label>
                         <select
@@ -2019,15 +2019,15 @@ export default function AppLayout() {
                           }}
                           className="w-full p-3 border border-blue-200 rounded-xl font-bold outline-none text-slate-900 bg-white text-sm"
                         >
-                          <option value={SESSION_PRESETS.standard.id}>{SESSION_PRESETS.standard.label}</option>
-                          <option value={SESSION_PRESETS.extended.id}>{SESSION_PRESETS.extended.label}</option>
+                          <option value={SESSION_PRESETS.standard.id}>{SESSION_PRESETS.standard.selectLabel}</option>
+                          <option value={SESSION_PRESETS.extended.id}>{SESSION_PRESETS.extended.selectLabel}</option>
                         </select>
                         <p className="text-[8px] font-bold text-blue-600 uppercase mt-1">
                           Bloque total: {(Number(selectedSlot.duration) || 60) + (Number(selectedSlot.buffer) || 0)} min
                         </p>
                       </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="min-w-0">
                           <label className="block text-[8px] font-black text-blue-700 uppercase mb-1">Fecha</label>
                           <input
                             type="date"
@@ -2043,15 +2043,15 @@ export default function AppLayout() {
                                 day: ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'][d.getDay()]
                               });
                             }}
-                            className="w-full p-3 border border-blue-200 rounded-xl font-bold outline-none text-slate-900 bg-white text-sm"
+                            className="w-full min-w-0 max-w-full p-2.5 sm:p-3 border border-blue-200 rounded-xl font-bold outline-none text-slate-900 bg-white text-sm box-border"
                           />
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <label className="block text-[8px] font-black text-blue-700 uppercase mb-1">Hora</label>
                           <select
                             value={selectedSlot.time || ''}
                             onChange={e => setSelectedSlot({ ...selectedSlot, time: e.target.value })}
-                            className="w-full p-3 border border-blue-200 rounded-xl font-bold outline-none text-slate-900 bg-white text-sm"
+                            className="w-full min-w-0 p-2.5 sm:p-3 border border-blue-200 rounded-xl font-bold outline-none text-slate-900 bg-white text-sm"
                           >
                             <option value="">Hora...</option>
                             {timeOptions.map(t => <option key={t} value={t}>{t}</option>)}
@@ -2060,7 +2060,7 @@ export default function AppLayout() {
                       </div>
                       <p className="text-[8px] font-bold text-blue-600 uppercase">Consulta el calendario a la izquierda antes de confirmar</p>
                     </div>
-                    <div className="col-span-2 flex gap-3">
+                    <div className="col-span-1 sm:col-span-2 flex flex-col sm:flex-row gap-2 sm:gap-3">
                       <button onClick={() => setIsRescheduling(false)} className="flex-1 bg-white border border-slate-300 font-black py-3 rounded-xl uppercase text-[10px] hover:bg-slate-50 transition">Cancelar</button>
                       <button onClick={handleRescheduleSubmit} className="flex-1 bg-blue-600 text-white font-black py-3 rounded-xl uppercase text-[10px] shadow-lg hover:bg-blue-700 transition">Confirmar cambios</button>
                     </div>
@@ -2089,7 +2089,7 @@ export default function AppLayout() {
                       <span className="block text-[8px] font-black text-slate-400 uppercase">Hora de Inicio</span>
                       <span className="text-base font-black text-slate-700 block">{selectedSlot.time}</span>
                     </div>
-                    <div className="col-span-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <div className="col-span-1 sm:col-span-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
                       <span className="block text-[8px] font-black text-slate-400 uppercase">
                         {getPresetFromTimes(selectedSlot.duration, selectedSlot.buffer).shortLabel} · {selectedSlot.equipment}
                       </span>
@@ -2154,15 +2154,15 @@ export default function AppLayout() {
       
       {/* CREAR NUEVA CITA FORMULARIO */}
       {showNewAppointment && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" style={{ zIndex: 9999 }}>
-          <div className="bg-white rounded-3xl max-w-md w-full max-h-[85vh] flex flex-col shadow-2xl border overflow-hidden text-slate-900">
-            <div className="bg-slate-50 px-8 py-5 border-b shrink-0 flex justify-between items-center">
-               <h3 className="text-xl font-black uppercase text-emerald-600">{selectedSlot?.status === 'booked' ? 'Editar Cita' : 'Registrar Cita'}</h3>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" style={{ zIndex: 9999 }}>
+          <div className="bg-white rounded-t-2xl sm:rounded-3xl max-w-md w-full max-h-[92dvh] sm:max-h-[85vh] flex flex-col shadow-2xl border overflow-hidden text-slate-900">
+            <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-b shrink-0 flex justify-between items-center gap-2">
+               <h3 className="text-base sm:text-xl font-black uppercase text-emerald-600 truncate">{selectedSlot?.status === 'booked' ? 'Editar Cita' : 'Registrar Cita'}</h3>
                <button onClick={() => {setShowNewAppointment(false); setSelectedSlot(null);}} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
             </div>
             
-            <div className="p-8 overflow-y-auto flex-1 space-y-4">
-              <div>
+            <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-3 sm:space-y-4 min-h-0">
+              <div className="min-w-0">
                 <label className="text-[10px] font-black uppercase text-slate-400">Paciente</label>
                 <input type="text" list="patients-list" placeholder="Escribe para buscar..." value={selectedSlot?.patient || ''} onChange={e => {
                   const pName = e.target.value; 
@@ -2190,7 +2190,7 @@ export default function AppLayout() {
               {isNewPatientInline && (
                 <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl space-y-3">
                   <p className="text-xs font-black text-blue-800 uppercase flex items-center gap-2">✨ Paciente Nuevo Detectado</p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-[9px] font-black uppercase text-blue-700">Teléfono</label>
                       <input type="text" value={selectedSlot?.phone || ''} onChange={e => setSelectedSlot({...selectedSlot, phone: e.target.value})} className="w-full p-2 border border-blue-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white" />
@@ -2200,7 +2200,7 @@ export default function AppLayout() {
                       <input type="email" value={selectedSlot?.email || ''} onChange={e => setSelectedSlot({...selectedSlot, email: e.target.value})} className="w-full p-2 border border-blue-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                     <div className="flex items-center gap-2">
                       <input type="checkbox" checked={selectedSlot?.prefers_sms !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_sms: e.target.checked})} className="w-4 h-4" />
                       <label className="text-[9px] font-black uppercase text-blue-800">Recibir SMS</label>
@@ -2234,7 +2234,7 @@ export default function AppLayout() {
                     buffer: preset.buffer,
                     sessionPreset: preset.id
                   });
-                }} className="w-full p-3 border rounded-xl font-bold uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white">
+                }} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none focus:border-emerald-500 text-slate-900 bg-white text-sm">
                   <option value="">Selecciona un servicio...</option>
                   {(dbServices || []).filter(s => s.is_active).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
@@ -2253,10 +2253,10 @@ export default function AppLayout() {
                       buffer: preset.buffer
                     });
                   }}
-                  className="w-full p-3 border border-blue-200 rounded-xl font-bold outline-none focus:border-blue-500 text-slate-900 bg-white"
+                  className="w-full min-w-0 p-2.5 sm:p-3 border border-blue-200 rounded-xl font-bold outline-none focus:border-blue-500 text-slate-900 bg-white text-sm"
                 >
-                  <option value={SESSION_PRESETS.standard.id}>{SESSION_PRESETS.standard.label}</option>
-                  <option value={SESSION_PRESETS.extended.id}>{SESSION_PRESETS.extended.label}</option>
+                  <option value={SESSION_PRESETS.standard.id}>{SESSION_PRESETS.standard.selectLabel}</option>
+                  <option value={SESSION_PRESETS.extended.id}>{SESSION_PRESETS.extended.selectLabel}</option>
                 </select>
                 <p className="text-[9px] font-bold text-slate-500 uppercase mt-1">
                   Bloque total en agenda: {(Number(selectedSlot?.duration) || 60) + (Number(selectedSlot?.buffer) || 0)} min
@@ -2269,13 +2269,13 @@ export default function AppLayout() {
                     value={selectedSlot?.notes || ''} 
                     onChange={e => setSelectedSlot({...selectedSlot, notes: e.target.value})} 
                     placeholder="Ej. Subir presión despacio, dolor de oído reciente..."
-                    className="w-full p-3 border rounded-xl font-bold text-sm outline-none focus:border-emerald-500 mt-1 bg-blue-50 text-blue-900 border-blue-200"
+                    className="w-full p-2.5 sm:p-3 border rounded-xl font-bold text-sm outline-none focus:border-emerald-500 mt-1 bg-blue-50 text-blue-900 border-blue-200"
                     rows="2"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3 pb-2">
-                <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-2">
+                <div className="min-w-0">
                   <label className="text-[10px] font-black uppercase text-slate-400">Fecha</label>
                   <input type="date" value={selectedSlot?.fullDate || currentFullDate} onChange={e => { 
                     const d = new Date(e.target.value + 'T12:00:00'); 
@@ -2284,16 +2284,16 @@ export default function AppLayout() {
                       fullDate: e.target.value, 
                       day: ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'][d.getDay()]
                     }); 
-                  }} className="w-full p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white" />
+                  }} className="w-full min-w-0 max-w-full p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm box-border" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="text-[10px] font-black uppercase text-slate-400">Hora</label>
                   <select value={selectedSlot?.time || ''} onChange={e => { 
                     setSelectedSlot({
                       ...(selectedSlot || {}), 
                       time: e.target.value
                     });
-                  }} className="w-full p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white">
+                  }} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm">
                     <option value="">Hora...</option>
                     {timeOptions.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
@@ -2301,8 +2301,8 @@ export default function AppLayout() {
               </div>
             </div>
 
-            <div className="bg-slate-50 px-8 py-5 border-t shrink-0 flex gap-3 text-slate-900">
-              <button onClick={() => {setShowNewAppointment(false); setSelectedSlot(null);}} className="w-1/3 bg-white border border-slate-300 font-black py-4 rounded-xl uppercase text-xs hover:bg-slate-50 transition">Cancelar</button>
+            <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-t shrink-0 flex flex-col sm:flex-row gap-2 sm:gap-3 text-slate-900">
+              <button onClick={() => {setShowNewAppointment(false); setSelectedSlot(null);}} className="w-full sm:w-1/3 bg-white border border-slate-300 font-black py-3 sm:py-4 rounded-xl uppercase text-xs hover:bg-slate-50 transition">Cancelar</button>
               <button onClick={async () => {
                 try {
                   if(!selectedSlot?.patient || !selectedSlot?.equipment || !selectedSlot?.time) return alert("Faltan datos.");
@@ -2339,7 +2339,7 @@ export default function AppLayout() {
                   const { data: na, error } = await activeSupabase.from('appointments').insert([payload]).select();
                   if(error) alert("Error: " + error.message); else { if (na && na[0]) await logAudit(na[0].id, payload.patient, 'CREACIÓN', payload.time); setShowNewAppointment(false); setSelectedSlot(null); fetchAllData(); }
                 } catch (e) { alert("Error de conexión."); }
-              }} className="flex-1 bg-emerald-600 text-white font-black py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-emerald-700 transition">Agendar Espacio</button>
+              }} className="w-full sm:flex-1 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-emerald-700 transition">Agendar Espacio</button>
             </div>
           </div>
         </div>
@@ -2347,14 +2347,14 @@ export default function AppLayout() {
 
       {/* MODAL ALTA RÁPIDA (SOLO GUARDAR CLIENTE) */}
       {showNewPatientModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" style={{ zIndex: 9999 }}>
-          <div className="bg-white rounded-3xl max-w-sm w-full max-h-[85vh] flex flex-col shadow-2xl border overflow-hidden">
-            <div className="bg-slate-50 px-8 py-5 border-b shrink-0 flex justify-between items-center">
-               <h3 className="text-xl font-black uppercase text-emerald-600">Alta Rápida</h3>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" style={{ zIndex: 9999 }}>
+          <div className="bg-white rounded-t-2xl sm:rounded-3xl max-w-sm w-full max-h-[92dvh] sm:max-h-[85vh] flex flex-col shadow-2xl border overflow-hidden">
+            <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-b shrink-0 flex justify-between items-center">
+               <h3 className="text-base sm:text-xl font-black uppercase text-emerald-600">Alta Rápida</h3>
                <button onClick={() => setShowNewPatientModal(false)} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
             </div>
             
-            <div className="p-8 overflow-y-auto flex-1 space-y-4">
+            <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-3 sm:space-y-4 min-h-0">
               <div>
                 <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Nombre Completo</label>
                 <input type="text" placeholder="Ej. Juan Pérez" value={newPatientData.name} onChange={e => setNewPatientData({...newPatientData, name: e.target.value})} className="w-full p-3 border rounded-xl font-bold text-sm uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white" />
@@ -2374,7 +2374,7 @@ export default function AppLayout() {
                   {dbProtocols.filter(p => p.is_active).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
                 </select>
               </div>
-              <div className="flex gap-4">
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
                 <div className="flex items-center gap-2">
                   <input type="checkbox" checked={newPatientData.prefers_sms} onChange={e => setNewPatientData({...newPatientData, prefers_sms: e.target.checked})} className="w-4 h-4" />
                   <label className="text-[10px] font-black uppercase text-slate-700">Recibir SMS</label>
@@ -2396,7 +2396,7 @@ export default function AppLayout() {
               </div>
             </div>
 
-            <div className="bg-slate-50 px-8 py-5 border-t shrink-0 flex gap-2">
+            <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-t shrink-0 flex flex-col sm:flex-row gap-2 sm:gap-2">
               <button onClick={async () => {
                 const trimmedName = newPatientData.name.trim();
                 if (!trimmedName) return alert("El nombre es obligatorio.");
@@ -2417,7 +2417,7 @@ export default function AppLayout() {
                 setShowNewPatientModal(false); 
                 setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true }); 
                 await fetchAllData(); 
-              }} className="w-1/2 bg-white border border-slate-300 text-slate-700 font-black py-4 rounded-xl uppercase text-[10px] shadow-sm hover:bg-slate-50">Solo Guardar</button>
+              }} className="w-full sm:w-1/2 bg-white border border-slate-300 text-slate-700 font-black py-3 sm:py-4 rounded-xl uppercase text-[10px] shadow-sm hover:bg-slate-50">Solo Guardar</button>
               
               <button onClick={async () => {
                 const trimmedName = newPatientData.name.trim();
@@ -2452,33 +2452,33 @@ export default function AppLayout() {
 
                 setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true }); 
                 await fetchAllData(); 
-              }} className="w-1/2 bg-emerald-600 text-white font-black py-4 rounded-xl uppercase text-[10px] shadow-lg hover:bg-emerald-700">Guardar y Agendar</button>
+              }} className="w-full sm:w-1/2 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-[10px] shadow-lg hover:bg-emerald-700">Guardar y Agendar</button>
             </div>
           </div>
         </div>
       )}
 
       {showOOOModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50" style={{ zIndex: 9999 }}>
-          <div className="bg-white rounded-3xl max-w-sm w-full max-h-[85vh] flex flex-col border-t-8 border-red-500 shadow-2xl overflow-hidden text-slate-900">
-            <div className="bg-slate-50 px-8 py-5 border-b shrink-0 flex justify-between items-center">
-              <h3 className="text-xl font-black uppercase text-red-600">🚫 Bloquear Agenda</h3>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" style={{ zIndex: 9999 }}>
+          <div className="bg-white rounded-t-2xl sm:rounded-3xl max-w-sm w-full max-h-[92dvh] sm:max-h-[85vh] flex flex-col border-t-8 border-red-500 shadow-2xl overflow-hidden text-slate-900">
+            <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-b shrink-0 flex justify-between items-center">
+              <h3 className="text-base sm:text-xl font-black uppercase text-red-600">🚫 Bloquear Agenda</h3>
               <button onClick={() => setShowOOOModal(false)} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
             </div>
             
-            <div className="p-8 overflow-y-auto flex-1 space-y-4">
+            <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-3 sm:space-y-4 min-h-0">
               <div>
                 <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fecha a bloquear</label>
                 <input type="date" value={oooData.date} onChange={e => setOOOData({...oooData, date: e.target.value})} className="w-full p-3 border rounded-xl font-bold text-sm outline-none text-slate-900 bg-white" />
               </div>
-              <div className="flex gap-3">
-                <div className="flex-1">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex-1 min-w-0">
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Desde</label>
-                  <input type="time" value={oooData.start_time} onChange={e => setOOOData({...oooData, start_time: e.target.value})} className="w-full p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white" />
+                  <input type="time" value={oooData.start_time} onChange={e => setOOOData({...oooData, start_time: e.target.value})} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm" />
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Hasta</label>
-                  <input type="time" value={oooData.end_time} onChange={e => setOOOData({...oooData, end_time: e.target.value})} className="w-full p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white" />
+                  <input type="time" value={oooData.end_time} onChange={e => setOOOData({...oooData, end_time: e.target.value})} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm" />
                 </div>
               </div>
               <div className="flex items-center gap-3 bg-red-50 p-3 rounded-xl border border-red-100 cursor-pointer" onClick={() => setOOOData({...oooData, is_global: !oooData.is_global})}>
@@ -2501,8 +2501,8 @@ export default function AppLayout() {
               </div>
             </div>
             
-            <div className="bg-slate-50 px-8 py-5 border-t shrink-0 flex gap-3">
-              <button onClick={() => setShowOOOModal(false)} className="w-1/3 bg-white border border-slate-300 font-black py-4 rounded-xl uppercase text-xs hover:bg-slate-50">Cancelar</button>
+            <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-t shrink-0 flex flex-col sm:flex-row gap-2 sm:gap-3">
+              <button onClick={() => setShowOOOModal(false)} className="w-full sm:w-1/3 bg-white border border-slate-300 font-black py-3 sm:py-4 rounded-xl uppercase text-xs hover:bg-slate-50">Cancelar</button>
               <button onClick={async () => {
                 if (!oooData.date) return alert("Selecciona una fecha");
                 await activeSupabase.from('blocked_slots').insert([{ 
@@ -2515,16 +2515,16 @@ export default function AppLayout() {
                 }]);
                 setShowOOOModal(false); 
                 fetchAllData();
-              }} className="flex-1 bg-red-600 text-white font-black py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-red-700">Aplicar Bloqueo</button>
+              }} className="w-full sm:flex-1 bg-red-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-red-700">Aplicar Bloqueo</button>
             </div>
           </div>
         </div>
       )}
 
       {moveConfirmation && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[10000]">
-          <div className="bg-white rounded-3xl max-w-md w-full p-8 shadow-2xl text-slate-900">
-            <h3 className="text-xl font-black mb-4 uppercase text-center">⚠️ Confirmar Reprogramación</h3>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[10000]">
+          <div className="bg-white rounded-t-2xl sm:rounded-3xl max-w-md w-full p-4 sm:p-8 shadow-2xl text-slate-900 max-h-[92dvh] overflow-y-auto">
+            <h3 className="text-lg sm:text-xl font-black mb-4 uppercase text-center">⚠️ Confirmar Reprogramación</h3>
             <p className="text-sm font-bold text-slate-500 mb-4 text-center">
               Reubicar a <span className="text-slate-800 uppercase">{moveConfirmation.app.patient}</span>
             </p>
@@ -2541,9 +2541,9 @@ export default function AppLayout() {
                 <p className="text-xs font-black text-blue-600 uppercase">{moveConfirmation.newEquipment}</p>
               </div>
             </div>
-            <div className="flex space-x-3">
-              <button onClick={() => setMoveConfirmation(null)} className="flex-1 bg-slate-100 font-black py-4 rounded-2xl uppercase text-xs hover:bg-slate-200">Cancelar</button>
-              <button onClick={confirmMove} className="flex-1 bg-blue-600 text-white font-black py-4 rounded-2xl uppercase text-xs shadow-lg hover:bg-blue-700">Confirmar</button>
+            <div className="flex flex-col sm:flex-row gap-2 sm:space-x-3 sm:gap-0">
+              <button onClick={() => setMoveConfirmation(null)} className="w-full sm:flex-1 bg-slate-100 font-black py-3 sm:py-4 rounded-2xl uppercase text-xs hover:bg-slate-200">Cancelar</button>
+              <button onClick={confirmMove} className="w-full sm:flex-1 bg-blue-600 text-white font-black py-3 sm:py-4 rounded-2xl uppercase text-xs shadow-lg hover:bg-blue-700">Confirmar</button>
             </div>
           </div>
         </div>

@@ -178,25 +178,25 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[120]">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[120]">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200 flex flex-col max-h-[92dvh] sm:max-h-[90vh]">
         
-        <div className="bg-slate-900 px-6 py-4 border-b border-slate-800 flex justify-between items-center shrink-0">
-          <h3 className="text-lg font-black text-white uppercase tracking-widest flex items-center gap-2">
+        <div className="bg-slate-900 px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-800 flex justify-between items-center shrink-0">
+          <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-widest flex items-center gap-2">
             👤 Expediente & POS
           </h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-2xl font-black">&times;</button>
         </div>
 
-        <div className="p-6 space-y-5 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto flex-1 min-h-0">
           
           <div className="space-y-4">
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Nombre Completo</label>
-              <input disabled={formData.is_blocked && currentUserLevel > 1} type="text" value={formData.patient} onChange={(e) => handleChange('patient', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 font-black text-slate-800 uppercase focus:border-blue-500 outline-none shadow-sm disabled:opacity-50" />
+              <input disabled={formData.is_blocked && currentUserLevel > 1} type="text" value={formData.patient} onChange={(e) => handleChange('patient', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 font-black text-slate-800 uppercase focus:border-blue-500 outline-none shadow-sm disabled:opacity-50 text-sm" />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="min-w-0">
                 <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Celular</label>
                 <input disabled={formData.is_blocked && currentUserLevel > 1} type="tel" value={formData.phone} onChange={(e) => handleChange('phone', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold text-slate-800 focus:border-blue-500 outline-none shadow-sm disabled:opacity-50" />
               </div>
@@ -209,7 +209,7 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
                 </select>
               </div>
             </div>
-            <div className="flex gap-4 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 p-3 sm:p-0 bg-slate-50 sm:bg-transparent border sm:border-0 border-slate-200 rounded-xl">
               <div className="flex items-center gap-2">
                 <input disabled={formData.is_blocked && currentUserLevel > 1} type="checkbox" checked={formData.prefers_sms} onChange={e => handleChange('prefers_sms', e.target.checked)} className="w-4 h-4 cursor-pointer" />
                 <label className="text-[10px] font-black uppercase text-slate-700 cursor-pointer">Recibir SMS</label>
