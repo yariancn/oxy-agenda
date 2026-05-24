@@ -7,23 +7,31 @@ import {
   getInstallSteps,
   INSTALL_DISMISS_KEY,
   INSTALL_GUIDE_EVENT,
+  INSTALL_SESSION_KEY,
+  shouldAutoShowInstallGuide,
 } from '../lib/installContext';
+
+const GUIDE_Z = 'z-[100002]';
+
+function readContext() {
+  if (typeof window === 'undefined') return null;
+  return getInstallContext();
+}
 
 export default function InstallGuide() {
   const [open, setOpen] = useState(false);
-  const [ctx, setCtx] = useState(null);
+  const [ctx, setCtx] = useState(readContext);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [installing, setInstalling] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const refreshContext = useCallback(() => {
-    const next = getInstallContext();
-    setCtx({ ...next, canNativeInstall: Boolean(deferredPrompt) });
-  }, [deferredPrompt]);
+    setCtx(getInstallContext());
+  }, []);
 
   useEffect(() => {
     refreshContext();
-  }, [refreshContext]);
+  }, [refreshContext, deferredPrompt]);
 
   useEffect(() => {
     const onBeforeInstall = (e) => {
@@ -41,18 +49,9 @@ export default function InstallGuide() {
     window.addEventListener(INSTALL_GUIDE_EVENT, onOpenGuide);
     window.addEventListener('appinstalled', onInstalled);
 
-    const stored = localStorage.getItem(INSTALL_DISMISS_KEY);
     const context = getInstallContext();
-    const forceGuide = typeof window !== 'undefined'
-      && new URLSearchParams(window.location.search).has('pwa');
-    if ((!stored || forceGuide) && !context.isStandalone) {
-      const timer = window.setTimeout(() => setOpen(true), 600);
-      return () => {
-        clearTimeout(timer);
-        window.removeEventListener('beforeinstallprompt', onBeforeInstall);
-        window.removeEventListener(INSTALL_GUIDE_EVENT, onOpenGuide);
-        window.removeEventListener('appinstalled', onInstalled);
-      };
+    if (shouldAutoShowInstallGuide(context)) {
+      setOpen(true);
     }
 
     return () => {
@@ -62,13 +61,10 @@ export default function InstallGuide() {
     };
   }, []);
 
-  useEffect(() => {
-    if (deferredPrompt) refreshContext();
-  }, [deferredPrompt, refreshContext]);
-
   const content = useMemo(() => (ctx ? getInstallSteps(ctx) : null), [ctx]);
 
-  const dismiss = (remember = true) => {
+  const dismiss = (remember = false) => {
+    sessionStorage.setItem(INSTALL_SESSION_KEY, '1');
     if (remember) localStorage.setItem(INSTALL_DISMISS_KEY, '1');
     setOpen(false);
   };
@@ -99,6 +95,14 @@ export default function InstallGuide() {
     }
   };
 
+  const handleIosDone = () => {
+    if (ctx?.iosFlow === 'safari' || ctx?.iosFlow === 'chrome') {
+      dismiss(true);
+    } else {
+      dismiss(false);
+    }
+  };
+
   if (!ctx || ctx.isStandalone) return null;
 
   const isIosWizard = ctx.platform === 'ios' && open;
@@ -106,28 +110,24 @@ export default function InstallGuide() {
 
   if (isIosWizard) {
     return (
-      <>
-        {showFab && (
-          <InstallFab onOpen={() => setOpen(true)} />
-        )}
-        <IosInstallWizard
-          ctx={ctx}
-          onDismiss={dismiss}
-          onDone={() => dismiss(true)}
-        />
-      </>
+      <IosInstallWizard
+        ctx={ctx}
+        className={GUIDE_Z}
+        onDismiss={dismiss}
+        onDone={handleIosDone}
+      />
     );
   }
 
   return (
     <>
       {showFab && (
-        <InstallFab onOpen={() => setOpen(true)} />
+        <InstallFab className={GUIDE_Z} onOpen={() => setOpen(true)} />
       )}
 
       {open && content && (
         <div
-          className="fixed inset-0 z-[99995] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/70 backdrop-blur-sm"
+          className={`fixed inset-0 ${GUIDE_Z} flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/70 backdrop-blur-sm`}
           role="dialog"
           aria-modal="true"
           aria-labelledby="install-guide-title"
@@ -148,7 +148,7 @@ export default function InstallGuide() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => dismiss(true)}
+                  onClick={() => dismiss(false)}
                   className="text-slate-300 hover:text-white text-2xl font-black leading-none shrink-0 p-1"
                   aria-label="Cerrar"
                 >
@@ -218,17 +218,17 @@ export default function InstallGuide() {
             <div className="p-4 sm:p-5 border-t bg-slate-50 shrink-0 flex flex-col gap-2">
               <button
                 type="button"
-                onClick={() => dismiss(true)}
+                onClick={() => dismiss(false)}
                 className="w-full bg-blue-600 text-white font-black py-3.5 rounded-xl uppercase text-xs hover:bg-blue-700 transition"
               >
                 Entendido, continuar
               </button>
               <button
                 type="button"
-                onClick={() => dismiss(false)}
+                onClick={() => dismiss(true)}
                 className="w-full text-slate-400 font-bold py-2 text-[11px] uppercase hover:text-slate-600 transition"
               >
-                Recordarme después
+                No volver a mostrar
               </button>
             </div>
           </div>
@@ -238,12 +238,12 @@ export default function InstallGuide() {
   );
 }
 
-function InstallFab({ onOpen }) {
+function InstallFab({ onOpen, className }) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="fixed bottom-20 lg:bottom-6 right-4 z-[99990] flex items-center gap-2 bg-blue-600 text-white text-[11px] font-black uppercase tracking-wide px-4 py-3 rounded-2xl shadow-xl hover:bg-blue-700 transition active:scale-95"
+      className={`fixed bottom-20 lg:bottom-6 right-4 ${className} flex items-center gap-2 bg-blue-600 text-white text-[11px] font-black uppercase tracking-wide px-4 py-3 rounded-2xl shadow-xl hover:bg-blue-700 transition active:scale-95`}
       aria-label="Cómo instalar OXY Agenda"
     >
       <span className="text-base leading-none" aria-hidden>📲</span>
@@ -258,6 +258,7 @@ export function InstallGuideLink({ className = '' }) {
       type="button"
       onClick={() => {
         if (typeof window !== 'undefined') {
+          sessionStorage.removeItem(INSTALL_SESSION_KEY);
           window.dispatchEvent(new CustomEvent(INSTALL_GUIDE_EVENT));
         }
       }}

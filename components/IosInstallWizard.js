@@ -191,7 +191,7 @@ function MockupScene({ type }) {
   return null;
 }
 
-export default function IosInstallWizard({ ctx, onDismiss, onDone }) {
+export default function IosInstallWizard({ ctx, onDismiss, onDone, className = 'z-[100002]' }) {
   const wizard = useMemo(() => getIosWizardSteps(ctx), [ctx]);
   const [stepIndex, setStepIndex] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -231,7 +231,7 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[99996] bg-slate-950 flex flex-col text-white overflow-hidden">
+    <div className={`fixed inset-0 ${className} bg-slate-950 flex flex-col text-white overflow-hidden`}>
       <div className="shrink-0 px-4 pt-4 pb-3 safe-area-top">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div>
@@ -298,7 +298,9 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone }) {
             onClick={onDone}
             className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-2xl text-sm uppercase transition"
           >
-            ✓ Ya la instalé — Entrar
+            {wizard.flow === 'in-app'
+              ? 'Entendido — continuaré en Safari'
+              : '✓ Ya la instalé — Entrar'}
           </button>
         )}
 
