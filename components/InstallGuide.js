@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import IosInstallWizard from './IosInstallWizard';
 import {
   getInstallContext,
   getInstallSteps,
@@ -42,8 +43,10 @@ export default function InstallGuide() {
 
     const stored = localStorage.getItem(INSTALL_DISMISS_KEY);
     const context = getInstallContext();
-    if (!stored && !context.isStandalone) {
-      const timer = window.setTimeout(() => setOpen(true), 900);
+    const forceGuide = typeof window !== 'undefined'
+      && new URLSearchParams(window.location.search).has('pwa');
+    if ((!stored || forceGuide) && !context.isStandalone) {
+      const timer = window.setTimeout(() => setOpen(true), 600);
       return () => {
         clearTimeout(timer);
         window.removeEventListener('beforeinstallprompt', onBeforeInstall);
@@ -98,20 +101,28 @@ export default function InstallGuide() {
 
   if (!ctx || ctx.isStandalone) return null;
 
+  const isIosWizard = ctx.platform === 'ios' && open;
   const showFab = !open;
+
+  if (isIosWizard) {
+    return (
+      <>
+        {showFab && (
+          <InstallFab onOpen={() => setOpen(true)} />
+        )}
+        <IosInstallWizard
+          ctx={ctx}
+          onDismiss={dismiss}
+          onDone={() => dismiss(true)}
+        />
+      </>
+    );
+  }
 
   return (
     <>
       {showFab && (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="fixed bottom-20 lg:bottom-6 right-4 z-[99990] flex items-center gap-2 bg-blue-600 text-white text-[11px] font-black uppercase tracking-wide px-4 py-3 rounded-2xl shadow-xl hover:bg-blue-700 transition active:scale-95"
-          aria-label="Cómo instalar OXY Agenda"
-        >
-          <span className="text-base leading-none" aria-hidden>📲</span>
-          Instalar app
-        </button>
+        <InstallFab onOpen={() => setOpen(true)} />
       )}
 
       {open && content && (
@@ -224,6 +235,20 @@ export default function InstallGuide() {
         </div>
       )}
     </>
+  );
+}
+
+function InstallFab({ onOpen }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="fixed bottom-20 lg:bottom-6 right-4 z-[99990] flex items-center gap-2 bg-blue-600 text-white text-[11px] font-black uppercase tracking-wide px-4 py-3 rounded-2xl shadow-xl hover:bg-blue-700 transition active:scale-95"
+      aria-label="Cómo instalar OXY Agenda"
+    >
+      <span className="text-base leading-none" aria-hidden>📲</span>
+      Instalar app
+    </button>
   );
 }
 
