@@ -20,6 +20,8 @@ import BitacoraModal from '../components/BitacoraModal';
 import PatientProfileModal from '../components/PatientProfileModal';
 import GFEManager from '../components/GFEManager';
 import { InstallGuideLink } from '../components/InstallGuide';
+import { StaffLocaleProvider } from '../components/StaffLocaleContext';
+import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -113,6 +115,8 @@ export default function AppLayout() {
 
   const locale = localeForClinic(activeClinic);
   const L = useMemo(() => staffStrings(locale), [locale]);
+  const presetLabels = useMemo(() => getSessionPresetLabels(locale), [locale]);
+  const a = (key, ...args) => staffAlert(locale, key, ...args);
 
   useEffect(() => {
     document.documentElement.lang = locale === 'en' ? 'en' : 'es';
@@ -225,7 +229,7 @@ export default function AppLayout() {
       setAuditLogs(data || []);
       setShowAudit(true);
     } catch (e) {
-      alert("Error leyendo auditoría");
+      alert(a('auditReadError'));
     }
   };
 
@@ -517,7 +521,7 @@ export default function AppLayout() {
     if (status === 'Devuelto') { badgeClass = 'bg-purple-200 text-purple-900'; icon = '↩️'; }
     return (
       <span title={status} className={`text-[8px] font-black px-1 rounded shadow-sm flex items-center gap-0.5 ${badgeClass}`}>
-        {icon} {!isCompact && <span>{status}</span>}
+        {icon} {!isCompact && <span>{translateCheckInStatus(locale, status)}</span>}
       </span>
     );
   };
@@ -531,13 +535,13 @@ export default function AppLayout() {
 
   // --- CANCELACIÓN GLOBAL DE VENTAS DESDE REPORTES ---
   const handleCancelGlobalTransaction = async (tx, patientId, patientName) => {
-    if (!window.confirm(`¿ESTÁS SEGURO? Estás a punto de CANCELAR el ticket de $${tx.price} y revertirle a ${patientName} sus ${tx.sessions} sesiones de ${tx.serviceName}. Esta acción es irreversible y quedará auditada.`)) {
+    if (!window.confirm(a('cancelSaleConfirm', patientName, tx.price, tx.sessions, tx.serviceName))) {
       return;
     }
 
     try {
       const p = dbPatients.find(x => String(x.id) === String(patientId));
-      if (!p) return alert("Paciente no encontrado.");
+      if (!p) return alert(a('patientNotFound'));
 
       const eqName = tx.equipment || tx.serviceName;
       const currentWallets = { ...p.wallets };
@@ -552,10 +556,10 @@ export default function AppLayout() {
       }).eq('id', p.id);
 
       await logAudit(null, patientName, 'REVERSIÓN DE VENTA', `Se canceló ticket por $${tx.price} y se restaron ${tx.sessions} sesiones de ${eqName}.`);
-      alert("Venta cancelada exitosamente.");
+      alert(a('saleCancelled'));
       fetchAllData();
     } catch (e) {
-      alert("Error al cancelar la venta.");
+      alert(a('saleCancelError'));
     }
   };
 
@@ -595,18 +599,18 @@ export default function AppLayout() {
       app.time === newTime &&
       app.equipment === newEquipment
     ) {
-      alert("La cita ya está en ese horario.");
+      alert(a('alreadyAtTime'));
       return false;
     }
 
     if (isPastTime(newFullDate, newTime)) {
-      alert("🔒 No puedes reubicar citas al pasado.");
+      alert(a('pastMove'));
       return false;
     }
 
     const pInfo = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(app.patient));
     if (pInfo && pInfo.is_blocked) {
-      alert("🚫 Paciente Bloqueado por Administración. No se pueden reubicar ni alterar sus citas.");
+      alert(a('patientBlockedMove'));
       return false;
     }
 
@@ -615,7 +619,7 @@ export default function AppLayout() {
     const buf = srv ? Number(srv.buffer) : Number(app.buffer) || 0;
 
     if (checkOverlap(newEquipment, newFullDate, newTime, dur, buf, app.id)) {
-      alert("🔒 Empalme de horario: Ya hay una cita que choca con ese espacio en esa cámara.");
+      alert(a('overlapLong'));
       return false;
     }
 
@@ -638,7 +642,7 @@ export default function AppLayout() {
     const targetEquipment = selectedSlot.equipment;
 
     if (!targetDate || !targetTime || !targetEquipment) {
-      alert("Completa fecha, hora y servicio.");
+      alert(a('completeDateTimeService'));
       return;
     }
 
@@ -667,7 +671,7 @@ export default function AppLayout() {
         buffer
       }).eq('id', moveConfirmation.app.id);
       
-      if (error) alert("Error al mover la cita: " + error.message);
+      if (error) alert(a('moveError', error.message));
       else {
         await logAudit(moveConfirmation.app.id, moveConfirmation.app.patient, 'REUBICACIÓN', `De ${moveConfirmation.app.full_date} ${moveConfirmation.app.time} (${moveConfirmation.app.equipment}) a ${moveConfirmation.newFullDate} ${moveConfirmation.newTime} (${moveConfirmation.newEquipment})`);
       }
@@ -676,18 +680,18 @@ export default function AppLayout() {
       closeAppointmentPanel();
       fetchAllData();
     } catch (e) {
-      alert("Error de conexión: " + e.message);
+      alert(a('connectionErrorMsg', e.message));
     }
   };
 
   const updateAppStatus = async (id, status, patientName, equipment) => {
     try {
       const app = dbAppointments.find(a => a.id === id);
-      if (!app) return alert('Cita no encontrada.');
+      if (!app) return alert(a('apptNotFound'));
 
       if (status === 'No Asistió') {
-        if (app.check_in_status === 'No Asistió') return alert('Esta cita ya está marcada como No Asistió.');
-        if (!window.confirm('Marcar NO ASISTIÓ: se descontará 1 sesión pagada de la cartera. ¿Continuar?')) return;
+        if (app.check_in_status === 'No Asistió') return alert(a('alreadyNoShow'));
+        if (!window.confirm(a('noShowConfirm'))) return;
 
         const p = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(patientName));
         if (p) {
@@ -720,7 +724,7 @@ export default function AppLayout() {
 
         await activeSupabase.from('appointments').update({ check_in_status: 'No Asistió' }).eq('id', id);
       } else if (status === 'Falta Justificada') {
-        if (app.check_in_status === 'Falta Justificada') return alert('Esta cita ya está marcada como Falta Justificada.');
+        if (app.check_in_status === 'Falta Justificada') return alert(a('alreadyExcused'));
         await activeSupabase.from('appointments').update({ check_in_status: 'Falta Justificada' }).eq('id', id);
         await logAudit(id, patientName, 'FALTA JUSTIFICADA', 'Paciente no atendió (justificado). La sesión pagada se conserva en cartera.');
       } else {
@@ -730,11 +734,11 @@ export default function AppLayout() {
 
       setSelectedSlot(null);
       fetchAllData();
-    } catch(e) { alert("Error actualizando estatus."); }
+    } catch(e) { alert(a('statusUpdateError')); }
   };
 
   const handleRefund = async (app) => {
-    if (window.confirm('¿Seguro que deseas cancelar el cobro y devolver la sesión a la cartera del paciente?')) {
+    if (window.confirm(a('refundConfirm'))) {
       const p = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(app.patient));
       if (p) {
         const currentWallets = p.wallets || {};
@@ -774,7 +778,7 @@ export default function AppLayout() {
 
   const printPatientBitacora = (patientName) => {
     const apps = dbAppointments.filter(a => String(a.patient) === String(patientName) && a.check_in_status === 'Finalizado').sort((a,b) => new Date(b.full_date) - new Date(a.full_date));
-    if(apps.length === 0) return alert("Este paciente no tiene citas finalizadas.");
+    if(apps.length === 0) return alert(a('noFinishedAppts'));
 
     const ROWS_PER_PAGE = 15;
     let pagesHTML = '';
@@ -838,7 +842,7 @@ export default function AppLayout() {
         key={idx} 
         onClick={() => {
           if (isPastTime(fullDate, time)) {
-             alert("🔒 No puedes agendar citas en el pasado.");
+             alert(a('pastScheduleAppt'));
              return;
           }
           if (isRescheduling && selectedSlot?.id) {
@@ -895,6 +899,7 @@ export default function AppLayout() {
   const mobileMoreActive = mobileAdminTabs.some(t => t.id === activeTab);
 
   return (
+    <StaffLocaleProvider clinic={activeClinic}>
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden relative">
       
       {/* CAPA DE BLOQUEO: INICIAR TURNO Y LLAVE MAESTRA */}
@@ -1264,8 +1269,8 @@ export default function AppLayout() {
         {activeTab === 'Servicios' && currentUserLevel <= 2 && (
           <div className="flex-1 p-3 lg:p-6 bg-slate-50 overflow-auto flex flex-col h-full z-10">
             <div className="mb-6">
-              <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Catálogo operativo</h2>
-              <p className="text-xs font-bold text-slate-500 mt-1">Un registro por equipo o cámara. La duración se elige al agendar.</p>
+              <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">{L.p.services.title}</h2>
+              <p className="text-xs font-bold text-slate-500 mt-1">{L.p.services.subtitle}</p>
             </div>
             <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 mb-10">
               
@@ -1314,7 +1319,7 @@ export default function AppLayout() {
                   <div className="flex gap-2 pt-1">
                     {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1' });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
                     <button onClick={async () => {
-                      if(!newSrv.name) return alert("Falta el nombre");
+                      if(!newSrv.name) return alert(L.p.services.missingName);
                       const p = { name: newSrv.name.trim(), duration: 60, buffer: 30, price: newSrv.price, color: newSrv.color, is_active: newSrv.is_active };
                       if(isEditingSrv && newSrv.id) {
                         await activeSupabase.from('services').update(p).eq('id', newSrv.id);
@@ -1355,7 +1360,7 @@ export default function AppLayout() {
                             <div className="flex justify-end gap-2">
                               <button onClick={() => {setNewSrv(s); setIsEditingSrv(true);}} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-blue-100 border border-blue-100">Editar</button>
                               <button onClick={async () => { 
-                                if(window.confirm('¿Borrar este equipo?')) { 
+                                if(window.confirm(a('deleteEquipment'))) { 
                                   await activeSupabase.from('services').delete().eq('id', s.id); 
                                   fetchAllData(); 
                                 } 
@@ -1392,7 +1397,7 @@ export default function AppLayout() {
                   <div className="flex gap-2 pt-1">
                     {isEditingProtocol && <button onClick={() => {setIsEditingProtocol(false); setNewProtocol({ id: null, name: '', is_active: true });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
                     <button onClick={async () => {
-                      if(!newProtocol.name) return alert("Falta el nombre");
+                      if(!newProtocol.name) return alert(L.p.services.missingName);
                       const p = { name: newProtocol.name, is_active: newProtocol.is_active };
                       if(isEditingProtocol && newProtocol.id) {
                         await activeSupabase.from('protocols').update(p).eq('id', newProtocol.id);
@@ -1427,7 +1432,7 @@ export default function AppLayout() {
                             <div className="flex justify-end gap-2">
                               <button onClick={() => {setNewProtocol(p); setIsEditingProtocol(true);}} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-blue-100 border border-blue-100">Editar</button>
                               <button onClick={async () => { 
-                                if(window.confirm('¿Borrar protocolo?')) { 
+                                if(window.confirm(a('deleteProtocol'))) { 
                                   await activeSupabase.from('protocols').delete().eq('id', p.id); 
                                   fetchAllData(); 
                                 } 
@@ -1735,10 +1740,10 @@ export default function AppLayout() {
                     } else {
                       await activeSupabase.from('company_config').insert([{...p, clinic: activeClinic}]);
                     }
-                    alert('Configuración General y NIPs guardados exitosamente.'); 
+                    alert(L.p.admin.configSaved); 
                     fetchAllData();
                   } catch (e) {
-                    alert('Error guardando configuración: ' + e.message);
+                    alert(a('configSaveError', e.message));
                   }
                 }} className="w-full bg-slate-900 text-white font-black py-4 rounded-xl uppercase shadow-lg hover:bg-slate-800 transition">
                   Guardar Configuración General
@@ -1761,7 +1766,7 @@ export default function AppLayout() {
                       <div className="flex gap-2">
                         {isEditingRole && <button onClick={() => {setIsEditingRole(false); setNewRole({ id: null, name: '', level: 3 });}} className="w-1/3 bg-slate-300 text-slate-700 font-black py-3 rounded-xl uppercase text-xs">Cancelar</button>}
                         <button onClick={async () => {
-                          if (!newRole.name) return alert("Ingresa el nombre del rol.");
+                          if (!newRole.name) return alert(L.p.admin.roleName);
                           if (isEditingRole && newRole.id) {
                             await activeSupabase.from('user_roles').update({ name: newRole.name, level: newRole.level }).eq('id', newRole.id);
                           } else {
@@ -1808,8 +1813,8 @@ export default function AppLayout() {
                       <div className="flex gap-2">
                         {isEditingUser && <button onClick={() => {setIsEditingUser(false); setNewUser({ id: null, name: '', email: '', role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' });}} className="w-1/3 bg-slate-300 text-slate-700 font-black py-3 rounded-xl uppercase text-xs">Cancelar</button>}
                         <button onClick={async () => {
-                          if (!newUser.name) return alert("Ingresa el nombre.");
-                          if (!newUser.pin || newUser.pin.length !== 6) return alert("El PIN debe ser de exactamente 6 dígitos.");
+                          if (!newUser.name) return alert(L.p.admin.userName);
+                          if (!newUser.pin || newUser.pin.length !== 6) return alert(L.p.admin.pinSix);
                           const staffPayload = {
                             name: newUser.name,
                             role: newUser.role,
@@ -1832,7 +1837,7 @@ export default function AppLayout() {
                             const { email: _e, ...rest } = staffPayload;
                             res = await saveStaff(rest);
                           }
-                          if (res.error) return alert(`Error al guardar: ${res.error.message}`);
+                          if (res.error) return alert(a('saveError', res.error.message));
 
                           if (isEditingUser && newUser.id) {
                             await logAudit(null, newUser.name, 'EDICIÓN DE EMPLEADO', `Rol: ${newUser.role} · ${activeClinic}`);
@@ -1914,10 +1919,10 @@ export default function AppLayout() {
             <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-b flex justify-between items-center shrink-0">
               <div>
                 <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight">
-                  {isRescheduling ? 'Reprogramar Cita' : 'Detalle de Cita'}
+                  {isRescheduling ? L.p.appt.reschedule : L.p.appt.detail}
                 </h3>
                 {isRescheduling && (
-                  <p className="text-[9px] font-bold text-blue-600 uppercase mt-1">El calendario queda visible para verificar disponibilidad</p>
+                  <p className="text-[9px] font-bold text-blue-600 uppercase mt-1">{L.p.appt.rescheduleHint}</p>
                 )}
               </div>
               <button onClick={closeAppointmentPanel} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
@@ -1927,22 +1932,22 @@ export default function AppLayout() {
               <div className="flex flex-wrap gap-2 mb-2">
                  {!isRescheduling && !['Finalizado', 'Devuelto', 'No Asistió', 'Falta Justificada'].includes(selectedSlot.check_in_status) && (
                    <>
-                     <button onClick={() => updateAppStatus(selectedSlot.id, 'Llegó', selectedSlot.patient, selectedSlot.equipment)} className="bg-amber-100 text-amber-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-amber-200 transition">✅ Llegó</button>
-                     <button onClick={() => updateAppStatus(selectedSlot.id, 'En Sesión', selectedSlot.patient, selectedSlot.equipment)} className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-emerald-200 transition">🟢 En Sesión</button>
-                     <button onClick={() => updateAppStatus(selectedSlot.id, 'No Asistió', selectedSlot.patient, selectedSlot.equipment)} className="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-200 transition">❌ No Asistió</button>
-                     <button onClick={() => updateAppStatus(selectedSlot.id, 'Falta Justificada', selectedSlot.patient, selectedSlot.equipment)} className="bg-orange-100 text-orange-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-orange-200 transition">📋 Falta Justificada</button>
+                     <button onClick={() => updateAppStatus(selectedSlot.id, 'Llegó', selectedSlot.patient, selectedSlot.equipment)} className="bg-amber-100 text-amber-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-amber-200 transition">{L.p.appt.arrived}</button>
+                     <button onClick={() => updateAppStatus(selectedSlot.id, 'En Sesión', selectedSlot.patient, selectedSlot.equipment)} className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-emerald-200 transition">{L.p.appt.inSession}</button>
+                     <button onClick={() => updateAppStatus(selectedSlot.id, 'No Asistió', selectedSlot.patient, selectedSlot.equipment)} className="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-200 transition">{L.p.appt.noShow}</button>
+                     <button onClick={() => updateAppStatus(selectedSlot.id, 'Falta Justificada', selectedSlot.patient, selectedSlot.equipment)} className="bg-orange-100 text-orange-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-orange-200 transition">{L.p.appt.excused}</button>
                    </>
                  )}
                  
                  {selectedSlot.check_in_status !== 'Finalizado' && selectedSlot.check_in_status !== 'Devuelto' && !isRescheduling && (
                      <button onClick={async () => {
-                       if(window.confirm('¿Deseas BORRAR DEFINITIVAMENTE esta cita del registro?')){
+                       if(window.confirm(L.p.appt.deleteConfirm)){
                           await activeSupabase.from('appointments').delete().eq('id', selectedSlot.id);
                           await logAudit(selectedSlot.id, selectedSlot.patient, 'CITA BORRADA', `Cita físicamente eliminada del sistema.`);
                           closeAppointmentPanel();
                           fetchAllData();
                        }
-                     }} className="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-200 transition ml-auto border border-red-200">🗑️ Borrar Cita</button>
+                     }} className="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-200 transition ml-auto border border-red-200">{L.p.appt.deleteAppt}</button>
                  )}
               </div>
               
@@ -1952,21 +1957,21 @@ export default function AppLayout() {
                 
                 <div className="mt-4 space-y-3">
                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl">
-                      <label className="text-[10px] font-black uppercase text-amber-800 flex items-center gap-1 mb-1">⚠️ Nota General (Para siempre)</label>
+                      <label className="text-[10px] font-black uppercase text-amber-800 flex items-center gap-1 mb-1">{L.p.appt.notePermanent}</label>
                       <textarea 
                         value={selectedSlot.patientNotes || ''} 
                         onChange={e => setSelectedSlot({...selectedSlot, patientNotes: e.target.value})}
                         className="w-full p-2 border border-amber-200 rounded-lg text-xs font-bold outline-none bg-white text-amber-900"
-                        rows="2" placeholder="Ej. Diabético, hipertensión..."
+                        rows="2" placeholder={L.p.appt.notePermanentPh}
                       />
                    </div>
                    <div className="bg-blue-50 border border-blue-200 p-3 rounded-xl">
-                      <label className="text-[10px] font-black uppercase text-blue-800 flex items-center gap-1 mb-1">📌 Instrucción de HOY</label>
+                      <label className="text-[10px] font-black uppercase text-blue-800 flex items-center gap-1 mb-1">{L.p.appt.noteToday}</label>
                       <textarea 
                         value={selectedSlot.notes || ''} 
                         onChange={e => setSelectedSlot({...selectedSlot, notes: e.target.value})}
                         className="w-full p-2 border border-blue-200 rounded-lg text-xs font-bold outline-none bg-white text-blue-900"
-                        rows="2" placeholder="Ej. Subir presión despacio..."
+                        rows="2" placeholder={L.p.appt.noteTodayPh}
                       />
                    </div>
                    <button onClick={async () => {
@@ -1979,10 +1984,10 @@ export default function AppLayout() {
                                await activeSupabase.from('patients').update({ Notes: selectedSlot.patientNotes }).eq('id', pat.id);
                            }
                         }
-                        alert("Notas guardadas y sincronizadas correctamente.");
+                        alert(a('notesSavedOk'));
                         fetchAllData();
-                      } catch(e) { alert("Error guardando notas."); }
-                   }} className="w-full bg-slate-800 text-white font-black py-2 rounded-lg text-[10px] uppercase hover:bg-slate-700 shadow-sm transition">💾 Guardar Notas</button>
+                      } catch(e) { alert(a('notesSaveError')); }
+                   }} className="w-full bg-slate-800 text-white font-black py-2 rounded-lg text-[10px] uppercase hover:bg-slate-700 shadow-sm transition">{L.p.appt.saveNotes}</button>
                 </div>
               </div>
 
@@ -2027,8 +2032,8 @@ export default function AppLayout() {
                           }}
                           className="w-full p-3 border border-blue-200 rounded-xl font-bold outline-none text-slate-900 bg-white text-sm"
                         >
-                          <option value={SESSION_PRESETS.standard.id}>{SESSION_PRESETS.standard.selectLabel}</option>
-                          <option value={SESSION_PRESETS.extended.id}>{SESSION_PRESETS.extended.selectLabel}</option>
+                          <option value={SESSION_PRESETS.standard.id}>{presetLabels.standard.selectLabel}</option>
+                          <option value={SESSION_PRESETS.extended.id}>{presetLabels.extended.selectLabel}</option>
                         </select>
                         <p className="text-[8px] font-bold text-blue-600 uppercase mt-1">
                           Bloque total: {(Number(selectedSlot.duration) || 60) + (Number(selectedSlot.buffer) || 0)} min
@@ -2145,7 +2150,7 @@ export default function AppLayout() {
                    <div className="flex-1 bg-emerald-100 text-emerald-800 py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center text-center border border-emerald-300">✅ Bitácora Sellada y Firmada</div>
                 ) : (
                    <button onClick={() => {
-                      if(!selectedSlot.attendant || selectedSlot.attendant === 'Por Asignar') return alert("Por favor selecciona responsable antes de firmar.");
+                      if(!selectedSlot.attendant || selectedSlot.attendant === 'Por Asignar') return alert(a('selectAttendant'));
                       setShowBitacora(true);
                    }} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] shadow-lg hover:bg-blue-700 transition">Bitácora Médica</button>
                 )}
@@ -2357,7 +2362,7 @@ export default function AppLayout() {
                   const sessionTimes = resolveSessionTimes(selectedSlot);
                   const payload = { patient: canonicalPatient, phone: canonicalPhone, email: canonicalEmail, protocol: selectedSlot.protocol || 'Wellness', equipment: selectedSlot.equipment, duration: sessionTimes.duration, buffer: sessionTimes.buffer, full_date: selectedSlot.fullDate || currentFullDate, appointment_date: selectedSlot.fullDate || currentFullDate, day: selectedSlot.day || currentDayInfo.name, time: selectedSlot.time, appointment_time: selectedSlot.time, attendant: selectedSlot.attendant || 'Por Asignar', check_in_status: selectedSlot.check_in_status || 'Agendado', is_new_patient: isNewForAppointment, notes: selectedSlot.notes || '' };
                   const { data: na, error } = await activeSupabase.from('appointments').insert([payload]).select();
-                  if(error) alert("Error: " + error.message); else { if (na && na[0]) await logAudit(na[0].id, payload.patient, 'CREACIÓN', payload.time); setShowNewAppointment(false); setSelectedSlot(null); fetchAllData(); }
+                  if(error) alert(a('genericError', error.message)); else { if (na && na[0]) await logAudit(na[0].id, payload.patient, 'CREACIÓN', payload.time); setShowNewAppointment(false); setSelectedSlot(null); fetchAllData(); }
                 } catch (e) { alert(staffAlert(locale, 'connectionError')); }
               }} className="w-full sm:flex-1 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-emerald-700 transition">Agendar Espacio</button>
             </div>
@@ -2419,7 +2424,7 @@ export default function AppLayout() {
             <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-t shrink-0 flex flex-col sm:flex-row gap-2 sm:gap-2">
               <button onClick={async () => {
                 const trimmedName = newPatientData.name.trim();
-                if (!trimmedName) return alert("El nombre es obligatorio.");
+                if (!trimmedName) return alert(a('nameRequired'));
                 
                 const { error } = await savePatientToDB(activeSupabase, {
                     name: trimmedName,
@@ -2431,8 +2436,8 @@ export default function AppLayout() {
                     prefers_sms: newPatientData.prefers_sms
                 });
                 
-                if (error && error.message === "CLON_DETECTADO") return alert("El paciente o teléfono ya existe en el directorio.");
-                if (error) return alert("Error guardando cliente: " + error.message); 
+                if (error && error.message === "CLON_DETECTADO") return alert(a('cloneDetected'));
+                if (error) return alert(a('saveClientError', error.message)); 
                 
                 setShowNewPatientModal(false); 
                 setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true }); 
@@ -2441,7 +2446,7 @@ export default function AppLayout() {
               
               <button onClick={async () => {
                 const trimmedName = newPatientData.name.trim();
-                if (!trimmedName) return alert("El nombre es obligatorio.");
+                if (!trimmedName) return alert(a('nameRequired'));
                 
                 const { error } = await savePatientToDB(activeSupabase, {
                     name: trimmedName,
@@ -2453,8 +2458,8 @@ export default function AppLayout() {
                     prefers_sms: newPatientData.prefers_sms
                 });
                 
-                if (error && error.message === "CLON_DETECTADO") return alert("El paciente o teléfono ya existe en el directorio.");
-                if (error) return alert("Error guardando cliente: " + error.message); 
+                if (error && error.message === "CLON_DETECTADO") return alert(a('cloneDetected'));
+                if (error) return alert(a('saveClientError', error.message)); 
                 
                 setShowNewPatientModal(false); 
                 setSelectedSlot({
@@ -2524,7 +2529,7 @@ export default function AppLayout() {
             <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-t shrink-0 flex flex-col sm:flex-row gap-2 sm:gap-3">
               <button onClick={() => setShowOOOModal(false)} className="w-full sm:w-1/3 bg-white border border-slate-300 font-black py-3 sm:py-4 rounded-xl uppercase text-xs hover:bg-slate-50">Cancelar</button>
               <button onClick={async () => {
-                if (!oooData.date) return alert("Selecciona una fecha");
+                if (!oooData.date) return alert(a('selectDate'));
                 await activeSupabase.from('blocked_slots').insert([{ 
                   date: oooData.date, 
                   start_time: oooData.start_time, 
@@ -2692,5 +2697,6 @@ export default function AppLayout() {
         </>
       )}
     </div>
+    </StaffLocaleProvider>
   );
 }

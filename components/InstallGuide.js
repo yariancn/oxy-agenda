@@ -10,6 +10,7 @@ import {
   INSTALL_SESSION_KEY,
   shouldAutoShowInstallGuide,
 } from '../lib/installContext';
+import { INSTALL_GUIDE_COPY, localeFromPathname } from '../lib/i18n';
 
 const GUIDE_Z = 'z-[100002]';
 
@@ -61,7 +62,12 @@ export default function InstallGuide() {
     };
   }, []);
 
-  const content = useMemo(() => (ctx ? getInstallSteps(ctx) : null), [ctx]);
+  const installLocale = useMemo(
+    () => (typeof window !== 'undefined' ? localeFromPathname(window.location.pathname) : 'es'),
+    [],
+  );
+  const ig = INSTALL_GUIDE_COPY[installLocale] || INSTALL_GUIDE_COPY.es;
+  const content = useMemo(() => (ctx ? getInstallSteps(ctx, installLocale) : null), [ctx, installLocale]);
 
   const dismiss = (remember = false) => {
     sessionStorage.setItem(INSTALL_SESSION_KEY, '1');
@@ -112,6 +118,7 @@ export default function InstallGuide() {
     return (
       <IosInstallWizard
         ctx={ctx}
+        locale={installLocale}
         className={GUIDE_Z}
         onDismiss={dismiss}
         onDone={handleIosDone}
@@ -122,7 +129,7 @@ export default function InstallGuide() {
   return (
     <>
       {showFab && (
-        <InstallFab className={GUIDE_Z} onOpen={() => setOpen(true)} />
+        <InstallFab className={GUIDE_Z} ig={ig} onOpen={() => setOpen(true)} />
       )}
 
       {open && content && (
@@ -137,7 +144,7 @@ export default function InstallGuide() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-blue-200 mb-1">
-                    Primera vez aquí
+                    {ig.firstTime}
                   </p>
                   <h2 id="install-guide-title" className="text-xl font-black leading-tight">
                     {content.title}
@@ -150,7 +157,7 @@ export default function InstallGuide() {
                   type="button"
                   onClick={() => dismiss(false)}
                   className="text-slate-300 hover:text-white text-2xl font-black leading-none shrink-0 p-1"
-                  aria-label="Cerrar"
+                  aria-label={ig.close}
                 >
                   ×
                 </button>
@@ -165,7 +172,7 @@ export default function InstallGuide() {
                   disabled={installing}
                   className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-black py-4 rounded-2xl uppercase text-sm shadow-lg transition"
                 >
-                  {installing ? 'Instalando…' : '⚡ Instalar ahora (recomendado)'}
+                  {installing ? ig.installing : ig.installNow}
                 </button>
               )}
 
@@ -194,26 +201,22 @@ export default function InstallGuide() {
                   onClick={copyUrl}
                   className="w-full border-2 border-dashed border-blue-200 bg-blue-50 text-blue-800 font-black py-3 rounded-xl text-xs uppercase hover:bg-blue-100 transition"
                 >
-                  {copied ? '✓ Dirección copiada' : '📋 Copiar dirección de la app'}
+                  {copied ? ig.copied : ig.copyUrl}
                 </button>
               )}
 
               {content.tip && (
                 <p className="text-xs text-slate-500 bg-amber-50 border border-amber-100 rounded-xl p-3 leading-relaxed">
-                  <span className="font-black text-amber-700">Tip: </span>
+                  <span className="font-black text-amber-700">{ig.tip}</span>
                   {content.tip}
                 </p>
               )}
 
               <div className="rounded-2xl bg-slate-900 text-slate-300 p-4 text-center">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">
-                  Después de instalar
+                  {ig.afterInstall}
                 </p>
-                <p className="text-sm font-bold text-white">
-                  Abre desde el ícono la agenda en{' '}
-                  <span className="text-amber-300">oxy-agenda.vercel.app</span>
-                  {' '}(no el link de reservas) e ingresa tu NIP de 6 dígitos.
-                </p>
+                <p className="text-sm font-bold text-white">{ig.afterInstallBody}</p>
               </div>
             </div>
 
@@ -223,14 +226,14 @@ export default function InstallGuide() {
                 onClick={() => dismiss(false)}
                 className="w-full bg-blue-600 text-white font-black py-3.5 rounded-xl uppercase text-xs hover:bg-blue-700 transition"
               >
-                Entendido, continuar
+                {ig.understood}
               </button>
               <button
                 type="button"
                 onClick={() => dismiss(true)}
                 className="w-full text-slate-400 font-bold py-2 text-[11px] uppercase hover:text-slate-600 transition"
               >
-                No volver a mostrar
+                {ig.dismiss}
               </button>
             </div>
           </div>
@@ -240,21 +243,23 @@ export default function InstallGuide() {
   );
 }
 
-function InstallFab({ onOpen, className }) {
+function InstallFab({ onOpen, className, ig }) {
   return (
     <button
       type="button"
       onClick={onOpen}
       className={`fixed bottom-20 lg:bottom-6 right-4 ${className} flex items-center gap-2 bg-blue-600 text-white text-[11px] font-black uppercase tracking-wide px-4 py-3 rounded-2xl shadow-xl hover:bg-blue-700 transition active:scale-95`}
-      aria-label="Cómo instalar OXY Agenda"
+      aria-label={ig.fabAria}
     >
       <span className="text-base leading-none" aria-hidden>📲</span>
-      Instalar app
+      {ig.fab}
     </button>
   );
 }
 
 export function InstallGuideLink({ className = '' }) {
+  const installLocale = typeof window !== 'undefined' ? localeFromPathname(window.location.pathname) : 'es';
+  const ig = INSTALL_GUIDE_COPY[installLocale] || INSTALL_GUIDE_COPY.es;
   return (
     <button
       type="button"
@@ -266,7 +271,7 @@ export function InstallGuideLink({ className = '' }) {
       }}
       className={className || 'text-[11px] font-bold text-blue-600 hover:text-blue-800 underline underline-offset-2 transition'}
     >
-      📲 ¿Cómo instalar la app en tu celular o computadora?
+      {ig.link}
     </button>
   );
 }

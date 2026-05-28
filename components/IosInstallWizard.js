@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { getIosWizardSteps } from '../lib/installContext';
+import { IOS_WIZARD_UI } from '../lib/i18n';
 
 function Arrow({ className, label, flip }) {
   return (
@@ -230,8 +231,9 @@ function MockupScene({ type }) {
   return null;
 }
 
-export default function IosInstallWizard({ ctx, onDismiss, onDone, className = 'z-[100002]' }) {
-  const wizard = useMemo(() => getIosWizardSteps(ctx), [ctx]);
+export default function IosInstallWizard({ ctx, locale = 'es', onDismiss, onDone, className = 'z-[100002]' }) {
+  const wizard = useMemo(() => getIosWizardSteps(ctx, locale), [ctx, locale]);
+  const ui = IOS_WIZARD_UI[locale] || IOS_WIZARD_UI.es;
   const [stepIndex, setStepIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -266,7 +268,7 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone, className = '
         <div className="flex items-center justify-between gap-3 mb-3">
           <div>
             <p className="text-[10px] font-black uppercase tracking-widest text-blue-300">
-              Instalar en iPhone · Paso {stepIndex + 1} de {wizard.steps.length}
+              {ui.header(stepIndex + 1, wizard.steps.length)}
             </p>
             <h2 className="text-lg font-black leading-tight mt-0.5">{step.title}</h2>
           </div>
@@ -275,7 +277,7 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone, className = '
             onClick={() => onDismiss(false)}
             className="text-slate-400 hover:text-white text-sm font-bold uppercase shrink-0 px-2 py-1"
           >
-            Después
+            {ui.later}
           </button>
         </div>
         <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
@@ -301,7 +303,7 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone, className = '
 
         {step.id === 'share' && (
           <p className="mt-4 text-[11px] text-blue-200 font-bold text-center max-w-xs">
-            Tip: toca «Después» arriba a la derecha para ver la barra de Safari.
+            {ui.shareTip}
           </p>
         )}
       </div>
@@ -314,7 +316,7 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone, className = '
             onClick={() => runAutoAction(step.autoAction)}
             className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 text-emerald-950 font-black py-4 rounded-2xl text-sm uppercase shadow-lg transition"
           >
-            {busy ? 'Abriendo…' : `⚡ ${step.autoLabel}`}
+            {busy ? ui.opening : `⚡ ${step.autoLabel}`}
           </button>
         )}
 
@@ -324,7 +326,7 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone, className = '
             onClick={() => setStepIndex((i) => i + 1)}
             className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-2xl text-sm uppercase transition"
           >
-            Listo, siguiente paso →
+            {ui.next}
           </button>
         ) : (
           <button
@@ -332,14 +334,12 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone, className = '
             onClick={onDone}
             className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-2xl text-sm uppercase transition"
           >
-            {wizard.flow === 'in-app'
-              ? 'Entendido — continuaré en Safari'
-              : '✓ Ya la instalé — Entrar'}
+            {wizard.flow === 'in-app' ? ui.doneInApp : ui.doneInstalled}
           </button>
         )}
 
         {step.autoAction === 'copy-url' && copied && (
-          <p className="text-center text-xs text-emerald-400 font-bold">Enlace copiado — pégalo en Safari</p>
+          <p className="text-center text-xs text-emerald-400 font-bold">{ui.linkCopied}</p>
         )}
 
         {stepIndex > 0 && (
@@ -348,7 +348,7 @@ export default function IosInstallWizard({ ctx, onDismiss, onDone, className = '
             onClick={() => setStepIndex((i) => i - 1)}
             className="w-full text-slate-500 font-bold py-2 text-xs uppercase"
           >
-            ← Paso anterior
+            {ui.prev}
           </button>
         )}
       </div>
