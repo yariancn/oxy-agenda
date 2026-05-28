@@ -8,6 +8,7 @@ import {
   getStaffProfileForClinic,
   resolveStaffLogin,
 } from '../lib/clinicAccess';
+import { ensurePatient, digitsOnly } from '../lib/ensurePatient';
 import BitacoraModal from '../components/BitacoraModal';
 import PatientProfileModal from '../components/PatientProfileModal';
 import GFEManager from '../components/GFEManager';
@@ -216,37 +217,24 @@ export default function AppLayout() {
 
   // --- MOTOR INTELIGENTE AUTO-ADAPTABLE (TX / GDL) ---
   const savePatientToDB = async (db, pData) => {
-    const trimmedName = pData.name.trim();
-    const trimmedPhone = pData.phone.trim();
-    
-    // Candado Anti-Clones
-    const isClone = dbPatients.some(p => normalizeStr(p.patient) === normalizeStr(trimmedName) || (p.phone && p.phone === trimmedPhone && trimmedPhone.length > 0));
-    if (isClone) return { error: { message: "CLON_DETECTADO" } };
-
-    // Envío quirúrgico de 'notes' en minúsculas
-    let res = await db.from('patients').insert([{
-      Name: trimmedName,
-      Phone: trimmedPhone,
-      Email: pData.email.trim(),
+    const result = await ensurePatient(db, {
+      name: pData.name,
+      phone: pData.phone,
+      email: pData.email,
       protocol: pData.protocol,
       notes: pData.notes,
-      prefers_email: pData.prefers_email !== false,
-      prefers_sms: pData.prefers_sms !== false
-    }]).select();
-
-    // 2. Si falla por choque de columnas, adapta a formato GDL (Minúsculas completas)
-    if (res.error && res.error.message.toLowerCase().includes('column')) {
-      res = await db.from('patients').insert([{
-        name: trimmedName,
-        phone: trimmedPhone,
-        email: pData.email.trim(),
-        protocol: pData.protocol,
-        notes: pData.notes,
-        prefers_email: pData.prefers_email !== false,
-        prefers_sms: pData.prefers_sms !== false
-      }]).select();
+      prefers_email: pData.prefers_email,
+      prefers_sms: pData.prefers_sms,
+    });
+    if (result.error) {
+      const last10 = digitsOnly(pData.phone).slice(-10);
+      const duplicateInMemory = dbPatients.some(
+        (p) => digitsOnly(p.phone).slice(-10) === last10 && last10.length === 10
+      );
+      if (duplicateInMemory) return { error: { message: 'CLON_DETECTADO' } };
+      return { error: result.error };
     }
-    return res;
+    return { data: [{ id: result.id }], error: null };
   };
 
   // --- SINCRONIZACIÓN CON PAGINACIÓN INTELIGENTE ---
@@ -2336,24 +2324,36 @@ export default function AppLayout() {
                     selectedSlot.id
                   )) return alert("🔒 Empalme de horario.");
 
-                  if (isNewPatientInline && !selectedSlot.id) {
-                    const { error: pe } = await savePatientToDB(activeSupabase, { 
-                        name: selectedSlot.patient.trim(), 
-                        phone: (selectedSlot.phone || '').trim(), 
-                        email: (selectedSlot.email || '').trim(), 
-                        protocol: selectedSlot.protocol || 'Wellness', 
-                        notes: selectedSlot.patientNotes || '',
-                        prefers_email: selectedSlot.prefers_email !== false,
-                        prefers_sms: selectedSlot.prefers_sms !== false
+                  let canonicalPatient = selectedSlot.patient.trim();
+                  let canonicalPhone = (selectedSlot.phone || '').trim();
+                  let canonicalEmail = (selectedSlot.email || '').trim();
+                  let isNewForAppointment = isNewPatientInline;
+
+                  const phoneDigits = digitsOnly(canonicalPhone).slice(-10);
+                  if (phoneDigits.length === 10) {
+                    const ensured = await ensurePatient(activeSupabase, {
+                      name: canonicalPatient,
+                      phone: canonicalPhone,
+                      email: canonicalEmail,
+                      protocol: selectedSlot.protocol || 'Wellness',
+                      notes: selectedSlot.patientNotes || '',
+                      prefers_email: selectedSlot.prefers_email !== false,
+                      prefers_sms: selectedSlot.prefers_sms !== false,
                     });
-                    if (pe) return alert("Error: " + pe.message);
+                    if (ensured.error) return alert('Error con expediente: ' + ensured.error.message);
+                    canonicalPatient = ensured.displayName;
+                    canonicalPhone = ensured.phone;
+                    canonicalEmail = ensured.email;
+                    isNewForAppointment = ensured.isNew;
+                  } else if (isNewPatientInline && !selectedSlot.id) {
+                    return alert('Ingresa un teléfono de 10 dígitos para crear el expediente.');
                   } else if (!isNewPatientInline && selectedSlot.patientNotes !== undefined) {
                     const matching = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
                     for (const pat of matching) { await activeSupabase.from('patients').update({ notes: selectedSlot.patientNotes }).eq('id', pat.id); }
                   }
-                  
+
                   const sessionTimes = resolveSessionTimes(selectedSlot);
-                  const payload = { patient: selectedSlot.patient.trim(), phone: (selectedSlot.phone || '').trim(), protocol: selectedSlot.protocol || 'Wellness', equipment: selectedSlot.equipment, duration: sessionTimes.duration, buffer: sessionTimes.buffer, full_date: selectedSlot.fullDate || currentFullDate, appointment_date: selectedSlot.fullDate || currentFullDate, day: selectedSlot.day || currentDayInfo.name, time: selectedSlot.time, appointment_time: selectedSlot.time, attendant: selectedSlot.attendant || 'Por Asignar', check_in_status: selectedSlot.check_in_status || 'Agendado', is_new_patient: selectedSlot.is_new_patient || isNewPatientInline, notes: selectedSlot.notes || '' };
+                  const payload = { patient: canonicalPatient, phone: canonicalPhone, email: canonicalEmail, protocol: selectedSlot.protocol || 'Wellness', equipment: selectedSlot.equipment, duration: sessionTimes.duration, buffer: sessionTimes.buffer, full_date: selectedSlot.fullDate || currentFullDate, appointment_date: selectedSlot.fullDate || currentFullDate, day: selectedSlot.day || currentDayInfo.name, time: selectedSlot.time, appointment_time: selectedSlot.time, attendant: selectedSlot.attendant || 'Por Asignar', check_in_status: selectedSlot.check_in_status || 'Agendado', is_new_patient: isNewForAppointment, notes: selectedSlot.notes || '' };
                   const { data: na, error } = await activeSupabase.from('appointments').insert([payload]).select();
                   if(error) alert("Error: " + error.message); else { if (na && na[0]) await logAudit(na[0].id, payload.patient, 'CREACIÓN', payload.time); setShowNewAppointment(false); setSelectedSlot(null); fetchAllData(); }
                 } catch (e) { alert("Error de conexión."); }

@@ -1,0 +1,547 @@
+'use client';
+
+import React, { useEffect, useMemo, useState } from 'react';
+import { submitPublicBooking } from '../lib/publicBooking';
+import { buildDaySlots, countAvailableSlots } from '../lib/publicBookingSlots';
+import {
+  fetchPromoters,
+  getPromoFromUrl,
+  normalizePromoCode,
+  resolvePromoter,
+} from '../lib/promoters';
+
+const COPY = {
+  es: {
+    staff: 'Staff · NIP',
+    back: 'Volver',
+    step1Title: '¿Qué servicio buscas?',
+    step2Title: 'Selecciona fecha y hora',
+    slotLegendAvailable: 'Disponible',
+    slotLegendOccupied: 'Ocupado',
+    slotLegendBlocked: 'Bloqueado',
+    slotLegendSoon: 'Muy pronto',
+    noSlotsDay: 'No hay horarios para este día. Prueba otra fecha.',
+    availableCount: (n) => `${n} horario${n === 1 ? '' : 's'} disponible${n === 1 ? '' : 's'}`,
+    step3Title: 'Tus datos',
+    step3Summary: 'Resumen',
+    name: 'Nombre completo',
+    phone: 'Número (10 dígitos)',
+    email: 'Correo electrónico',
+    commentsTitle: 'Comentarios para la clínica',
+    commentsHint: 'Motivo de consulta, alergias, preferencias… Esto aparece en la nota de tu cita en agenda.',
+    commentsPlaceholder: 'Escribe aquí lo que quieras que vea el equipo al recibirte…',
+    promoterPageLabel: 'Página de reserva personal',
+    promoterWith: 'Te atiende',
+    promoterCode: 'Código',
+    promoterUnknown: 'Asesor de referidos',
+    promoterOptional: '¿Tienes código de referido? (opcional)',
+    promoterOptionalHint: 'Si no tienes código, déjalo vacío.',
+    confirm: 'Confirmar cita',
+    processing: 'Procesando…',
+    phoneRule: 'Se requiere un número de 10 dígitos para confirmar.',
+    doneTitle: '¡Cita confirmada!',
+    doneBody: 'Te esperamos en la clínica. Revisa tu correo si lo indicaste.',
+    bookAnother: 'Agendar otra cita',
+    phoneError: '⚠️ El número celular debe tener exactamente 10 dígitos.',
+    genericError: 'Error al confirmar la cita.',
+    loading: 'Cargando horarios…',
+  },
+  en: {
+    staff: 'Staff · PIN',
+    back: 'Back',
+    step1Title: 'What service do you need?',
+    step2Title: 'Pick date and time',
+    slotLegendAvailable: 'Available',
+    slotLegendOccupied: 'Booked',
+    slotLegendBlocked: 'Blocked',
+    slotLegendSoon: 'Too soon',
+    noSlotsDay: 'No time slots for this day. Try another date.',
+    availableCount: (n) => `${n} slot${n === 1 ? '' : 's'} available`,
+    step3Title: 'Your details',
+    step3Summary: 'Summary',
+    name: 'Full name',
+    phone: 'Phone (10 digits)',
+    email: 'Email',
+    commentsTitle: 'Notes for the clinic',
+    commentsHint: 'Reason for visit, allergies, preferences… This appears on your appointment note in the schedule.',
+    commentsPlaceholder: 'Write anything you want the team to see when you arrive…',
+    promoterPageLabel: 'Personal booking page',
+    promoterWith: 'Your advisor',
+    promoterCode: 'Code',
+    promoterUnknown: 'Referral advisor',
+    promoterOptional: 'Referral code (optional)',
+    promoterOptionalHint: 'Leave blank if you do not have one.',
+    confirm: 'Confirm appointment',
+    processing: 'Processing…',
+    phoneRule: 'A 10-digit phone number is required.',
+    doneTitle: 'Appointment confirmed!',
+    doneBody: 'We look forward to seeing you at the clinic.',
+    bookAnother: 'Book another',
+    phoneError: '⚠️ Phone number must be exactly 10 digits.',
+    genericError: 'Could not confirm the appointment.',
+    loading: 'Loading schedule…',
+  },
+};
+
+const SLOT_STATUS_LABEL = {
+  es: { occupied: 'Ocupado', blocked: 'Bloqueado', too_soon: '—' },
+  en: { occupied: 'Booked', blocked: 'Blocked', too_soon: '—' },
+};
+
+export default function PublicBookingPortal({
+  supabase,
+  clinicName,
+  portalTag,
+  locale = 'es',
+  branding,
+}) {
+  const t = COPY[locale] || COPY.es;
+  const [step, setStep] = useState(1);
+  const [selectedService, setSelectedService] = useState(null);
+  const [selectedDate, setSelectedDate] = useState('');
+  const [selectedTime, setSelectedTime] = useState('');
+  const [formData, setFormData] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    lada: branding.defaultLada,
+    notes: '',
+    promoterCode: '',
+  });
+  const [promoterList, setPromoterList] = useState([]);
+  const [promoFromLink, setPromoFromLink] = useState(false);
+  const [dbServices, setDbServices] = useState([]);
+  const [dbAppointments, setDbAppointments] = useState([]);
+  const [dbBlockedSlots, setDbBlockedSlots] = useState([]);
+  const [dbConfig, setDbConfig] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const activePromoter = useMemo(
+    () => resolvePromoter(formData.promoterCode, promoterList),
+    [formData.promoterCode, promoterList],
+  );
+
+  const accentRing = branding.accent === 'emerald' ? 'ring-emerald-500' : 'ring-blue-500';
+  const accentBorder = branding.accent === 'emerald' ? 'border-emerald-500' : 'border-blue-500';
+  const accentBg = branding.accent === 'emerald' ? 'bg-emerald-600' : 'bg-blue-600';
+  const accentText = branding.accent === 'emerald' ? 'text-emerald-400' : 'text-blue-400';
+
+  useEffect(() => {
+    const load = async () => {
+      setIsLoading(true);
+      try {
+        const [resSrv, resApp, resBlock, resConf, promoters] = await Promise.all([
+          supabase.from('services').select('*').eq('is_active', true),
+          supabase
+            .from('appointments')
+            .select('equipment, full_date, time, duration, buffer, check_in_status')
+            .neq('check_in_status', 'Cancelado'),
+          supabase.from('blocked_slots').select('*'),
+          supabase.from('company_config').select('*').eq('clinic', clinicName).maybeSingle(),
+          fetchPromoters(supabase, clinicName),
+        ]);
+        if (resSrv.data) setDbServices(resSrv.data.sort((a, b) => a.name.length - b.name.length));
+        if (resApp.data) setDbAppointments(resApp.data);
+        if (resBlock.data) setDbBlockedSlots(resBlock.data);
+        setDbConfig(
+          resConf.data || {
+            start_time: '08:00',
+            end_time: '20:00',
+            interval_mins: 30,
+            booking_limit_hours: 2,
+          },
+        );
+        setPromoterList(promoters);
+        const promo = getPromoFromUrl();
+        if (promo) {
+          setPromoFromLink(true);
+          setFormData((prev) => ({ ...prev, promoterCode: promo }));
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    load();
+  }, [supabase, clinicName]);
+
+  const dateOptions = useMemo(() => {
+    const dates = [];
+    const start = new Date(
+      new Date().toLocaleString('en-US', { timeZone: branding.timezone }),
+    );
+    for (let i = 0; i < 14; i += 1) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      const fullDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const label = d.toLocaleDateString(locale === 'en' ? 'en-US' : 'es-MX', {
+        weekday: 'long',
+        day: '2-digit',
+        month: 'short',
+      });
+      dates.push({ fullDate, label });
+    }
+    return dates;
+  }, [branding.timezone, locale]);
+
+  const daySlots = useMemo(() => {
+    if (!selectedService) return [];
+    return buildDaySlots({
+      dbConfig,
+      selectedDate,
+      equipmentName: selectedService.name,
+      dbAppointments,
+      dbBlockedSlots,
+      timezone: branding.timezone,
+    });
+  }, [dbConfig, selectedDate, selectedService, dbAppointments, dbBlockedSlots, branding.timezone]);
+
+  const availableCount = countAvailableSlots(daySlots);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    try {
+      const result = await submitPublicBooking({
+        supabase,
+        clinicName,
+        portalTag,
+        formData: {
+          ...formData,
+          promoterCode: normalizePromoCode(formData.promoterCode),
+        },
+        selectedService,
+        selectedDate,
+        selectedTime,
+      });
+      if (result.error) {
+        if (result.error.message === 'PHONE_LENGTH') {
+          alert(t.phoneError);
+          return;
+        }
+        throw result.error;
+      }
+      setStep(4);
+    } catch (error) {
+      alert(error.message || t.genericError);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const promoterDisplayName = activePromoter.name
+    || (activePromoter.code ? t.promoterUnknown : null);
+
+  return (
+    <div className="min-h-screen bg-slate-100 font-sans text-slate-900 flex flex-col">
+      {activePromoter.code && (
+        <div className="bg-gradient-to-r from-amber-500 via-amber-500 to-orange-600 text-white px-4 py-4 shadow-md">
+          <p className="text-[10px] font-black uppercase tracking-widest text-amber-100">
+            {t.promoterPageLabel}
+          </p>
+          <p className="text-xs font-bold uppercase text-amber-50/90 mt-0.5">{t.promoterWith}</p>
+          <h2 className="text-2xl sm:text-3xl font-black leading-tight mt-1">
+            {promoterDisplayName}
+          </h2>
+          <p className="text-[11px] font-bold mt-2 text-amber-100">
+            {t.promoterCode}: {activePromoter.code}
+            {!activePromoter.recognized && (
+              <span className="ml-2 opacity-80">({locale === 'en' ? 'pending validation' : 'pendiente de alta'})</span>
+            )}
+          </p>
+        </div>
+      )}
+
+      <header className="bg-slate-900 text-white p-4 flex items-center justify-between shadow-lg gap-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <img
+            src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg"
+            className="h-10 w-auto bg-white rounded p-1 shrink-0"
+            alt=""
+          />
+          <div className="min-w-0">
+            <h1 className="text-sm font-black uppercase tracking-widest truncate">{branding.title}</h1>
+            <p className={`text-[9px] font-bold uppercase ${accentText}`}>{branding.subtitle}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <a
+            href="/"
+            className="text-[9px] font-black uppercase border border-amber-500/60 text-amber-200 px-2 py-1 rounded whitespace-nowrap"
+          >
+            {t.staff}
+          </a>
+          {step > 1 && step < 4 && (
+            <button
+              type="button"
+              onClick={() => setStep(step - 1)}
+              className="text-[10px] font-black uppercase border border-slate-700 px-3 py-1 rounded"
+            >
+              {t.back}
+            </button>
+          )}
+        </div>
+      </header>
+
+      <main className="flex-1 p-4 md:p-8 flex justify-center">
+        <div className="max-w-2xl w-full bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden h-fit">
+          {isLoading && step < 4 && (
+            <p className="p-8 text-center text-sm font-bold text-slate-400 uppercase">{t.loading}</p>
+          )}
+
+          <div className="p-6 md:p-10">
+            {step === 1 && !isLoading && (
+              <div className="space-y-4">
+                <h2 className="text-2xl font-black text-slate-800 uppercase text-center mb-2">
+                  {t.step1Title}
+                </h2>
+                {activePromoter.code && (
+                  <p className="text-center text-sm font-bold text-amber-700 mb-4">
+                    {locale === 'en'
+                      ? `Booking with ${promoterDisplayName}`
+                      : `Agenda tu cita con ${promoterDisplayName}`}
+                  </p>
+                )}
+                {dbServices.map((srv) => (
+                  <button
+                    key={srv.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedService(srv);
+                      setStep(2);
+                    }}
+                    className={`w-full bg-white border-2 border-slate-200 rounded-2xl p-5 flex justify-between items-center transition hover:border-2 ${
+                      branding.accent === 'emerald' ? 'hover:border-emerald-500' : 'hover:border-blue-500'
+                    }`}
+                  >
+                    <span className="font-black text-slate-800 uppercase text-left">{srv.name}</span>
+                    <span className="bg-slate-100 p-2 rounded-full shrink-0">▶</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {step === 2 && (
+              <div className="space-y-5">
+                <h2 className="text-xl font-black text-slate-800 uppercase border-b pb-4">
+                  {t.step2Title}
+                </h2>
+                {selectedService && (
+                  <p className="text-xs font-bold text-slate-500 uppercase">
+                    {selectedService.name}
+                  </p>
+                )}
+
+                <div className="flex gap-3 overflow-x-auto pb-2">
+                  {dateOptions.map((d) => (
+                    <button
+                      key={d.fullDate}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDate(d.fullDate);
+                        setSelectedTime('');
+                      }}
+                      className={`shrink-0 w-32 p-4 rounded-2xl border-2 transition text-left ${
+                        selectedDate === d.fullDate
+                          ? `${accentBorder} bg-slate-50 ring-2 ${accentRing}`
+                          : 'border-slate-200'
+                      }`}
+                    >
+                      <p className="text-xs font-black uppercase text-slate-600 leading-tight">
+                        {d.label}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+
+                {selectedDate && (
+                  <>
+                    <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase">
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        {t.slotLegendAvailable}
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 text-slate-500 border border-slate-200">
+                        <span className="w-2 h-2 rounded-full bg-slate-400" />
+                        {t.slotLegendOccupied}
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 text-red-700 border border-red-100">
+                        <span className="w-2 h-2 rounded-full bg-red-400" />
+                        {t.slotLegendBlocked}
+                      </span>
+                    </div>
+
+                    <p className="text-xs font-bold text-slate-600">{t.availableCount(availableCount)}</p>
+
+                    <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+                      {daySlots.map((slot) => {
+                        const statusLabels = SLOT_STATUS_LABEL[locale] || SLOT_STATUS_LABEL.es;
+                        if (slot.status === 'available') {
+                          return (
+                            <button
+                              key={slot.time}
+                              type="button"
+                              onClick={() => {
+                                setSelectedTime(slot.time);
+                                setStep(3);
+                              }}
+                              className="p-3 rounded-xl border-2 border-emerald-200 bg-emerald-50 font-black text-xs uppercase text-emerald-900 hover:border-emerald-500 hover:bg-emerald-100 transition"
+                            >
+                              {slot.time}
+                            </button>
+                          );
+                        }
+                        return (
+                          <div
+                            key={slot.time}
+                            className="p-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-xs uppercase text-slate-400 text-center cursor-not-allowed"
+                            title={statusLabels[slot.status] || slot.status}
+                          >
+                            <span className="block opacity-60 line-through decoration-slate-400">
+                              {slot.time}
+                            </span>
+                            <span className="block text-[8px] font-black mt-0.5 normal-case">
+                              {statusLabels[slot.status] || '—'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {availableCount === 0 && (
+                      <p className="text-center text-slate-500 font-bold text-sm py-2">{t.noSlotsDay}</p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {step === 3 && (
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <h2 className="text-xl font-black text-slate-800 uppercase border-b pb-4">
+                  {t.step3Title}
+                </h2>
+
+                <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 text-sm space-y-1">
+                  <p className="text-[10px] font-black uppercase text-slate-400">{t.step3Summary}</p>
+                  <p className="font-bold text-slate-800">{selectedService?.name}</p>
+                  <p className="font-bold text-slate-600">
+                    {selectedDate} · {selectedTime}
+                  </p>
+                  {activePromoter.code && (
+                    <p className="font-bold text-amber-700 text-xs uppercase pt-1">
+                      {t.promoterWith}: {promoterDisplayName} ({activePromoter.code})
+                    </p>
+                  )}
+                </div>
+
+                <input
+                  required
+                  placeholder={t.name}
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full p-4 border-2 rounded-xl font-bold uppercase outline-none focus:border-blue-500"
+                />
+                <div className="flex gap-2">
+                  <input
+                    required
+                    placeholder={branding.defaultLada}
+                    value={formData.lada}
+                    onChange={(e) => setFormData({ ...formData, lada: e.target.value })}
+                    className="w-20 p-4 border-2 bg-slate-50 rounded-xl font-black text-center outline-none focus:border-blue-500"
+                  />
+                  <input
+                    required
+                    type="tel"
+                    maxLength={10}
+                    placeholder={t.phone}
+                    value={formData.phone}
+                    onChange={(e) =>
+                      setFormData({ ...formData, phone: e.target.value.replace(/\D/g, '') })
+                    }
+                    className="flex-1 p-4 border-2 rounded-xl font-bold outline-none focus:border-blue-500"
+                  />
+                </div>
+                <input
+                  required
+                  type="email"
+                  placeholder={t.email}
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="w-full p-4 border-2 rounded-xl font-bold outline-none focus:border-blue-500"
+                />
+
+                {!promoFromLink && (
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1 ml-1">
+                      {t.promoterOptional}
+                    </label>
+                    <input
+                      placeholder="ANA01"
+                      value={formData.promoterCode}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          promoterCode: e.target.value.toUpperCase(),
+                        })
+                      }
+                      className="w-full p-3 border-2 rounded-xl font-bold uppercase outline-none focus:border-amber-500 tracking-wider"
+                    />
+                    <p className="text-[9px] text-slate-400 font-bold mt-1 ml-1">{t.promoterOptionalHint}</p>
+                  </div>
+                )}
+
+                <section className="rounded-2xl border-2 border-amber-200 bg-amber-50/80 p-4 space-y-2">
+                  <label className="block text-sm font-black uppercase text-amber-900">
+                    {t.commentsTitle}
+                  </label>
+                  <p className="text-xs font-semibold text-amber-800/90 leading-relaxed">{t.commentsHint}</p>
+                  <textarea
+                    value={formData.notes}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    placeholder={t.commentsPlaceholder}
+                    rows={4}
+                    className="w-full p-4 border-2 border-amber-200 rounded-xl font-medium text-slate-800 outline-none focus:border-amber-500 bg-white resize-y min-h-[100px]"
+                  />
+                </section>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className={`w-full ${accentBg} text-white font-black py-5 rounded-2xl uppercase shadow-xl disabled:opacity-60`}
+                >
+                  {isSubmitting ? t.processing : t.confirm}
+                </button>
+                <p className="text-[10px] text-center font-bold text-slate-400 uppercase">{t.phoneRule}</p>
+              </form>
+            )}
+
+            {step === 4 && (
+              <div className="text-center py-10">
+                <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">
+                  ✓
+                </div>
+                <h2 className="text-3xl font-black text-slate-800 uppercase">{t.doneTitle}</h2>
+                <p className="text-sm font-bold text-slate-500 mt-4">{t.doneBody}</p>
+                {formData.notes.trim() && (
+                  <p className="text-xs text-slate-400 mt-3 max-w-sm mx-auto">
+                    {locale === 'en' ? 'Your notes were saved on the appointment.' : 'Tus comentarios quedaron guardados en la nota de la cita.'}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="mt-8 text-xs font-black text-blue-600 uppercase underline"
+                >
+                  {t.bookAnother}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}

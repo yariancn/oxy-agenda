@@ -210,7 +210,9 @@ export default function InstallGuide() {
                   Después de instalar
                 </p>
                 <p className="text-sm font-bold text-white">
-                  Abre OXY Agenda desde tu pantalla de inicio e ingresa tu NIP de staff.
+                  Abre desde el ícono la agenda en{' '}
+                  <span className="text-amber-300">oxy-agenda.vercel.app</span>
+                  {' '}(no el link de reservas) e ingresa tu NIP de 6 dígitos.
                 </p>
               </div>
             </div>
