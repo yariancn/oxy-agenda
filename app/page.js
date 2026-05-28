@@ -9,6 +9,13 @@ import {
   resolveStaffLogin,
 } from '../lib/clinicAccess';
 import { ensurePatient, digitsOnly } from '../lib/ensurePatient';
+import {
+  buildCalendarWeek,
+  getDayNameFromDate,
+  localeForClinic,
+  staffAlert,
+  staffStrings,
+} from '../lib/i18n';
 import BitacoraModal from '../components/BitacoraModal';
 import PatientProfileModal from '../components/PatientProfileModal';
 import GFEManager from '../components/GFEManager';
@@ -103,6 +110,13 @@ export default function AppLayout() {
   const [reportStartDate, setReportStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [reportEndDate, setReportEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedPatientReport, setSelectedPatientReport] = useState('');
+
+  const locale = localeForClinic(activeClinic);
+  const L = useMemo(() => staffStrings(locale), [locale]);
+
+  useEffect(() => {
+    document.documentElement.lang = locale === 'en' ? 'en' : 'es';
+  }, [locale]);
 
   const activeSupabase = activeClinic === 'Shenandoah' ? supabaseShenandoah : supabaseGdl;
 
@@ -349,7 +363,7 @@ export default function AppLayout() {
     try {
       const result = await resolveStaffLogin(loginPin, supabaseGdl, supabaseShenandoah);
       if (!result.user) {
-        alert('PIN incorrecto o usuario inactivo');
+        alert(staffAlert(locale, 'pinInvalid'));
         setLoginPin('');
         return;
       }
@@ -357,7 +371,7 @@ export default function AppLayout() {
       setActiveClinic(result.user.allowedClinics[0] || 'Guadalajara');
       setLoginPin('');
     } catch {
-      alert('No se pudo verificar el acceso. Intenta de nuevo.');
+      alert(staffAlert(locale, 'loginFailed'));
       setLoginPin('');
     } finally {
       setIsLoggingIn(false);
@@ -366,7 +380,7 @@ export default function AppLayout() {
 
   const switchClinic = (clinic) => {
     if (!canAccessClinic(currentUser, clinic)) {
-      alert('No tienes acceso a esta clínica.');
+      alert(staffAlert(locale, 'noClinicAccess'));
       return;
     }
     setActiveClinic(clinic);
@@ -386,7 +400,7 @@ export default function AppLayout() {
     if (String(pinInput) === String(staffPin) || String(pinInput) === String(lock)) {
         setIsReportsUnlocked(true); 
     } else { 
-        alert('NIP Financiero Incorrecto'); 
+        alert(staffAlert(locale, 'financialPin')); 
         setPinInput(''); 
     }
   };
@@ -395,22 +409,10 @@ export default function AppLayout() {
   const currentDateISO = new Date(currentDate).toISOString().split('T')[0];
   const currentFullDate = currentDateISO; 
 
-  const weekDays = useMemo(() => {
-    const start = new Date(currentDate);
-    const day = start.getDay();
-    const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-    start.setDate(diff);
-    
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(start);
-      d.setDate(start.getDate() + i);
-      return {
-        name: ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'][i],
-        date: d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }),
-        fullDate: d.toISOString().split('T')[0]
-      };
-    });
-  }, [currentDate]);
+  const weekDays = useMemo(
+    () => buildCalendarWeek(locale, currentDate),
+    [locale, currentDate],
+  );
 
   const currentDayInfo = weekDays.find(d => d.fullDate === currentDateISO) || weekDays[0];
 
@@ -641,7 +643,7 @@ export default function AppLayout() {
     }
 
     const d = new Date(targetDate + 'T12:00:00');
-    const dayName = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'][d.getDay()];
+    const dayName = getDayNameFromDate(locale, d);
 
     if (tryRequestMove(selectedSlot, targetTime, targetEquipment, dayName, targetDate)) {
       setIsRescheduling(false);
@@ -877,16 +879,16 @@ export default function AppLayout() {
   };
 
   const mobilePrimaryTabs = [
-    { id: 'Agenda', icon: '📅', label: 'Agenda' },
-    { id: 'Pacientes', icon: '👥', label: 'Clientes' },
-    { id: 'GFE', icon: '🩺', label: 'GFE' },
+    { id: 'Agenda', icon: '📅', label: L.tabs.Agenda },
+    { id: 'Pacientes', icon: '👥', label: L.tabs.Pacientes },
+    { id: 'GFE', icon: '🩺', label: L.tabs.GFE },
   ];
 
   const mobileAdminTabs = currentUserLevel <= 2
     ? [
-        { id: 'Servicios', icon: '⚙️', label: 'Catálogo' },
-        { id: 'Reportes', icon: '📊', label: 'Reportes' },
-        { id: 'Admin', icon: '🔒', label: 'Ajustes' },
+        { id: 'Servicios', icon: '⚙️', label: L.mobileTabs.Servicios },
+        { id: 'Reportes', icon: '📊', label: L.mobileTabs.Reportes },
+        { id: 'Admin', icon: '🔒', label: L.mobileTabs.Admin },
       ]
     : [];
 
@@ -900,8 +902,8 @@ export default function AppLayout() {
         <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md flex items-center justify-center z-[99999]">
            <div className="bg-white p-6 sm:p-10 rounded-3xl shadow-2xl w-full max-w-sm text-center border mx-4">
              <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" className="h-20 mx-auto mb-6 rounded-xl shadow-sm" alt="Logo"/>
-             <h2 className="text-2xl font-black uppercase mb-2 text-slate-800">🔒 Acceso</h2>
-             <p className="text-xs font-bold text-slate-500 mb-8 uppercase">Ingresa tu NIP de 6 dígitos</p>
+             <h2 className="text-2xl font-black uppercase mb-2 text-slate-800">{L.loginTitle}</h2>
+             <p className="text-xs font-bold text-slate-500 mb-8 uppercase">{L.loginHint}</p>
              <input 
                 type="password" 
                 maxLength="10" 
@@ -914,7 +916,7 @@ export default function AppLayout() {
                className="w-full text-center text-3xl tracking-[0.2em] font-black p-4 border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 mb-6 bg-slate-50 text-slate-900 disabled:opacity-60" 
              />
              <button onClick={handleLoginSubmit} disabled={isLoggingIn || !loginPin.trim()} className="w-full bg-blue-600 text-white font-black py-4 rounded-xl uppercase text-sm shadow-md hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed">
-                {isLoggingIn ? 'Verificando…' : 'Entrar'}
+                {isLoggingIn ? L.loginVerifying : L.loginEnter}
              </button>
              <div className="mt-5 pt-4 border-t border-slate-100">
                <InstallGuideLink className="text-[11px] font-bold text-blue-600 hover:text-blue-800 underline underline-offset-2 transition w-full text-center block leading-relaxed" />
@@ -934,18 +936,18 @@ export default function AppLayout() {
            <div className="px-4 py-3 bg-slate-800 text-[10px] font-black uppercase text-slate-400 flex flex-col gap-1 border-b border-slate-700">
              <div className="flex justify-between items-center w-full">
                <span className="truncate mr-2 text-white">👤 {currentUser.name}</span>
-               <button onClick={handleLogout} className="text-red-400 hover:text-red-300 shrink-0">Salir</button>
+               <button onClick={handleLogout} className="text-red-400 hover:text-red-300 shrink-0">{L.logout}</button>
              </div>
-             <span className="text-[8px] text-emerald-400">NIVEL DE ACCESO: {currentUserLevel}</span>
+             <span className="text-[8px] text-emerald-400">{L.accessLevel}: {currentUserLevel}</span>
              {allowedClinics.length > 1 && (
-               <span className="text-[8px] text-blue-300">CLÍNICAS: {allowedClinics.map(c => c === 'Guadalajara' ? 'GDL' : 'TX').join(' · ')}</span>
+               <span className="text-[8px] text-blue-300">{L.clinics}: {allowedClinics.map(c => c === 'Guadalajara' ? 'GDL' : 'TX').join(' · ')}</span>
              )}
            </div>
         )}
 
         {currentUser && allowedClinics.length > 1 && (
         <div className="p-4 bg-slate-900 border-b border-slate-800">
-          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Ubicación Activa</p>
+          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 px-1">{L.activeLocation}</p>
           <div className="bg-slate-950 p-1 rounded-xl flex border border-slate-800">
             {allowedClinics.includes('Shenandoah') && (
               <button onClick={() => switchClinic('Shenandoah')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeClinic === 'Shenandoah' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>🇺🇸 TX</button>
@@ -959,31 +961,31 @@ export default function AppLayout() {
 
         {currentUser && allowedClinics.length === 1 && (
         <div className="p-4 bg-slate-900 border-b border-slate-800">
-          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 px-1">Ubicación</p>
+          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 px-1">{L.location}</p>
           <div className="bg-slate-950 py-2 px-3 rounded-xl border border-slate-800 text-center text-[10px] font-black uppercase text-white">
-            {allowedClinics[0] === 'Guadalajara' ? '🇲🇽 Guadalajara' : '🇺🇸 Shenandoah, TX'}
+            {allowedClinics[0] === 'Guadalajara' ? L.clinicGdl : L.clinicTx}
           </div>
         </div>
         )}
 
         <div className="p-4">
           <button onClick={() => setShowNewAppointment(true)} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition uppercase text-xs">
-            <span className="text-xl leading-none">+</span> Nueva Cita
+            <span className="text-xl leading-none">+</span> {L.newAppointment}
           </button>
         </div>
         
         <nav className="flex-1 overflow-y-auto py-2 px-3 space-y-1">
-          <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 px-3 mt-2">Operación</div>
-          <button onClick={() => selectTab('Agenda')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Agenda' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📅 Agenda</button>
-          <button onClick={() => selectTab('Pacientes')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Pacientes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>👥 Clientes</button>
-          <button onClick={() => selectTab('GFE')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'GFE' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🩺 Consultas GFE</button>
+          <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 px-3 mt-2">{L.operation}</div>
+          <button onClick={() => selectTab('Agenda')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Agenda' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📅 {L.tabs.Agenda}</button>
+          <button onClick={() => selectTab('Pacientes')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Pacientes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>👥 {L.tabs.Pacientes}</button>
+          <button onClick={() => selectTab('GFE')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'GFE' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🩺 {L.tabs.GFE}</button>
           
           {currentUserLevel <= 2 && (
             <>
-              <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 px-3 mt-6">Administración</div>
-              <button onClick={() => selectTab('Servicios')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Servicios' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>⚙️ Catálogo Operativo</button>
-              <button onClick={() => selectTab('Reportes')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Reportes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📊 Reportes y Ventas</button>
-              <button onClick={() => selectTab('Admin')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Admin' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🔒 Ajustes de Clínica</button>
+              <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 px-3 mt-6">{L.administration}</div>
+              <button onClick={() => selectTab('Servicios')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Servicios' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>⚙️ {L.tabs.Servicios}</button>
+              <button onClick={() => selectTab('Reportes')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Reportes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📊 {L.tabs.Reportes}</button>
+              <button onClick={() => selectTab('Admin')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Admin' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🔒 {L.tabs.Admin}</button>
             </>
           )}
         </nav>
@@ -1009,8 +1011,8 @@ export default function AppLayout() {
               <span className="text-[9px] font-black uppercase text-slate-300 shrink-0">{allowedClinics[0] === 'Guadalajara' ? '🇲🇽 GDL' : '🇺🇸 TX'}</span>
             )}
             <span className="flex-1 truncate text-[10px] font-bold text-slate-200 min-w-0">{currentUser.name}</span>
-            <button onClick={() => setShowNewAppointment(true)} className="shrink-0 h-8 w-8 bg-emerald-600 rounded-lg text-white font-black text-lg leading-none shadow" aria-label="Nueva cita">+</button>
-            <button onClick={handleLogout} className="shrink-0 text-[9px] font-black text-red-400 uppercase px-1">Salir</button>
+            <button onClick={() => setShowNewAppointment(true)} className="shrink-0 h-8 w-8 bg-emerald-600 rounded-lg text-white font-black text-lg leading-none shadow" aria-label={L.ariaNewAppt}>+</button>
+            <button onClick={handleLogout} className="shrink-0 text-[9px] font-black text-red-400 uppercase px-1">{L.logout}</button>
           </div>
         )}
         
@@ -1022,29 +1024,29 @@ export default function AppLayout() {
                 <div className="flex bg-slate-100 p-0.5 lg:p-1 rounded-lg lg:rounded-xl border border-slate-200 shrink-0">
                   <button onClick={() => navigateDate(-1)} className="p-1.5 lg:p-2 hover:bg-white rounded-lg transition text-slate-600 text-sm">◀</button>
                   <div className="px-2 lg:px-4 flex flex-col items-center justify-center min-w-0">
-                    <span className="text-[8px] lg:text-[10px] font-black text-blue-600 uppercase leading-none">{viewMode === 'Día' ? 'Día' : 'Semana'}</span>
+                    <span className="text-[8px] lg:text-[10px] font-black text-blue-600 uppercase leading-none">{viewMode === 'Día' ? L.viewDay : L.viewWeek}</span>
                     <span className="text-[10px] lg:text-xs font-bold text-slate-800 truncate max-w-[7rem] sm:max-w-none">{viewMode === 'Día' ? currentDayInfo.date : `${weekDays[0].date} - ${weekDays[6].date}`}</span>
                   </div>
                   <button onClick={() => navigateDate(1)} className="p-1.5 lg:p-2 hover:bg-white rounded-lg transition text-slate-600 text-sm">▶</button>
                 </div>
-                <button onClick={() => setCurrentDate(new Date())} className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 hover:text-blue-600 transition border px-2 py-1 rounded shrink-0">Hoy</button>
+                <button onClick={() => setCurrentDate(new Date())} className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 hover:text-blue-600 transition border px-2 py-1 rounded shrink-0">{L.today}</button>
               </div>
 
               <div className="flex items-center gap-1.5 lg:gap-4 bg-slate-50 p-1 lg:p-1.5 rounded-lg lg:rounded-xl border border-slate-200 flex-wrap">
                 {currentUserLevel <= 2 && (
-                  <button onClick={() => setShowOOOModal(true)} className="bg-red-50 text-red-600 border border-red-200 px-2 lg:px-3 py-1 text-[9px] lg:text-[10px] font-black rounded-lg hover:bg-red-100 transition uppercase shadow-sm shrink-0" title="Bloquear espacio"><span className="lg:hidden">🚫</span><span className="hidden lg:inline">🚫 Bloquear Espacio</span></button>
+                  <button onClick={() => setShowOOOModal(true)} className="bg-red-50 text-red-600 border border-red-200 px-2 lg:px-3 py-1 text-[9px] lg:text-[10px] font-black rounded-lg hover:bg-red-100 transition uppercase shadow-sm shrink-0" title={L.blockSlot}><span className="lg:hidden">🚫</span><span className="hidden lg:inline">🚫 {L.blockSlot}</span></button>
                 )}
                 <div className="flex items-center gap-1 lg:gap-2 px-1 lg:px-2 border-l border-slate-200">
-                  <span className="text-[8px] lg:text-[9px] font-black text-slate-400 uppercase hidden sm:inline">Zoom</span>
+                  <span className="text-[8px] lg:text-[9px] font-black text-slate-400 uppercase hidden sm:inline">{L.zoom}</span>
                   <input type="range" min="20" max="300" value={zoomScale} onChange={(e) => setZoomScale(Number(e.target.value))} className="w-14 sm:w-20 lg:w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
                 </div>
                 <select value={equipmentFilter} onChange={e => setEquipmentFilter(e.target.value)} className="bg-white border border-slate-300 text-slate-700 font-bold text-[10px] lg:text-xs rounded-md px-1.5 lg:px-2 py-1 outline-none uppercase max-w-[5.5rem] sm:max-w-none truncate">
-                  <option value="Todos">Todos</option>
+                  <option value="Todos">{L.allEquipment}</option>
                   {dynamicColumns.map(e => <option key={e} value={e}>{e}</option>)}
                 </select>
                 <div className="flex items-center bg-slate-200/50 p-0.5 lg:p-1 rounded-lg shrink-0">
-                  <button onClick={() => setViewMode('Día')} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Día' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Día</button>
-                  <button onClick={() => setViewMode('Semana')} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Semana' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Sem</button>
+                  <button onClick={() => setViewMode('Día')} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Día' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewDay}</button>
+                  <button onClick={() => setViewMode('Semana')} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Semana' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewWeekShort}</button>
                 </div>
               </div>
             </header>
@@ -1055,7 +1057,7 @@ export default function AppLayout() {
                 
                 <div className="w-16 md:w-20 shrink-0 border-r border-slate-200 bg-slate-50 sticky left-0 z-50">
                   <div className="h-12 border-b border-slate-200 bg-slate-100 flex items-center justify-center sticky top-0 z-[60]">
-                    <span className="text-[9px] font-black text-slate-400 uppercase">Hora</span>
+                    <span className="text-[9px] font-black text-slate-400 uppercase">{L.time}</span>
                   </div>
                   <div className="relative" style={{ height: `${CALENDAR_HEIGHT}px` }}>
                     {timeOptions.map((timeStr) => (
@@ -1208,10 +1210,10 @@ export default function AppLayout() {
           <div className="flex-1 p-3 lg:p-6 bg-white overflow-auto flex flex-col relative z-10 min-h-0">
             <div className="flex flex-col md:flex-row md:items-end justify-between border-b pb-4 mb-6 gap-4">
               <div className="flex items-center gap-4">
-                <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Directorio: {activeClinic}</h2>
-                <button onClick={() => setShowNewPatientModal(true)} className="bg-emerald-100 text-emerald-800 border border-emerald-300 px-4 py-2 rounded-lg text-xs font-black uppercase shadow-sm hover:bg-emerald-200 transition">+ Nuevo Paciente</button>
+                <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">{L.directory}: {activeClinic}</h2>
+                <button onClick={() => setShowNewPatientModal(true)} className="bg-emerald-100 text-emerald-800 border border-emerald-300 px-4 py-2 rounded-lg text-xs font-black uppercase shadow-sm hover:bg-emerald-200 transition">+ {L.newPatient}</button>
               </div>
-              <input type="text" placeholder="🔍 Buscar por nombre o teléfono..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full md:max-w-md p-3 border border-slate-300 rounded-xl shadow-sm outline-none focus:border-blue-500 font-bold bg-white text-slate-900 text-sm" />
+              <input type="text" placeholder={L.searchPatients} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full md:max-w-md p-3 border border-slate-300 rounded-xl shadow-sm outline-none focus:border-blue-500 font-bold bg-white text-slate-900 text-sm" />
             </div>
             
             {dbStatus === 'listo' && (
@@ -1223,19 +1225,19 @@ export default function AppLayout() {
                         {p.is_blocked && <span title="Paciente Bloqueado" className="mr-2">🚫</span>}
                         {p.patient}
                       </p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{p.phone || 'Sin teléfono'}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{p.phone || L.noPhone}</p>
                       <div className="flex justify-between items-center mt-2 mb-4">
                         <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-1 rounded">{p.protocol}</p>
-                        <p className="text-[9px] font-black text-slate-500 bg-slate-200 px-2 py-1 rounded">SESIONES: {p.historicoSesiones}</p>
+                        <p className="text-[9px] font-black text-slate-500 bg-slate-200 px-2 py-1 rounded">{L.sessions}: {p.historicoSesiones}</p>
                       </div>
                       <div className="mt-auto flex gap-2">
                          <button onClick={() => { 
                            setSelectedSlot(p); 
                            setShowPatientProfile(true); 
-                         }} className="flex-1 bg-emerald-600 text-white text-[9px] font-black uppercase py-2 rounded hover:bg-emerald-700 transition shadow-sm">💳 Expediente</button>
+                         }} className="flex-1 bg-emerald-600 text-white text-[9px] font-black uppercase py-2 rounded hover:bg-emerald-700 transition shadow-sm">💳 {L.chart}</button>
                          <button onClick={() => { 
                            if (p.is_blocked) {
-                              alert("🚫 Paciente Bloqueado por Administración. No se pueden agendar citas ni servicios. Requiere desbloqueo de Superusuario en su Expediente.");
+                              alert(staffAlert(locale, 'patientBlocked'));
                               return;
                            }
                            setSelectedSlot({ 
@@ -1248,11 +1250,11 @@ export default function AppLayout() {
                              is_new_patient: false 
                            }); 
                            setShowNewAppointment(true); 
-                         }} className="flex-1 bg-blue-600 text-white text-[9px] font-black uppercase py-2 rounded hover:bg-blue-700 transition shadow-sm">📅 Agendar</button>
+                         }} className="flex-1 bg-blue-600 text-white text-[9px] font-black uppercase py-2 rounded hover:bg-blue-700 transition shadow-sm">📅 {L.schedule}</button>
                       </div>
                    </div>
                  ))}
-                 {filteredPatients.length === 0 && <div className="col-span-full py-20 text-center"><p className="text-slate-400 font-black uppercase text-lg">No se encontraron clientes.</p></div>}
+                 {filteredPatients.length === 0 && <div className="col-span-full py-20 text-center"><p className="text-slate-400 font-black uppercase text-lg">{L.noPatients}</p></div>}
               </div>
             )}
           </div>
@@ -2046,7 +2048,7 @@ export default function AppLayout() {
                                 ...selectedSlot,
                                 fullDate: e.target.value,
                                 full_date: e.target.value,
-                                day: ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'][d.getDay()]
+                                day: getDayNameFromDate(locale, d)
                               });
                             }}
                             className="w-full min-w-0 max-w-full p-2.5 sm:p-3 border border-blue-200 rounded-xl font-bold outline-none text-slate-900 bg-white text-sm box-border"
@@ -2288,7 +2290,7 @@ export default function AppLayout() {
                     setSelectedSlot({
                       ...(selectedSlot || {}), 
                       fullDate: e.target.value, 
-                      day: ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'][d.getDay()]
+                      day: getDayNameFromDate(locale, d)
                     }); 
                   }} className="w-full min-w-0 max-w-full p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm box-border" />
                 </div>
@@ -2311,10 +2313,10 @@ export default function AppLayout() {
               <button onClick={() => {setShowNewAppointment(false); setSelectedSlot(null);}} className="w-full sm:w-1/3 bg-white border border-slate-300 font-black py-3 sm:py-4 rounded-xl uppercase text-xs hover:bg-slate-50 transition">Cancelar</button>
               <button onClick={async () => {
                 try {
-                  if(!selectedSlot?.patient || !selectedSlot?.equipment || !selectedSlot?.time) return alert("Faltan datos.");
-                  if (isPastTime(selectedSlot.fullDate, selectedSlot.time) && selectedSlot.status !== 'booked') return alert("🔒 No puedes agendar en el pasado.");
+                  if(!selectedSlot?.patient || !selectedSlot?.equipment || !selectedSlot?.time) return alert(staffAlert(locale, 'missingData'));
+                  if (isPastTime(selectedSlot.fullDate, selectedSlot.time) && selectedSlot.status !== 'booked') return alert(staffAlert(locale, 'pastSchedule'));
                   const existingP = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
-                  if (existingP && existingP.is_blocked) return alert("🚫 Paciente Bloqueado.");
+                  if (existingP && existingP.is_blocked) return alert(staffAlert(locale, 'patientBlockedShort'));
                   if (checkOverlap(
                     selectedSlot.equipment,
                     selectedSlot.fullDate,
@@ -2322,7 +2324,7 @@ export default function AppLayout() {
                     resolveSessionTimes(selectedSlot).duration,
                     resolveSessionTimes(selectedSlot).buffer,
                     selectedSlot.id
-                  )) return alert("🔒 Empalme de horario.");
+                  )) return alert(staffAlert(locale, 'overlap'));
 
                   let canonicalPatient = selectedSlot.patient.trim();
                   let canonicalPhone = (selectedSlot.phone || '').trim();
@@ -2340,13 +2342,13 @@ export default function AppLayout() {
                       prefers_email: selectedSlot.prefers_email !== false,
                       prefers_sms: selectedSlot.prefers_sms !== false,
                     });
-                    if (ensured.error) return alert('Error con expediente: ' + ensured.error.message);
+                    if (ensured.error) return alert(staffAlert(locale, 'patientFileError', ensured.error.message));
                     canonicalPatient = ensured.displayName;
                     canonicalPhone = ensured.phone;
                     canonicalEmail = ensured.email;
                     isNewForAppointment = ensured.isNew;
                   } else if (isNewPatientInline && !selectedSlot.id) {
-                    return alert('Ingresa un teléfono de 10 dígitos para crear el expediente.');
+                    return alert(staffAlert(locale, 'phoneRequired'));
                   } else if (!isNewPatientInline && selectedSlot.patientNotes !== undefined) {
                     const matching = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
                     for (const pat of matching) { await activeSupabase.from('patients').update({ notes: selectedSlot.patientNotes }).eq('id', pat.id); }
@@ -2356,7 +2358,7 @@ export default function AppLayout() {
                   const payload = { patient: canonicalPatient, phone: canonicalPhone, email: canonicalEmail, protocol: selectedSlot.protocol || 'Wellness', equipment: selectedSlot.equipment, duration: sessionTimes.duration, buffer: sessionTimes.buffer, full_date: selectedSlot.fullDate || currentFullDate, appointment_date: selectedSlot.fullDate || currentFullDate, day: selectedSlot.day || currentDayInfo.name, time: selectedSlot.time, appointment_time: selectedSlot.time, attendant: selectedSlot.attendant || 'Por Asignar', check_in_status: selectedSlot.check_in_status || 'Agendado', is_new_patient: isNewForAppointment, notes: selectedSlot.notes || '' };
                   const { data: na, error } = await activeSupabase.from('appointments').insert([payload]).select();
                   if(error) alert("Error: " + error.message); else { if (na && na[0]) await logAudit(na[0].id, payload.patient, 'CREACIÓN', payload.time); setShowNewAppointment(false); setSelectedSlot(null); fetchAllData(); }
-                } catch (e) { alert("Error de conexión."); }
+                } catch (e) { alert(staffAlert(locale, 'connectionError')); }
               }} className="w-full sm:flex-1 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-emerald-700 transition">Agendar Espacio</button>
             </div>
           </div>
@@ -2682,7 +2684,7 @@ export default function AppLayout() {
                   className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-w-0 px-1 ${mobileMoreActive || mobileMoreOpen ? 'text-blue-400' : 'text-slate-500'}`}
                 >
                   <span className="text-base leading-none">⋯</span>
-                  <span className="text-[8px] font-black uppercase">Más</span>
+                  <span className="text-[8px] font-black uppercase">{L.more}</span>
                 </button>
               )}
             </div>

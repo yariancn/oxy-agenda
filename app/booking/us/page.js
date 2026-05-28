@@ -9,10 +9,10 @@ export default function BookingUS() {
       supabase={supabaseShenandoah}
       clinicName="Shenandoah"
       portalTag="TX"
-      locale="es"
+      locale="en"
       branding={{
         title: 'Regenoxy Texas',
-        subtitle: 'Reservaciones Shenandoah',
+        subtitle: 'Shenandoah online booking',
         accent: 'blue',
         timezone: 'America/Chicago',
         defaultLada: '+1',

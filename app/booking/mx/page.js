@@ -12,7 +12,7 @@ export default function BookingMX() {
       locale="es"
       branding={{
         title: 'OxyHyperbaric GDL',
-        subtitle: 'Reservaciones Guadalajara',
+        subtitle: 'Reservas en línea Guadalajara',
         accent: 'emerald',
         timezone: 'America/Mexico_City',
         defaultLada: '+52',

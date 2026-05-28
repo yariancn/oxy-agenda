@@ -3,90 +3,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { submitPublicBooking } from '../lib/publicBooking';
 import { buildDaySlots, countAvailableSlots } from '../lib/publicBookingSlots';
+import { PUBLIC_BOOKING_COPY, PUBLIC_SLOT_STATUS } from '../lib/i18n';
 import {
   fetchPromoters,
   getPromoFromUrl,
   normalizePromoCode,
   resolvePromoter,
 } from '../lib/promoters';
-
-const COPY = {
-  es: {
-    staff: 'Staff · NIP',
-    back: 'Volver',
-    step1Title: '¿Qué servicio buscas?',
-    step2Title: 'Selecciona fecha y hora',
-    slotLegendAvailable: 'Disponible',
-    slotLegendOccupied: 'Ocupado',
-    slotLegendBlocked: 'Bloqueado',
-    slotLegendSoon: 'Muy pronto',
-    noSlotsDay: 'No hay horarios para este día. Prueba otra fecha.',
-    availableCount: (n) => `${n} horario${n === 1 ? '' : 's'} disponible${n === 1 ? '' : 's'}`,
-    step3Title: 'Tus datos',
-    step3Summary: 'Resumen',
-    name: 'Nombre completo',
-    phone: 'Número (10 dígitos)',
-    email: 'Correo electrónico',
-    commentsTitle: 'Comentarios para la clínica',
-    commentsHint: 'Motivo de consulta, alergias, preferencias… Esto aparece en la nota de tu cita en agenda.',
-    commentsPlaceholder: 'Escribe aquí lo que quieras que vea el equipo al recibirte…',
-    promoterPageLabel: 'Página de reserva personal',
-    promoterWith: 'Te atiende',
-    promoterCode: 'Código',
-    promoterUnknown: 'Asesor de referidos',
-    promoterOptional: '¿Tienes código de referido? (opcional)',
-    promoterOptionalHint: 'Si no tienes código, déjalo vacío.',
-    confirm: 'Confirmar cita',
-    processing: 'Procesando…',
-    phoneRule: 'Se requiere un número de 10 dígitos para confirmar.',
-    doneTitle: '¡Cita confirmada!',
-    doneBody: 'Te esperamos en la clínica. Revisa tu correo si lo indicaste.',
-    bookAnother: 'Agendar otra cita',
-    phoneError: '⚠️ El número celular debe tener exactamente 10 dígitos.',
-    genericError: 'Error al confirmar la cita.',
-    loading: 'Cargando horarios…',
-  },
-  en: {
-    staff: 'Staff · PIN',
-    back: 'Back',
-    step1Title: 'What service do you need?',
-    step2Title: 'Pick date and time',
-    slotLegendAvailable: 'Available',
-    slotLegendOccupied: 'Booked',
-    slotLegendBlocked: 'Blocked',
-    slotLegendSoon: 'Too soon',
-    noSlotsDay: 'No time slots for this day. Try another date.',
-    availableCount: (n) => `${n} slot${n === 1 ? '' : 's'} available`,
-    step3Title: 'Your details',
-    step3Summary: 'Summary',
-    name: 'Full name',
-    phone: 'Phone (10 digits)',
-    email: 'Email',
-    commentsTitle: 'Notes for the clinic',
-    commentsHint: 'Reason for visit, allergies, preferences… This appears on your appointment note in the schedule.',
-    commentsPlaceholder: 'Write anything you want the team to see when you arrive…',
-    promoterPageLabel: 'Personal booking page',
-    promoterWith: 'Your advisor',
-    promoterCode: 'Code',
-    promoterUnknown: 'Referral advisor',
-    promoterOptional: 'Referral code (optional)',
-    promoterOptionalHint: 'Leave blank if you do not have one.',
-    confirm: 'Confirm appointment',
-    processing: 'Processing…',
-    phoneRule: 'A 10-digit phone number is required.',
-    doneTitle: 'Appointment confirmed!',
-    doneBody: 'We look forward to seeing you at the clinic.',
-    bookAnother: 'Book another',
-    phoneError: '⚠️ Phone number must be exactly 10 digits.',
-    genericError: 'Could not confirm the appointment.',
-    loading: 'Loading schedule…',
-  },
-};
-
-const SLOT_STATUS_LABEL = {
-  es: { occupied: 'Ocupado', blocked: 'Bloqueado', too_soon: '—' },
-  en: { occupied: 'Booked', blocked: 'Blocked', too_soon: '—' },
-};
 
 export default function PublicBookingPortal({
   supabase,
@@ -95,7 +18,11 @@ export default function PublicBookingPortal({
   locale = 'es',
   branding,
 }) {
-  const t = COPY[locale] || COPY.es;
+  const t = PUBLIC_BOOKING_COPY[locale] || PUBLIC_BOOKING_COPY.es;
+
+  useEffect(() => {
+    document.documentElement.lang = locale === 'en' ? 'en' : 'es';
+  }, [locale]);
   const [step, setStep] = useState(1);
   const [selectedService, setSelectedService] = useState(null);
   const [selectedDate, setSelectedDate] = useState('');
@@ -208,6 +135,7 @@ export default function PublicBookingPortal({
         supabase,
         clinicName,
         portalTag,
+        locale,
         formData: {
           ...formData,
           promoterCode: normalizePromoCode(formData.promoterCode),
@@ -248,7 +176,7 @@ export default function PublicBookingPortal({
           <p className="text-[11px] font-bold mt-2 text-amber-100">
             {t.promoterCode}: {activePromoter.code}
             {!activePromoter.recognized && (
-              <span className="ml-2 opacity-80">({locale === 'en' ? 'pending validation' : 'pendiente de alta'})</span>
+              <span className="ml-2 opacity-80">({t.promoterPending})</span>
             )}
           </p>
         </div>
@@ -299,9 +227,7 @@ export default function PublicBookingPortal({
                 </h2>
                 {activePromoter.code && (
                   <p className="text-center text-sm font-bold text-amber-700 mb-4">
-                    {locale === 'en'
-                      ? `Booking with ${promoterDisplayName}`
-                      : `Agenda tu cita con ${promoterDisplayName}`}
+                    {t.bookingWith(promoterDisplayName)}
                   </p>
                 )}
                 {dbServices.map((srv) => (
@@ -377,7 +303,7 @@ export default function PublicBookingPortal({
 
                     <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
                       {daySlots.map((slot) => {
-                        const statusLabels = SLOT_STATUS_LABEL[locale] || SLOT_STATUS_LABEL.es;
+                        const statusLabels = PUBLIC_SLOT_STATUS[locale] || PUBLIC_SLOT_STATUS.es;
                         if (slot.status === 'available') {
                           return (
                             <button
@@ -526,9 +452,7 @@ export default function PublicBookingPortal({
                 <h2 className="text-3xl font-black text-slate-800 uppercase">{t.doneTitle}</h2>
                 <p className="text-sm font-bold text-slate-500 mt-4">{t.doneBody}</p>
                 {formData.notes.trim() && (
-                  <p className="text-xs text-slate-400 mt-3 max-w-sm mx-auto">
-                    {locale === 'en' ? 'Your notes were saved on the appointment.' : 'Tus comentarios quedaron guardados en la nota de la cita.'}
-                  </p>
+                  <p className="text-xs text-slate-400 mt-3 max-w-sm mx-auto">{t.notesSaved}</p>
                 )}
                 <button
                   type="button"
