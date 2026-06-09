@@ -30,12 +30,28 @@ function StatusBadge({ status, locale, compact }) {
 
 function FlagIcons({ app, ultra }) {
   const size = ultra ? 'text-[8px]' : 'text-[9px]';
+  const hasFlags = app.is_new_patient || app.outside_normal_hours || app.is_extended_block;
+  if (!hasFlags) return null;
+
   return (
-    <span className={`flex items-center gap-0.5 leading-none ${size}`} aria-hidden="true">
+    <span className={`flex items-center justify-center gap-0.5 leading-none ${size}`} aria-hidden="true">
       {app.is_new_patient && <span title="Nueva">⭐</span>}
       {app.outside_normal_hours && <span title="Fuera de horario">🟡</span>}
       {app.is_extended_block && <span title="Extendida">🟣</span>}
     </span>
+  );
+}
+
+function StackedIndicators({ app, locale, compact, ultra }) {
+  const hasFlags = app.is_new_patient || app.outside_normal_hours || app.is_extended_block;
+  const hasStatus = app.check_in_status && app.check_in_status !== 'Agendado';
+  if (!hasFlags && !hasStatus) return null;
+
+  return (
+    <div className={`flex items-center justify-center gap-0.5 flex-wrap ${ultra ? 'mt-0.5' : 'mt-0.5 w-full'}`}>
+      <FlagIcons app={app} ultra={ultra} />
+      {compact && hasStatus && <StatusBadge status={app.check_in_status} locale={locale} compact />}
+    </div>
   );
 }
 
@@ -61,6 +77,7 @@ export default function CalendarAppointmentBlock({
   const ultra = isUltraCompactColumn(colWidth);
   const compact = isCompactColumn(colWidth);
   const shortBlock = blockMins <= 40;
+  const showNameInUltra = ultra && blockMins >= 75;
   const ariaLabel = buildAppointmentAriaLabel(app, {
     localeLabels: {
       newPatient: 'Nueva',
@@ -86,30 +103,30 @@ export default function CalendarAppointmentBlock({
       style={{ top: `${topPx}px`, height: `${heightPx}px`, zIndex: 10 }}
     >
       {ultra ? (
-        <div className="flex flex-col items-center justify-start h-full py-0.5 gap-0.5 text-center">
-          <span className="text-[6px] font-black uppercase leading-none opacity-80">{app.time.replace(' AM', 'a').replace(' PM', 'p')}</span>
-          <span className="text-[8px] font-black uppercase leading-none">{getPatientInitials(app.patient)}</span>
-          <FlagIcons app={app} ultra />
-          <StatusBadge status={app.check_in_status} locale={locale} compact />
+        <div className="flex flex-col items-center justify-start h-full py-0.5 gap-0.5 text-center min-w-0 w-full">
+          <span className="text-[6px] font-black uppercase leading-none opacity-80 shrink-0">{app.time.replace(' AM', 'a').replace(' PM', 'p')}</span>
+          {showNameInUltra ? (
+            <span className="text-[7px] font-black uppercase leading-tight truncate w-full px-0.5">{app.patient}</span>
+          ) : (
+            <span className="text-[8px] font-black uppercase leading-none">{getPatientInitials(app.patient)}</span>
+          )}
+          <StackedIndicators app={app} locale={locale} compact ultra />
         </div>
       ) : (
         <>
-          <div className="flex justify-between items-start gap-0.5 mb-0.5 min-w-0">
-            <span className={`font-black uppercase bg-black/10 px-0.5 rounded leading-none truncate ${compact ? 'text-[6px]' : 'text-[7px]'}`}>
+          <div className="flex justify-between items-start gap-0.5 mb-0.5 min-w-0 w-full">
+            <span className={`font-black uppercase bg-black/10 px-0.5 rounded leading-none truncate min-w-0 flex-1 ${compact ? 'text-[6px]' : 'text-[7px]'}`}>
               {timeLabel}
             </span>
-            <StatusBadge status={app.check_in_status} locale={locale} compact={compact} />
+            {!compact && <StatusBadge status={app.check_in_status} locale={locale} compact={false} />}
           </div>
 
           {compact ? (
-            <div className="flex items-center gap-0.5 min-w-0">
-              <span className={`font-black uppercase leading-none shrink-0 ${shortBlock ? 'text-[7px]' : 'text-[8px]'}`}>
-                {getPatientInitials(app.patient)}
-              </span>
-              <span className={`font-black uppercase truncate leading-none flex-1 min-w-0 ${shortBlock ? 'text-[7px]' : 'text-[8px]'}`}>
-                {app.patient.split(/\s+/)[0]}
-              </span>
-              <FlagIcons app={app} ultra={false} />
+            <div className="flex flex-col items-stretch min-w-0 w-full flex-1">
+              <div className={`font-black uppercase leading-tight truncate w-full ${shortBlock ? 'text-[7px]' : 'text-[8px] sm:text-[9px]'}`}>
+                {app.patient}
+              </div>
+              <StackedIndicators app={app} locale={locale} compact ultra={false} />
             </div>
           ) : (
             <>
@@ -118,18 +135,18 @@ export default function CalendarAppointmentBlock({
               </div>
               {blockMins > 45 && (
                 <div className="text-[7px] font-bold opacity-70 uppercase truncate mt-0.5">
-                  {duration}m + {buffer}m {compact ? 'L.' : 'Lmpz.'}
+                  {duration}m + {buffer}m Lmpz.
                 </div>
               )}
               {(app.outside_normal_hours || app.is_extended_block) && (
                 <div className="flex flex-wrap gap-0.5 mt-0.5">
                   {app.outside_normal_hours && (
-                    <span className={`font-black uppercase bg-amber-200 text-amber-900 px-0.5 rounded ${compact ? 'text-[5px]' : 'text-[6px]'}`}>
+                    <span className="text-[6px] font-black uppercase bg-amber-200 text-amber-900 px-0.5 rounded">
                       {L.p.appt.badgeOutsideHours}
                     </span>
                   )}
                   {app.is_extended_block && (
-                    <span className={`font-black uppercase bg-violet-200 text-violet-900 px-0.5 rounded ${compact ? 'text-[5px]' : 'text-[6px]'}`}>
+                    <span className="text-[6px] font-black uppercase bg-violet-200 text-violet-900 px-0.5 rounded">
                       {L.p.appt.badgeExtended}
                     </span>
                   )}

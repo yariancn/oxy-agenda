@@ -2388,6 +2388,9 @@ export default function AppLayout() {
               <p className="text-sm font-bold text-slate-600">{L.p.appt.cancelApptHint}</p>
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                 <span className="block font-black uppercase text-slate-800">{selectedSlot.patient}</span>
+                {selectedSlot.phone && (
+                  <a href={`tel:${digitsOnly(selectedSlot.phone)}`} className="block text-sm font-bold text-slate-600 mt-1 normal-case">{selectedSlot.phone}</a>
+                )}
                 <span className="block text-[10px] font-bold text-slate-500 mt-1 uppercase">{selectedSlot.equipment} · {selectedSlot.time} · {selectedSlot.full_date || selectedSlot.fullDate}</span>
               </div>
               <label className="flex items-start gap-3 bg-amber-50 border border-amber-200 p-4 rounded-xl cursor-pointer">
@@ -2465,6 +2468,17 @@ export default function AppLayout() {
               <div className="bg-white border border-slate-300 rounded-xl p-4 shadow-sm flex flex-col relative overflow-hidden">
                 <span className="font-black text-slate-800 text-lg uppercase pr-6">{selectedSlot.is_new_patient ? '⭐ ' : ''}{selectedSlot.patient}</span>
                 <span className="text-[10px] text-blue-600 font-black uppercase tracking-widest">{selectedSlot.protocol}</span>
+                {selectedSlot.phone ? (
+                  <a
+                    href={`tel:${digitsOnly(selectedSlot.phone)}`}
+                    className="mt-2 inline-flex items-center gap-1.5 text-sm font-bold text-slate-700 hover:text-blue-600 transition"
+                  >
+                    <span className="text-[10px] font-black uppercase text-slate-400">{L.p.appt.phone}:</span>
+                    <span className="normal-case tracking-wide">{selectedSlot.phone}</span>
+                  </a>
+                ) : (
+                  <span className="mt-2 text-[10px] font-bold text-slate-400 uppercase">{L.p.appt.phone}: {L.noPhone}</span>
+                )}
                 
                 <div className="mt-4 space-y-3">
                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl">
