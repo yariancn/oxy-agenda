@@ -22,7 +22,7 @@ import GFEManager from '../components/GFEManager';
 import { InstallGuideLink } from '../components/InstallGuide';
 import PatientSearchInput from '../components/PatientSearchInput';
 import { StaffLocaleProvider } from '../components/StaffLocaleContext';
-import { getServiceScheduleBounds } from '../lib/serviceSchedule';
+import { getServiceScheduleBounds, buildAvailabilitySlotTimes, normalizeTimeInput } from '../lib/serviceSchedule';
 import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
 
 export default function AppLayout() {
@@ -473,15 +473,16 @@ export default function AppLayout() {
   }, [startMins, endMins, intervalMins]);
 
   const createEmptyAppointmentDraft = () => {
-    const std = SESSION_PRESETS.standard;
     const firstSrv = dbServices.find(s => s.is_active);
+    const duration = Number(firstSrv?.duration) || 60;
+    const buffer = Number(firstSrv?.buffer ?? 30);
     return {
       status: 'available',
       fullDate: currentFullDate,
       day: currentDayInfo.name,
-      duration: std.duration,
-      buffer: std.buffer,
-      sessionPreset: std.id,
+      duration,
+      buffer,
+      sessionPreset: getPresetFromTimes(duration, buffer).id,
       equipment: firstSrv?.name || '',
       serviceId: firstSrv?.id ?? '',
       is_new_patient: false,
@@ -501,10 +502,14 @@ export default function AppLayout() {
     const srv = dbServices.find(s => String(s.id) === String(selectedSlot?.serviceId))
       || dbServices.find(s => s.name === selectedSlot?.equipment);
     if (!srv) return timeOptions;
-    const { startMins: svcStart, endMins: svcEnd } = getServiceScheduleBounds(srv, dbCompanyConfig);
-    return timeOptions.filter((t) => {
-      const m = getMinutes(t);
-      return m >= svcStart && m < svcEnd;
+    const duration = Number(srv.duration) || 60;
+    const buffer = Number(srv.buffer ?? 30);
+    return buildAvailabilitySlotTimes({
+      service: srv,
+      companyConfig: dbCompanyConfig,
+      duration,
+      buffer,
+      stepByBlock: true,
     });
   }, [selectedSlot?.serviceId, selectedSlot?.equipment, timeOptions, dbServices, dbCompanyConfig]);
 
@@ -655,8 +660,8 @@ export default function AppLayout() {
     }
 
     const srv = dbServices.find(s => s.name === newEquipment);
-    const dur = srv ? Number(srv.duration) : Number(app.duration) || 60;
-    const buf = srv ? Number(srv.buffer) : Number(app.buffer) || 0;
+    const dur = srv ? Number(srv.duration) || 60 : Number(app.duration) || 60;
+    const buf = srv ? Number(srv.buffer ?? 30) : Number(app.buffer ?? 30);
 
     if (checkOverlap(newEquipment, newFullDate, newTime, dur, buf, app.id)) {
       alert(a('overlapLong'));
@@ -930,58 +935,87 @@ export default function AppLayout() {
   };
 
   const renderBackgroundSlots = (equipment, day, fullDate) => {
-    const slots = [];
-    for (let m = startMins; m < endMins; m += intervalMins) {
-      const h = Math.floor(m / 60); 
-      const mins = m % 60; 
-      const ampm = h >= 12 ? 'PM' : 'AM'; 
-      const displayH = h > 12 ? h - 12 : h === 0 ? 12 : h;
-      slots.push(`${displayH.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')} ${ampm}`);
-    }
-    
-    const srv = dbServices.find(s => s.name === equipment) || { duration: 60, buffer: 0, id: null };
+    const srv = dbServices.find(s => s.name === equipment) || { duration: 60, buffer: 30, id: null };
+    const duration = Number(srv.duration) || 60;
+    const buffer = Number(srv.buffer ?? 30);
+    const blockMins = duration + buffer;
     const { startMins: svcStart, endMins: svcEnd } = getServiceScheduleBounds(srv, dbCompanyConfig);
 
-    return slots.map((time, idx) => {
-      const slotMins = getMinutes(time);
-      const withinHours = slotMins >= svcStart && slotMins < svcEnd;
-
-      return (
-      <div 
-        key={idx} 
-        onClick={() => {
-          if (!withinHours) return;
-          if (isPastTime(fullDate, time)) {
-             alert(a('pastScheduleAppt'));
-             return;
-          }
-          if (isRescheduling && selectedSlot?.id) {
-            setSelectedSlot({
-              ...selectedSlot,
-              time,
-              equipment,
-              day,
-              fullDate,
-              full_date: fullDate,
-              serviceId: srv.id
-            });
-            setCurrentDate(new Date(fullDate + 'T12:00:00'));
-            setViewMode('Día');
-            return;
-          }
-          const std = SESSION_PRESETS.standard;
-          openNewAppointment({ 
-            time, equipment, day, fullDate,
-            duration: std.duration, buffer: std.buffer, sessionPreset: std.id, serviceId: srv.id,
-          });
-        }} 
-        onDragOver={withinHours ? handleDragOver : undefined} 
-        onDrop={withinHours ? (e) => handleDrop(e, time, equipment, day, fullDate) : undefined} 
-        className={`border-b border-slate-300 box-border ${withinHours ? 'hover:shadow-[inset_0_2px_0_0_#3b82f6] cursor-pointer transition-colors' : 'bg-slate-200/60 cursor-not-allowed'}`} 
-        style={{ height: `${intervalMins * PIXELS_PER_MINUTE}px` }}
-      />
-    );
+    const slotTimes = buildAvailabilitySlotTimes({
+      service: srv,
+      companyConfig: dbCompanyConfig,
+      duration,
+      buffer,
+      stepByBlock: true,
     });
+
+    const offHourBands = [];
+    for (let m = startMins; m < endMins; m += intervalMins) {
+      if (m < svcStart || m >= svcEnd) {
+        offHourBands.push(m);
+      }
+    }
+
+    return (
+      <>
+        {offHourBands.map((m) => {
+          const h = Math.floor(m / 60);
+          const mins = m % 60;
+          const ampm = h >= 12 ? 'PM' : 'AM';
+          const displayH = h > 12 ? h - 12 : h === 0 ? 12 : h;
+          const timeStr = `${displayH.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')} ${ampm}`;
+          return (
+            <div
+              key={`off-${timeStr}`}
+              className="absolute left-0 right-0 bg-slate-200/60 cursor-not-allowed border-b border-slate-300 box-border z-0"
+              style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}
+            />
+          );
+        })}
+        {slotTimes.map((time) => (
+          <div
+            key={time}
+            onClick={() => {
+              if (isPastTime(fullDate, time)) {
+                alert(a('pastScheduleAppt'));
+                return;
+              }
+              if (isRescheduling && selectedSlot?.id) {
+                setSelectedSlot({
+                  ...selectedSlot,
+                  time,
+                  equipment,
+                  day,
+                  fullDate,
+                  full_date: fullDate,
+                  serviceId: srv.id,
+                  duration,
+                  buffer,
+                  sessionPreset: getPresetFromTimes(duration, buffer).id,
+                });
+                setCurrentDate(new Date(fullDate + 'T12:00:00'));
+                setViewMode('Día');
+                return;
+              }
+              openNewAppointment({
+                time,
+                equipment,
+                day,
+                fullDate,
+                duration,
+                buffer,
+                sessionPreset: getPresetFromTimes(duration, buffer).id,
+                serviceId: srv.id,
+              });
+            }}
+            onDragOver={handleDragOver}
+            onDrop={(e) => handleDrop(e, time, equipment, day, fullDate)}
+            className="absolute left-0 right-0 border-b border-slate-300 hover:shadow-[inset_0_2px_0_0_#3b82f6] cursor-pointer transition-colors box-border z-0"
+            style={{ top: `${timeToPixels(time)}px`, height: `${blockMins * PIXELS_PER_MINUTE}px` }}
+          />
+        ))}
+      </>
+    );
   };
 
   const isNewPatientInline = selectedSlot?.patient && selectedSlot.patient.length > 0 && !dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
@@ -1428,10 +1462,22 @@ export default function AppLayout() {
                       </div>
                     </div>
                   </div>
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1">
-                    <p className="text-[9px] font-black text-slate-500 uppercase">Duración al agendar</p>
-                    <p className="text-[10px] font-bold text-slate-700">Estándar: 60 min · 1h 30 en agenda</p>
-                    <p className="text-[10px] font-bold text-slate-700">Extendida: 90 min · 3h en agenda (solo staff)</p>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                    <p className="text-[9px] font-black text-slate-500 uppercase">{L.p.services.sessionDuration} / {L.p.services.bufferTime}</p>
+                    <p className="text-[8px] font-bold text-slate-500">{L.p.services.totalBlockHint}</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.services.sessionDuration}</label>
+                        <input type="number" min="5" step="5" className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none text-slate-900 bg-white" value={newSrv.duration} onChange={e => setNewSrv({...newSrv, duration: Number(e.target.value)})} />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.services.bufferTime}</label>
+                        <input type="number" min="0" step="5" className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none text-slate-900 bg-white" value={newSrv.buffer} onChange={e => setNewSrv({...newSrv, buffer: Number(e.target.value)})} />
+                      </div>
+                    </div>
+                    <p className="text-[10px] font-black text-blue-700 uppercase">
+                      {L.p.services.totalBlock}: {(Number(newSrv.duration) || 60) + (Number(newSrv.buffer) ?? 30)} min
+                    </p>
                   </div>
                   <label className="flex items-center gap-2 bg-white p-3 rounded-xl border border-slate-200 cursor-pointer">
                     <input type="checkbox" checked={newSrv.is_active} onChange={e => setNewSrv({...newSrv, is_active: e.target.checked})} className="w-4 h-4" />
@@ -1441,24 +1487,37 @@ export default function AppLayout() {
                     {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
                     <button onClick={async () => {
                       if(!newSrv.name) return alert(L.p.services.missingName);
+                      const duration = Math.max(5, Number(newSrv.duration) || 60);
+                      const buffer = Math.max(0, Number(newSrv.buffer) ?? 30);
+                      const startTrim = normalizeTimeInput(newSrv.start_time);
+                      const endTrim = normalizeTimeInput(newSrv.end_time);
+                      if ((startTrim && !endTrim) || (!startTrim && endTrim)) {
+                        return alert('Define horario de inicio y fin, o déjalos ambos vacíos para usar el de la clínica.');
+                      }
                       const p = {
                         name: newSrv.name.trim(),
-                        duration: 60,
-                        buffer: 30,
-                        price: newSrv.price,
+                        duration,
+                        buffer,
+                        price: Number(newSrv.price) || 0,
                         color: newSrv.color,
                         is_active: newSrv.is_active,
-                        start_time: newSrv.start_time?.trim() || null,
-                        end_time: newSrv.end_time?.trim() || null,
+                        start_time: startTrim || null,
+                        end_time: endTrim || null,
                       };
-                      if(isEditingSrv && newSrv.id) {
-                        await activeSupabase.from('services').update(p).eq('id', newSrv.id);
-                      } else {
-                        await activeSupabase.from('services').insert([p]);
+                      try {
+                        let error;
+                        if(isEditingSrv && newSrv.id) {
+                          ({ error } = await activeSupabase.from('services').update(p).eq('id', newSrv.id));
+                        } else {
+                          ({ error } = await activeSupabase.from('services').insert([p]));
+                        }
+                        if (error) return alert(`${L.p.services.saveError}: ${error.message}`);
+                        setIsEditingSrv(false);
+                        setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });
+                        await fetchAllData();
+                      } catch (e) {
+                        alert(`${L.p.services.saveError}: ${e.message}`);
                       }
-                      setIsEditingSrv(false); 
-                      setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' }); 
-                      fetchAllData();
                     }} className="flex-1 bg-blue-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-md hover:bg-blue-700 transition">{isEditingSrv ? 'Actualizar' : 'Guardar'}</button>
                   </div>
                 </div>
@@ -1471,7 +1530,7 @@ export default function AppLayout() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
                     <thead className="border-b border-slate-100 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                      <tr><th className="px-5 py-3">Equipo</th><th className="px-5 py-3">Horario</th><th className="px-5 py-3">Precio</th><th className="px-5 py-3">Estado</th><th className="px-5 py-3 text-right">Acciones</th></tr>
+                      <tr><th className="px-5 py-3">Equipo</th><th className="px-5 py-3">Horario</th><th className="px-5 py-3">Bloque</th><th className="px-5 py-3">Precio</th><th className="px-5 py-3">Estado</th><th className="px-5 py-3 text-right">Acciones</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {(dbServices || []).map(s => (
@@ -1483,7 +1542,11 @@ export default function AppLayout() {
                             </div>
                           </td>
                           <td className="px-5 py-4 font-bold text-slate-500 text-[10px] whitespace-nowrap uppercase">
-                            {s.start_time && s.end_time ? `${s.start_time} – ${s.end_time}` : 'Clínica'}
+                            {s.start_time && s.end_time ? `${normalizeTimeInput(s.start_time)} – ${normalizeTimeInput(s.end_time)}` : 'Clínica'}
+                          </td>
+                          <td className="px-5 py-4 font-bold text-slate-600 text-[10px] whitespace-nowrap">
+                            {(Number(s.duration) || 60)} + {(Number(s.buffer) ?? 30)} min
+                            <span className="block text-[8px] text-slate-400 uppercase">= {(Number(s.duration) || 60) + (Number(s.buffer) ?? 30)} min</span>
                           </td>
                           <td className="px-5 py-4 font-bold text-slate-600 text-sm whitespace-nowrap">${s.price} {currencyStr}</td>
                           <td className="px-5 py-4">
@@ -1491,7 +1554,16 @@ export default function AppLayout() {
                           </td>
                           <td className="px-5 py-4">
                             <div className="flex justify-end gap-2">
-                              <button onClick={() => {setNewSrv({ ...s, start_time: s.start_time || '', end_time: s.end_time || '' }); setIsEditingSrv(true);}} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-blue-100 border border-blue-100">Editar</button>
+                              <button onClick={() => {
+                                setNewSrv({
+                                  ...s,
+                                  duration: Number(s.duration) || 60,
+                                  buffer: Number(s.buffer ?? 30),
+                                  start_time: normalizeTimeInput(s.start_time),
+                                  end_time: normalizeTimeInput(s.end_time),
+                                });
+                                setIsEditingSrv(true);
+                              }} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-blue-100 border border-blue-100">Editar</button>
                               <button onClick={async () => { 
                                 if(window.confirm(a('deleteEquipment'))) { 
                                   await activeSupabase.from('services').delete().eq('id', s.id); 
@@ -1502,7 +1574,7 @@ export default function AppLayout() {
                           </td>
                         </tr>
                       ))}
-                      {(!dbServices || dbServices.length === 0) && <tr><td colSpan="5" className="px-5 py-12 text-center text-slate-400 font-bold uppercase text-sm">Sin equipos configurados</td></tr>}
+                      {(!dbServices || dbServices.length === 0) && <tr><td colSpan="6" className="px-5 py-12 text-center text-slate-400 font-bold uppercase text-sm">Sin equipos configurados</td></tr>}
                     </tbody>
                   </table>
                 </div>
@@ -2153,13 +2225,16 @@ export default function AppLayout() {
                           value={selectedSlot.equipment || ''}
                           onChange={e => {
                             const srv = dbServices.find(s => s.name === e.target.value);
-                            const preset = SESSION_PRESETS[selectedSlot.sessionPreset] || SESSION_PRESETS.standard;
+                            const dur = srv ? Number(srv.duration) || 60 : Number(selectedSlot.duration) || 60;
+                            const buf = srv ? Number(srv.buffer ?? 30) : Number(selectedSlot.buffer ?? 30);
                             setSelectedSlot({
                               ...selectedSlot,
                               equipment: e.target.value,
-                              duration: preset.duration,
-                              buffer: preset.buffer,
-                              serviceId: srv?.id ?? selectedSlot.serviceId
+                              duration: dur,
+                              buffer: buf,
+                              sessionPreset: getPresetFromTimes(dur, buf).id,
+                              serviceId: srv?.id ?? selectedSlot.serviceId,
+                              time: '',
                             });
                           }}
                           className="w-full p-3 border border-blue-200 rounded-xl font-bold uppercase outline-none text-slate-900 bg-white text-sm"
@@ -2412,15 +2487,19 @@ export default function AppLayout() {
                 <select value={selectedSlot?.serviceId || ''} onChange={e => {
                   const sid = e.target.value; 
                   const srv = dbServices.find(s => String(s.id) === String(sid));
-                  const preset = SESSION_PRESETS[selectedSlot?.sessionPreset] || SESSION_PRESETS.standard;
-                  if(srv) setSelectedSlot({
-                    ...selectedSlot,
-                    serviceId: sid,
-                    equipment: srv.name,
-                    duration: preset.duration,
-                    buffer: preset.buffer,
-                    sessionPreset: preset.id
-                  });
+                  if(srv) {
+                    const dur = Number(srv.duration) || 60;
+                    const buf = Number(srv.buffer ?? 30);
+                    setSelectedSlot({
+                      ...(selectedSlot || createEmptyAppointmentDraft()),
+                      serviceId: sid,
+                      equipment: srv.name,
+                      duration: dur,
+                      buffer: buf,
+                      sessionPreset: getPresetFromTimes(dur, buf).id,
+                      time: '',
+                    });
+                  }
                 }} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none focus:border-emerald-500 text-slate-900 bg-white text-sm">
                   <option value="">Selecciona un servicio...</option>
                   {(dbServices || []).filter(s => s.is_active).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
