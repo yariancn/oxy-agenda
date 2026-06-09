@@ -22,6 +22,7 @@ import GFEManager from '../components/GFEManager';
 import { InstallGuideLink } from '../components/InstallGuide';
 import PatientSearchInput from '../components/PatientSearchInput';
 import { StaffLocaleProvider } from '../components/StaffLocaleContext';
+import StaffBookingOverrides from '../components/StaffBookingOverrides';
 import { getServiceScheduleBounds, buildAvailabilitySlotTimes, normalizeTimeInput } from '../lib/serviceSchedule';
 import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
 
@@ -169,13 +170,62 @@ export default function AppLayout() {
     }
   }, [activeTab, reportFilter, activeSupabase]);
 
+  const getServiceForSlot = (slot) => (
+    dbServices.find(s => String(s.id) === String(slot?.serviceId))
+    || dbServices.find(s => s.name === slot?.equipment)
+  );
+
+  const isExtendedSession = (slot) => (
+    !!slot?.extended_session
+    || !!slot?.is_extended_block
+  );
+
   const resolveSessionTimes = (slot) => {
-    const preset = SESSION_PRESETS[slot?.sessionPreset] || getPresetFromTimes(slot?.duration, slot?.buffer);
+    if (isExtendedSession(slot)) {
+      return { duration: 90, buffer: 90 };
+    }
+    const srv = getServiceForSlot(slot);
     return {
-      duration: Number(slot?.duration) || preset.duration,
-      buffer: Number(slot?.buffer) ?? preset.buffer,
+      duration: Number(slot?.duration) || Number(srv?.duration) || 60,
+      buffer: Number(slot?.buffer ?? srv?.buffer ?? 30),
     };
   };
+
+  const applyExtendedSession = (slot, enabled) => {
+    const base = { ...(slot || {}) };
+    if (enabled) {
+      return {
+        ...base,
+        extended_session: true,
+        sessionPreset: SESSION_PRESETS.extended.id,
+        duration: 90,
+        buffer: 90,
+        time: '',
+      };
+    }
+    const srv = getServiceForSlot(base);
+    const duration = Number(srv?.duration) || 60;
+    const buffer = Number(srv?.buffer ?? 30);
+    return {
+      ...base,
+      extended_session: false,
+      sessionPreset: getPresetFromTimes(duration, buffer).id,
+      duration,
+      buffer,
+      time: '',
+    };
+  };
+
+  const applyOutsideHours = (slot, enabled) => ({
+    ...(slot || {}),
+    outside_normal_hours: enabled,
+    time: '',
+  });
+
+  const appointmentFlagsFromApp = (app) => ({
+    outside_normal_hours: !!app.outside_normal_hours,
+    extended_session: !!app.is_extended_block,
+  });
 
   // Normalizador de texto para búsqueda inteligente
   const normalizeStr = (str) => String(str).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -490,6 +540,8 @@ export default function AppLayout() {
       prefers_sms: true,
       time: '',
       patient: '',
+      outside_normal_hours: false,
+      extended_session: false,
     };
   };
 
@@ -499,19 +551,30 @@ export default function AppLayout() {
   };
 
   const appointmentTimeOptions = useMemo(() => {
-    const srv = dbServices.find(s => String(s.id) === String(selectedSlot?.serviceId))
-      || dbServices.find(s => s.name === selectedSlot?.equipment);
-    if (!srv) return timeOptions;
-    const duration = Number(srv.duration) || 60;
-    const buffer = Number(srv.buffer ?? 30);
+    const srv = getServiceForSlot(selectedSlot);
+    const { duration, buffer } = resolveSessionTimes(selectedSlot || {});
     return buildAvailabilitySlotTimes({
-      service: srv,
+      service: selectedSlot?.outside_normal_hours ? {} : (srv || {}),
       companyConfig: dbCompanyConfig,
       duration,
       buffer,
       stepByBlock: true,
     });
-  }, [selectedSlot?.serviceId, selectedSlot?.equipment, timeOptions, dbServices, dbCompanyConfig]);
+  }, [
+    selectedSlot?.serviceId,
+    selectedSlot?.equipment,
+    selectedSlot?.outside_normal_hours,
+    selectedSlot?.extended_session,
+    selectedSlot?.duration,
+    selectedSlot?.buffer,
+    dbServices,
+    dbCompanyConfig,
+  ]);
+
+  const selectedBlockMins = useMemo(() => {
+    const { duration, buffer } = resolveSessionTimes(selectedSlot || {});
+    return duration + buffer;
+  }, [selectedSlot]);
 
   const getEquipmentColors = (color) => {
     const map = { 
@@ -660,8 +723,9 @@ export default function AppLayout() {
     }
 
     const srv = dbServices.find(s => s.name === newEquipment);
-    const dur = srv ? Number(srv.duration) || 60 : Number(app.duration) || 60;
-    const buf = srv ? Number(srv.buffer ?? 30) : Number(app.buffer ?? 30);
+    const times = resolveSessionTimes(app);
+    const dur = times.duration;
+    const buf = times.buffer;
 
     if (checkOverlap(newEquipment, newFullDate, newTime, dur, buf, app.id)) {
       alert(a('overlapLong'));
@@ -701,10 +765,7 @@ export default function AppLayout() {
 
   const confirmMove = async () => {
     try {
-      const srv = dbServices.find(s => s.name === moveConfirmation.newEquipment);
-      const duration = srv ? Number(srv.duration) : Number(moveConfirmation.app.duration) || 60;
-      const buffer = srv ? Number(srv.buffer) : Number(moveConfirmation.app.buffer) || 0;
-
+      const times = resolveSessionTimes(moveConfirmation.app);
       const { error } = await activeSupabase.from('appointments').update({ 
         time: moveConfirmation.newTime, 
         appointment_time: moveConfirmation.newTime,
@@ -712,8 +773,10 @@ export default function AppLayout() {
         day: moveConfirmation.newDay,
         full_date: moveConfirmation.newFullDate,
         appointment_date: moveConfirmation.newFullDate,
-        duration,
-        buffer
+        duration: times.duration,
+        buffer: times.buffer,
+        outside_normal_hours: !!moveConfirmation.app.outside_normal_hours,
+        is_extended_block: isExtendedSession(moveConfirmation.app),
       }).eq('id', moveConfirmation.app.id);
       
       if (error) alert(a('moveError', error.message));
@@ -967,8 +1030,26 @@ export default function AppLayout() {
           return (
             <div
               key={`off-${timeStr}`}
-              className="absolute left-0 right-0 bg-slate-200/60 cursor-not-allowed border-b border-slate-300 box-border z-0"
+              onClick={() => {
+                if (isPastTime(fullDate, timeStr)) {
+                  alert(a('pastScheduleAppt'));
+                  return;
+                }
+                openNewAppointment({
+                  time: timeStr,
+                  equipment,
+                  day,
+                  fullDate,
+                  serviceId: srv.id,
+                  duration,
+                  buffer,
+                  sessionPreset: getPresetFromTimes(duration, buffer).id,
+                  outside_normal_hours: true,
+                });
+              }}
+              className="absolute left-0 right-0 bg-slate-200/60 hover:bg-amber-100/70 cursor-pointer border-b border-slate-300 box-border z-0 transition-colors"
               style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}
+              title={L.p.appt.outsideNormalHours}
             />
           );
         })}
@@ -1264,7 +1345,8 @@ export default function AppLayout() {
                                      historicoSesiones: patInfo?.historicoSesiones || 0,
                                      packageHistory: patInfo?.packageHistory || [],
                                      patientNotes: patInfo ? patInfo.notes : '',
-                                     sessionPreset: getPresetFromTimes(app.duration, app.buffer).id
+                                     sessionPreset: getPresetFromTimes(app.duration, app.buffer).id,
+                                     ...appointmentFlagsFromApp(app),
                                    });
                                  }} draggable={selectedSlot?.id !== app.id || !isRescheduling} onDragStart={(e) => handleDragStart(e, app)}
                                    className={`absolute left-1 right-1 rounded-lg p-1 border-l-4 shadow-md cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-105 hover:ring-1 hover:ring-black/20 hover:z-30 ${getEquipmentColors(srvColor)} ${selectedSlot?.id === app.id ? 'ring-2 ring-blue-600 ring-offset-1 z-30' : ''}`}
@@ -1275,6 +1357,12 @@ export default function AppLayout() {
                                 </div>
                                 <div className={`font-black uppercase truncate leading-none ${(Number(app.duration)||60) + (Number(app.buffer)||0) <= 40 ? 'text-[8px]' : 'text-[10px]'}`}>{app.is_new_patient ? '⭐ ' : ''}{app.patient}</div>
                                 {(Number(app.duration)||60) + (Number(app.buffer)||0) > 45 && <div className="text-[7px] font-bold opacity-70 uppercase truncate mt-0.5">{(app.duration||60)}m + {app.buffer || 0}m Lmpz.</div>}
+                                {(app.outside_normal_hours || app.is_extended_block) && (
+                                  <div className="flex flex-wrap gap-0.5 mt-0.5">
+                                    {app.outside_normal_hours && <span className="text-[6px] font-black uppercase bg-amber-200 text-amber-900 px-1 rounded">{L.p.appt.badgeOutsideHours}</span>}
+                                    {app.is_extended_block && <span className="text-[6px] font-black uppercase bg-violet-200 text-violet-900 px-1 rounded">{L.p.appt.badgeExtended}</span>}
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -1327,7 +1415,8 @@ export default function AppLayout() {
                                      historicoSesiones: patInfo?.historicoSesiones || 0,
                                      packageHistory: patInfo?.packageHistory || [],
                                      patientNotes: patInfo ? patInfo.notes : '',
-                                     sessionPreset: getPresetFromTimes(app.duration, app.buffer).id
+                                     sessionPreset: getPresetFromTimes(app.duration, app.buffer).id,
+                                     ...appointmentFlagsFromApp(app),
                                    });
                                      }} draggable={selectedSlot?.id !== app.id || !isRescheduling} onDragStart={(e) => handleDragStart(e, app)}
                                        className={`absolute left-0.5 right-0.5 rounded-md p-1 border-l-4 shadow-md cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-105 hover:ring-1 hover:ring-black/20 hover:z-30 ${getEquipmentColors(srvColor)} ${selectedSlot?.id === app.id ? 'ring-2 ring-blue-600 ring-offset-1 z-30' : ''}`}
@@ -1338,6 +1427,12 @@ export default function AppLayout() {
                                     </div>
                                     <div className={`font-black uppercase truncate leading-none ${(Number(app.duration)||60) + (Number(app.buffer)||0) <= 40 ? 'text-[7px]' : 'text-[9px]'}`}>{app.is_new_patient ? '⭐ ' : ''}{app.patient}</div>
                                     {(Number(app.duration)||60) + (Number(app.buffer)||0) > 45 && <div className="text-[7px] font-bold opacity-70 uppercase truncate mt-0.5">{(app.duration||60)}m + {app.buffer || 0}m L.</div>}
+                                    {(app.outside_normal_hours || app.is_extended_block) && (
+                                      <div className="flex flex-wrap gap-0.5 mt-0.5">
+                                        {app.outside_normal_hours && <span className="text-[5px] font-black uppercase bg-amber-200 text-amber-900 px-0.5 rounded">{L.p.appt.badgeOutsideHours}</span>}
+                                        {app.is_extended_block && <span className="text-[5px] font-black uppercase bg-violet-200 text-violet-900 px-0.5 rounded">{L.p.appt.badgeExtended}</span>}
+                                      </div>
+                                    )}
                                   </div>
                                 ))}
                               </div>
@@ -2244,28 +2339,14 @@ export default function AppLayout() {
                           ))}
                         </select>
                       </div>
-                      <div>
-                        <label className="block text-[8px] font-black text-blue-700 uppercase mb-1">Tipo de sesión</label>
-                        <select
-                          value={selectedSlot.sessionPreset || getPresetFromTimes(selectedSlot.duration, selectedSlot.buffer).id}
-                          onChange={e => {
-                            const preset = SESSION_PRESETS[e.target.value] || SESSION_PRESETS.standard;
-                            setSelectedSlot({
-                              ...selectedSlot,
-                              sessionPreset: preset.id,
-                              duration: preset.duration,
-                              buffer: preset.buffer
-                            });
-                          }}
-                          className="w-full p-3 border border-blue-200 rounded-xl font-bold outline-none text-slate-900 bg-white text-sm"
-                        >
-                          <option value={SESSION_PRESETS.standard.id}>{presetLabels.standard.selectLabel}</option>
-                          <option value={SESSION_PRESETS.extended.id}>{presetLabels.extended.selectLabel}</option>
-                        </select>
-                        <p className="text-[8px] font-bold text-blue-600 uppercase mt-1">
-                          Bloque total: {(Number(selectedSlot.duration) || 60) + (Number(selectedSlot.buffer) || 0)} min
-                        </p>
-                      </div>
+                      <StaffBookingOverrides
+                        compact
+                        slot={selectedSlot}
+                        labels={L.p.appt}
+                        blockMins={(Number(selectedSlot.duration) || 60) + (Number(selectedSlot.buffer) || 0)}
+                        onOutsideHoursChange={(checked) => setSelectedSlot(applyOutsideHours(selectedSlot, checked))}
+                        onExtendedChange={(checked) => setSelectedSlot(applyExtendedSession(selectedSlot, checked))}
+                      />
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="min-w-0">
                           <label className="block text-[8px] font-black text-blue-700 uppercase mb-1">Fecha</label>
@@ -2488,17 +2569,27 @@ export default function AppLayout() {
                   const sid = e.target.value; 
                   const srv = dbServices.find(s => String(s.id) === String(sid));
                   if(srv) {
-                    const dur = Number(srv.duration) || 60;
-                    const buf = Number(srv.buffer ?? 30);
-                    setSelectedSlot({
-                      ...(selectedSlot || createEmptyAppointmentDraft()),
-                      serviceId: sid,
-                      equipment: srv.name,
-                      duration: dur,
-                      buffer: buf,
-                      sessionPreset: getPresetFromTimes(dur, buf).id,
-                      time: '',
-                    });
+                    const extended = !!selectedSlot?.extended_session;
+                    if (extended) {
+                      setSelectedSlot({
+                        ...(selectedSlot || createEmptyAppointmentDraft()),
+                        serviceId: sid,
+                        equipment: srv.name,
+                        time: '',
+                      });
+                    } else {
+                      const dur = Number(srv.duration) || 60;
+                      const buf = Number(srv.buffer ?? 30);
+                      setSelectedSlot({
+                        ...(selectedSlot || createEmptyAppointmentDraft()),
+                        serviceId: sid,
+                        equipment: srv.name,
+                        duration: dur,
+                        buffer: buf,
+                        sessionPreset: getPresetFromTimes(dur, buf).id,
+                        time: '',
+                      });
+                    }
                   }
                 }} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none focus:border-emerald-500 text-slate-900 bg-white text-sm">
                   <option value="">Selecciona un servicio...</option>
@@ -2506,28 +2597,13 @@ export default function AppLayout() {
                 </select>
               </div>
 
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-400">Tipo de sesión (Staff)</label>
-                <select
-                  value={selectedSlot?.sessionPreset || SESSION_PRESETS.standard.id}
-                  onChange={e => {
-                    const preset = SESSION_PRESETS[e.target.value] || SESSION_PRESETS.standard;
-                    setSelectedSlot({
-                      ...selectedSlot,
-                      sessionPreset: preset.id,
-                      duration: preset.duration,
-                      buffer: preset.buffer
-                    });
-                  }}
-                  className="w-full min-w-0 p-2.5 sm:p-3 border border-blue-200 rounded-xl font-bold outline-none focus:border-blue-500 text-slate-900 bg-white text-sm"
-                >
-                  <option value={SESSION_PRESETS.standard.id}>{SESSION_PRESETS.standard.selectLabel}</option>
-                  <option value={SESSION_PRESETS.extended.id}>{SESSION_PRESETS.extended.selectLabel}</option>
-                </select>
-                <p className="text-[9px] font-bold text-slate-500 uppercase mt-1">
-                  Bloque total en agenda: {(Number(selectedSlot?.duration) || 60) + (Number(selectedSlot?.buffer) || 0)} min
-                </p>
-              </div>
+              <StaffBookingOverrides
+                slot={selectedSlot}
+                labels={L.p.appt}
+                blockMins={selectedBlockMins}
+                onOutsideHoursChange={(checked) => setSelectedSlot(applyOutsideHours(selectedSlot, checked))}
+                onExtendedChange={(checked) => setSelectedSlot(applyExtendedSession(selectedSlot, checked))}
+              />
 
               <div>
                 <label className="text-[10px] font-black uppercase text-slate-400">Instrucciones para la sesión de hoy</label>
@@ -2614,9 +2690,39 @@ export default function AppLayout() {
                   }
 
                   const sessionTimes = resolveSessionTimes(selectedSlot);
-                  const payload = { patient: canonicalPatient, phone: canonicalPhone, email: canonicalEmail, protocol: selectedSlot.protocol || 'Wellness', equipment: selectedSlot.equipment, duration: sessionTimes.duration, buffer: sessionTimes.buffer, full_date: selectedSlot.fullDate || currentFullDate, appointment_date: selectedSlot.fullDate || currentFullDate, day: selectedSlot.day || currentDayInfo.name, time: selectedSlot.time, appointment_time: selectedSlot.time, attendant: selectedSlot.attendant || 'Por Asignar', check_in_status: selectedSlot.check_in_status || 'Agendado', is_new_patient: isNewForAppointment, notes: selectedSlot.notes || '' };
+                  const payload = {
+                    patient: canonicalPatient,
+                    phone: canonicalPhone,
+                    email: canonicalEmail,
+                    protocol: selectedSlot.protocol || 'Wellness',
+                    equipment: selectedSlot.equipment,
+                    duration: sessionTimes.duration,
+                    buffer: sessionTimes.buffer,
+                    full_date: selectedSlot.fullDate || currentFullDate,
+                    appointment_date: selectedSlot.fullDate || currentFullDate,
+                    day: selectedSlot.day || currentDayInfo.name,
+                    time: selectedSlot.time,
+                    appointment_time: selectedSlot.time,
+                    attendant: selectedSlot.attendant || 'Por Asignar',
+                    check_in_status: selectedSlot.check_in_status || 'Agendado',
+                    is_new_patient: isNewForAppointment,
+                    notes: selectedSlot.notes || '',
+                    outside_normal_hours: !!selectedSlot.outside_normal_hours,
+                    is_extended_block: isExtendedSession(selectedSlot),
+                  };
                   const { data: na, error } = await activeSupabase.from('appointments').insert([payload]).select();
-                  if(error) alert(a('genericError', error.message)); else { if (na && na[0]) await logAudit(na[0].id, payload.patient, 'CREACIÓN', payload.time); setShowNewAppointment(false); setSelectedSlot(null); fetchAllData(); }
+                  if(error) alert(a('genericError', error.message)); else {
+                    if (na && na[0]) {
+                      const flags = [
+                        selectedSlot.outside_normal_hours ? L.p.appt.badgeOutsideHours : '',
+                        isExtendedSession(selectedSlot) ? L.p.appt.badgeExtended : '',
+                      ].filter(Boolean).join(' · ');
+                      await logAudit(na[0].id, payload.patient, 'CREACIÓN', `${payload.time}${flags ? ` (${flags})` : ''}`);
+                    }
+                    setShowNewAppointment(false);
+                    setSelectedSlot(null);
+                    fetchAllData();
+                  }
                 } catch (e) { alert(staffAlert(locale, 'connectionError')); }
               }} className="w-full sm:flex-1 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-emerald-700 transition">Agendar Espacio</button>
             </div>

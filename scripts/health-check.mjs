@@ -65,11 +65,28 @@ function shouldSkipHttp() {
   return process.argv.includes('--skip-http');
 }
 
+async function checkAppointmentOverrideColumns() {
+  console.log('\n=== Overrides staff en citas (schema) ===');
+
+  for (const clinic of CLINICS) {
+    const { error } = await clinic.client
+      .from('appointments')
+      .select('id, outside_normal_hours, is_extended_block')
+      .limit(1);
+
+    if (error) {
+      record('fail', `${clinic.label}: outside_normal_hours/is_extended_block — ${error.message}`, fail);
+    } else {
+      record('pass', `${clinic.label}: columnas override staff OK`, ok);
+    }
+  }
+}
+
 async function checkServiceHoursColumns() {
   console.log('\n=== Horarios por servicio (schema) ===');
 
   for (const clinic of CLINICS) {
-    const { data, error } = await clinic.client
+    const { error } = await clinic.client
       .from('services')
       .select('id, start_time, end_time')
       .limit(1);
@@ -212,6 +229,7 @@ async function main() {
 
   await checkSupabase();
   await checkServiceHoursColumns();
+  await checkAppointmentOverrideColumns();
   checkStaticAssets();
   checkNotifyEnv();
 
