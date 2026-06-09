@@ -472,6 +472,42 @@ export default function AppLayout() {
     return slots;
   }, [startMins, endMins, intervalMins]);
 
+  const createEmptyAppointmentDraft = () => {
+    const std = SESSION_PRESETS.standard;
+    const firstSrv = dbServices.find(s => s.is_active);
+    return {
+      status: 'available',
+      fullDate: currentFullDate,
+      day: currentDayInfo.name,
+      duration: std.duration,
+      buffer: std.buffer,
+      sessionPreset: std.id,
+      equipment: firstSrv?.name || '',
+      serviceId: firstSrv?.id ?? '',
+      is_new_patient: false,
+      prefers_email: true,
+      prefers_sms: true,
+      time: '',
+      patient: '',
+    };
+  };
+
+  const openNewAppointment = (draft = {}) => {
+    setSelectedSlot({ ...createEmptyAppointmentDraft(), ...draft });
+    setShowNewAppointment(true);
+  };
+
+  const appointmentTimeOptions = useMemo(() => {
+    const srv = dbServices.find(s => String(s.id) === String(selectedSlot?.serviceId))
+      || dbServices.find(s => s.name === selectedSlot?.equipment);
+    if (!srv) return timeOptions;
+    const { startMins: svcStart, endMins: svcEnd } = getServiceScheduleBounds(srv, dbCompanyConfig);
+    return timeOptions.filter((t) => {
+      const m = getMinutes(t);
+      return m >= svcStart && m < svcEnd;
+    });
+  }, [selectedSlot?.serviceId, selectedSlot?.equipment, timeOptions, dbServices, dbCompanyConfig]);
+
   const getEquipmentColors = (color) => {
     const map = { 
       blue: 'bg-blue-50 border-blue-500 text-blue-900', rose: 'bg-rose-50 border-rose-500 text-rose-900', 
@@ -934,12 +970,10 @@ export default function AppLayout() {
             return;
           }
           const std = SESSION_PRESETS.standard;
-          setSelectedSlot({ 
-            time, equipment, day, fullDate, status: 'available',
+          openNewAppointment({ 
+            time, equipment, day, fullDate,
             duration: std.duration, buffer: std.buffer, sessionPreset: std.id, serviceId: srv.id,
-            is_new_patient: false, prefers_email: true, prefers_sms: true
           });
-          setShowNewAppointment(true);
         }} 
         onDragOver={withinHours ? handleDragOver : undefined} 
         onDrop={withinHours ? (e) => handleDrop(e, time, equipment, day, fullDate) : undefined} 
@@ -1049,7 +1083,7 @@ export default function AppLayout() {
         )}
 
         <div className="p-4">
-          <button onClick={() => setShowNewAppointment(true)} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition uppercase text-xs">
+          <button onClick={() => openNewAppointment()} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition uppercase text-xs">
             <span className="text-xl leading-none">+</span> {L.newAppointment}
           </button>
         </div>
@@ -1091,7 +1125,7 @@ export default function AppLayout() {
               <span className="text-[9px] font-black uppercase text-slate-300 shrink-0">{allowedClinics[0] === 'Guadalajara' ? '🇲🇽 GDL' : '🇺🇸 TX'}</span>
             )}
             <span className="flex-1 truncate text-[10px] font-bold text-slate-200 min-w-0">{currentUser.name}</span>
-            <button onClick={() => setShowNewAppointment(true)} className="shrink-0 h-8 w-8 bg-emerald-600 rounded-lg text-white font-black text-lg leading-none shadow" aria-label={L.ariaNewAppt}>+</button>
+            <button onClick={() => openNewAppointment()} className="shrink-0 h-8 w-8 bg-emerald-600 rounded-lg text-white font-black text-lg leading-none shadow" aria-label={L.ariaNewAppt}>+</button>
             <button onClick={handleLogout} className="shrink-0 text-[9px] font-black text-red-400 uppercase px-1">{L.logout}</button>
           </div>
         )}
@@ -1320,16 +1354,14 @@ export default function AppLayout() {
                               alert(staffAlert(locale, 'patientBlocked'));
                               return;
                            }
-                           setSelectedSlot({ 
+                           openNewAppointment({ 
                              patient: p.patient, 
                              phone: p.phone, 
                              protocol: p.protocol, 
                              email: p.email,
-                             status: 'available',
                              patientNotes: p.notes,
-                             is_new_patient: false 
+                             is_new_patient: false,
                            }); 
-                           setShowNewAppointment(true); 
                          }} className="flex-1 bg-blue-600 text-white text-[9px] font-black uppercase py-2 rounded hover:bg-blue-700 transition shadow-sm">📅 {L.schedule}</button>
                       </div>
                    </div>
@@ -1459,7 +1491,7 @@ export default function AppLayout() {
                           </td>
                           <td className="px-5 py-4">
                             <div className="flex justify-end gap-2">
-                              <button onClick={() => {setNewSrv(s); setIsEditingSrv(true);}} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-blue-100 border border-blue-100">Editar</button>
+                              <button onClick={() => {setNewSrv({ ...s, start_time: s.start_time || '', end_time: s.end_time || '' }); setIsEditingSrv(true);}} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-blue-100 border border-blue-100">Editar</button>
                               <button onClick={async () => { 
                                 if(window.confirm(a('deleteEquipment'))) { 
                                   await activeSupabase.from('services').delete().eq('id', s.id); 
@@ -2187,7 +2219,7 @@ export default function AppLayout() {
                             className="w-full min-w-0 p-2.5 sm:p-3 border border-blue-200 rounded-xl font-bold outline-none text-slate-900 bg-white text-sm"
                           >
                             <option value="">Hora...</option>
-                            {timeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                            {appointmentTimeOptions.map(t => <option key={t} value={t}>{t}</option>)}
                           </select>
                         </div>
                       </div>
@@ -2305,7 +2337,7 @@ export default function AppLayout() {
                   onQueryChange={(pName) => {
                     const exact = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(pName));
                     setSelectedSlot({
-                      ...selectedSlot,
+                      ...(selectedSlot || createEmptyAppointmentDraft()),
                       patient: pName,
                       phone: exact ? exact.phone : (selectedSlot?.phone || ''),
                       protocol: exact ? exact.protocol : (selectedSlot?.protocol || ''),
@@ -2316,7 +2348,7 @@ export default function AppLayout() {
                   }}
                   onSelectPatient={(p) => {
                     setSelectedSlot({
-                      ...selectedSlot,
+                      ...(selectedSlot || createEmptyAppointmentDraft()),
                       patient: p.patient,
                       phone: p.phone || '',
                       protocol: p.protocol || '',
@@ -2450,7 +2482,8 @@ export default function AppLayout() {
                     });
                   }} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm">
                     <option value="">Hora...</option>
-                    {timeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                    {appointmentTimeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                    {appointmentTimeOptions.length === 0 && <option value="" disabled>Sin horario para este equipo</option>}
                   </select>
                 </div>
               </div>

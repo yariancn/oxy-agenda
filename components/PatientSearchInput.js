@@ -36,7 +36,7 @@ export default function PatientSearchInput({
   const term = normalizeStr(query);
   const filtered = patients
     .filter((p) => {
-      if (!term) return true;
+      if (!term || term.length < 2) return false;
       const name = normalizeStr(p.patient);
       const phone = normalizeStr(p.phone);
       return name.includes(term) || phone.includes(term);
@@ -65,7 +65,7 @@ export default function PatientSearchInput({
         }}
         className={className}
       />
-      {open && filtered.length > 0 && (
+      {open && term.length >= 2 && filtered.length > 0 && (
         <ul className="absolute z-[10000] w-full mt-1 max-h-52 overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-xl">
           {filtered.map((p) => (
             <li key={p.id}>

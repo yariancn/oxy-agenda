@@ -65,6 +65,23 @@ function shouldSkipHttp() {
   return process.argv.includes('--skip-http');
 }
 
+async function checkServiceHoursColumns() {
+  console.log('\n=== Horarios por servicio (schema) ===');
+
+  for (const clinic of CLINICS) {
+    const { data, error } = await clinic.client
+      .from('services')
+      .select('id, start_time, end_time')
+      .limit(1);
+
+    if (error) {
+      record('fail', `${clinic.label}: columnas start_time/end_time — ${error.message}`, fail);
+    } else {
+      record('pass', `${clinic.label}: columnas start_time/end_time OK`, ok);
+    }
+  }
+}
+
 async function checkSupabase() {
   console.log('\n=== Supabase ===');
 
@@ -194,6 +211,7 @@ async function main() {
   console.log(`Fecha: ${new Date().toLocaleString('es-MX')}`);
 
   await checkSupabase();
+  await checkServiceHoursColumns();
   checkStaticAssets();
   checkNotifyEnv();
 
