@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabaseShenandoah, supabaseGdl } from '../lib/supabase';
 import { SESSION_PRESETS, getPresetFromTimes } from '../lib/sessionPresets';
 import {
@@ -34,6 +34,7 @@ import {
   isCompactColumn,
   WEEK_STICKY_HEADER_PX,
 } from '../lib/calendarDisplay';
+import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -48,8 +49,13 @@ export default function AppLayout() {
   const [viewMode, setViewMode] = useState('Semana'); 
   const [equipmentFilter, setEquipmentFilter] = useState('Todos');
   const [zoomScale, setZoomScale] = useState(80);
+  const [zoomManual, setZoomManual] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [weekFilterHintDismissed, setWeekFilterHintDismissed] = useState(false);
+  const [showCalendarLegend, setShowCalendarLegend] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
+  const prefsHydratedRef = useRef(false);
+  const skipAutoZoomRef = useRef(false);
   
   // --- RELOJ MULTIHUSO HORARIO ---
   const [clinicNow, setClinicNow] = useState({ mins: 0, dateStr: '' });
@@ -534,14 +540,66 @@ export default function AppLayout() {
   const dynamicColumns = activeServices.map(s => s.name);
   const displayedEquipments = equipmentFilter === 'Todos' ? dynamicColumns : [equipmentFilter];
 
+  const activeClinicLabel = activeClinic === 'Guadalajara' ? L.clinicGdl : L.clinicTx;
+  const activeClinicShort = activeClinic === 'Guadalajara' ? 'GDL' : 'TX';
+
+  const showWeekFilterHint = (
+    activeTab === 'Agenda'
+    && viewMode === 'Semana'
+    && equipmentFilter === 'Todos'
+    && dynamicColumns.length > 1
+    && !weekFilterHintDismissed
+  );
+
+  const agendaSummary = useMemo(() => {
+    const active = dbAppointments.filter((a) => a.check_in_status !== 'Cancelado');
+    const weekDates = new Set(weekDays.map((d) => d.fullDate));
+    const viewApps = viewMode === 'Día'
+      ? active.filter((a) => a.full_date === currentFullDate)
+      : active.filter((a) => weekDates.has(a.full_date));
+    const todayApps = active.filter((a) => a.full_date === clinicNow.dateStr);
+    return {
+      today: todayApps.length,
+      view: viewApps.length,
+      extended: viewApps.filter((a) => a.is_extended_block).length,
+      outside: viewApps.filter((a) => a.outside_normal_hours).length,
+    };
+  }, [dbAppointments, viewMode, currentFullDate, weekDays, clinicNow.dateStr]);
+
   useEffect(() => {
-    if (displayedEquipments.length === 0) return;
+    prefsHydratedRef.current = false;
+    skipAutoZoomRef.current = true;
+    const prefs = loadCalendarPrefs(activeClinic);
+    if (prefs?.viewMode === 'Día' || prefs?.viewMode === 'Semana') setViewMode(prefs.viewMode);
+    if (prefs?.equipmentFilter) setEquipmentFilter(prefs.equipmentFilter);
+    if (typeof prefs?.zoomScale === 'number') setZoomScale(prefs.zoomScale);
+    if (prefs?.zoomManual) setZoomManual(true);
+    if (prefs?.weekFilterHintDismissed) setWeekFilterHintDismissed(true);
+    prefsHydratedRef.current = true;
+    const t = setTimeout(() => { skipAutoZoomRef.current = false; }, 0);
+    return () => clearTimeout(t);
+  }, [activeClinic]);
+
+  useEffect(() => {
+    if (!prefsHydratedRef.current || displayedEquipments.length === 0 || skipAutoZoomRef.current) return;
+    if (zoomManual) return;
     setZoomScale(computeDefaultZoomScale({
       viewMode,
       equipmentCount: displayedEquipments.length,
       isMobile: isMobileViewport,
     }));
-  }, [viewMode, equipmentFilter, displayedEquipments.length, isMobileViewport, activeClinic]);
+  }, [viewMode, equipmentFilter, displayedEquipments.length, isMobileViewport, zoomManual]);
+
+  useEffect(() => {
+    if (!prefsHydratedRef.current) return;
+    saveCalendarPrefs(activeClinic, {
+      viewMode,
+      equipmentFilter,
+      zoomScale,
+      zoomManual,
+      weekFilterHintDismissed,
+    });
+  }, [activeClinic, viewMode, equipmentFilter, zoomScale, zoomManual, weekFilterHintDismissed]);
 
   const timeOptions = useMemo(() => {
     const slots = [];
@@ -601,6 +659,32 @@ export default function AppLayout() {
       ...appointmentFlagsFromApp(app),
     });
   };
+
+  useEffect(() => {
+    if (!currentUser || activeTab !== 'Agenda') return undefined;
+    const onKeyDown = (e) => {
+      if (e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const key = e.key;
+      if (key === 'h' || key === 'H') {
+        e.preventDefault();
+        setCurrentDate(new Date());
+      } else if (key === 'd' || key === 'D') {
+        e.preventDefault();
+        setZoomManual(false);
+        setViewMode('Día');
+      } else if (key === 's' || key === 'S') {
+        e.preventDefault();
+        setZoomManual(false);
+        setViewMode('Semana');
+      } else if (key === '+' || key === '=') {
+        e.preventDefault();
+        openNewAppointment();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [currentUser, activeTab, dbServices, currentFullDate, currentDayInfo]);
 
   const appointmentTimeOptions = useMemo(() => {
     const srv = getServiceForSlot(selectedSlot);
@@ -1099,9 +1183,9 @@ export default function AppLayout() {
                   outside_normal_hours: true,
                 });
               }}
-              className="absolute left-0 right-0 bg-slate-200/60 hover:bg-amber-100/70 cursor-pointer border-b border-slate-300 box-border z-0 transition-colors"
+              className="absolute left-0 right-0 bg-slate-200/60 hover:bg-amber-100/80 active:bg-amber-200/90 cursor-pointer border-b border-slate-300 box-border z-0 transition-all hover:ring-2 hover:ring-inset hover:ring-amber-400/50"
               style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}
-              title={L.p.appt.outsideNormalHours}
+              title={`${L.clickToBook} · ${L.p.legendOutsideHours}`}
             />
           );
         })}
@@ -1143,8 +1227,9 @@ export default function AppLayout() {
             }}
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, time, equipment, day, fullDate)}
-            className="absolute left-0 right-0 border-b border-slate-300 hover:shadow-[inset_0_2px_0_0_#3b82f6] cursor-pointer transition-colors box-border z-0"
+            className="absolute left-0 right-0 border-b border-slate-300 hover:bg-emerald-50/90 active:bg-emerald-100/90 hover:shadow-[inset_0_0_0_2px_rgba(16,185,129,0.45)] cursor-pointer transition-all box-border z-0"
             style={{ top: `${timeToPixels(time)}px`, height: `${blockMins * PIXELS_PER_MINUTE}px` }}
+            title={L.clickToBook}
           />
         ))}
       </>
@@ -1207,14 +1292,14 @@ export default function AppLayout() {
       )}
 
       {/* SIDEBAR — solo escritorio / tablet horizontal */}
-      <aside className="hidden lg:flex w-56 xl:w-64 bg-slate-900 text-slate-300 flex-col shadow-2xl z-30 shrink-0">
-        <div className="p-4 xl:p-6 border-b border-slate-800 bg-slate-950 flex flex-col items-center">
-          <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" alt="Logo" className="h-12 xl:h-16 w-auto object-contain mb-2 xl:mb-3 bg-white rounded p-1" />
-          <h1 className="text-sm xl:text-lg font-black text-white uppercase tracking-widest text-center">OxyHyperbaric</h1>
+      <aside className="hidden lg:flex w-52 xl:w-60 bg-slate-900 text-slate-300 flex-col shadow-2xl z-30 shrink-0">
+        <div className="p-3 xl:p-4 border-b border-slate-800 bg-slate-950 flex flex-col items-center">
+          <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" alt="Logo" className="h-11 xl:h-14 w-auto object-contain mb-1.5 xl:mb-2 bg-white rounded p-1" />
+          <h1 className="text-sm xl:text-base font-black text-white uppercase tracking-widest text-center">OxyHyperbaric</h1>
         </div>
         
         {currentUser && (
-           <div className="px-4 py-3 bg-slate-800 text-[10px] font-black uppercase text-slate-400 flex flex-col gap-1 border-b border-slate-700">
+           <div className="px-3 py-2 bg-slate-800 text-[10px] font-black uppercase text-slate-400 flex flex-col gap-0.5 border-b border-slate-700">
              <div className="flex justify-between items-center w-full">
                <span className="truncate mr-2 text-white">👤 {currentUser.name}</span>
                <button onClick={handleLogout} className="text-red-400 hover:text-red-300 shrink-0">{L.logout}</button>
@@ -1227,8 +1312,8 @@ export default function AppLayout() {
         )}
 
         {currentUser && allowedClinics.length > 1 && (
-        <div className="p-4 bg-slate-900 border-b border-slate-800">
-          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 px-1">{L.activeLocation}</p>
+        <div className="p-3 bg-slate-900 border-b border-slate-800">
+          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1.5 px-1">{L.activeLocation}</p>
           <div className="bg-slate-950 p-1 rounded-xl flex border border-slate-800">
             {allowedClinics.includes('Shenandoah') && (
               <button onClick={() => switchClinic('Shenandoah')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeClinic === 'Shenandoah' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>🇺🇸 TX</button>
@@ -1241,32 +1326,51 @@ export default function AppLayout() {
         )}
 
         {currentUser && allowedClinics.length === 1 && (
-        <div className="p-4 bg-slate-900 border-b border-slate-800">
-          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 px-1">{L.location}</p>
+        <div className="p-3 bg-slate-900 border-b border-slate-800">
+          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1.5 px-1">{L.location}</p>
           <div className="bg-slate-950 py-2 px-3 rounded-xl border border-slate-800 text-center text-[10px] font-black uppercase text-white">
             {allowedClinics[0] === 'Guadalajara' ? L.clinicGdl : L.clinicTx}
           </div>
         </div>
         )}
 
-        <div className="p-4">
-          <button onClick={() => openNewAppointment()} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition uppercase text-xs">
+        <div className="p-3">
+          <button onClick={() => openNewAppointment()} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg transition uppercase text-xs">
             <span className="text-xl leading-none">+</span> {L.newAppointment}
           </button>
         </div>
+
+        {activeTab === 'Agenda' && currentUser && (
+          <div className="px-3 pb-2">
+            <div className="bg-slate-800/80 border border-slate-700 rounded-lg px-2.5 py-2 text-[9px] font-bold text-slate-300 leading-relaxed">
+              <span className="block text-emerald-400 font-black uppercase text-[8px] mb-1">{activeClinicShort} · {L.agendaSummaryToday}</span>
+              <span>{agendaSummary.today} {L.agendaSummaryAppts}</span>
+              {agendaSummary.view !== agendaSummary.today && (
+                <span className="text-slate-400"> · {L.agendaSummaryView}: {agendaSummary.view}</span>
+              )}
+              {(agendaSummary.extended > 0 || agendaSummary.outside > 0) && (
+                <span className="block text-slate-400 mt-0.5">
+                  {agendaSummary.extended > 0 && `${agendaSummary.extended} ${L.agendaSummaryExtended}`}
+                  {agendaSummary.extended > 0 && agendaSummary.outside > 0 && ' · '}
+                  {agendaSummary.outside > 0 && `${agendaSummary.outside} ${L.agendaSummaryOutside}`}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
         
-        <nav className="flex-1 overflow-y-auto py-2 px-3 space-y-1">
-          <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 px-3 mt-2">{L.operation}</div>
-          <button onClick={() => selectTab('Agenda')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Agenda' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📅 {L.tabs.Agenda}</button>
-          <button onClick={() => selectTab('Pacientes')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Pacientes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>👥 {L.tabs.Pacientes}</button>
-          <button onClick={() => selectTab('GFE')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'GFE' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🩺 {L.tabs.GFE}</button>
+        <nav className="flex-1 overflow-y-auto py-1 px-2 space-y-0.5">
+          <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1 px-2 mt-1">{L.operation}</div>
+          <button onClick={() => selectTab('Agenda')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Agenda' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📅 {L.tabs.Agenda}</button>
+          <button onClick={() => selectTab('Pacientes')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Pacientes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>👥 {L.tabs.Pacientes}</button>
+          <button onClick={() => selectTab('GFE')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'GFE' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🩺 {L.tabs.GFE}</button>
           
           {currentUserLevel <= 2 && (
             <>
-              <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 px-3 mt-6">{L.administration}</div>
-              <button onClick={() => selectTab('Servicios')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Servicios' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>⚙️ {L.tabs.Servicios}</button>
-              <button onClick={() => selectTab('Reportes')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Reportes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📊 {L.tabs.Reportes}</button>
-              <button onClick={() => selectTab('Admin')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition text-sm ${activeTab === 'Admin' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🔒 {L.tabs.Admin}</button>
+              <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1 px-2 mt-4">{L.administration}</div>
+              <button onClick={() => selectTab('Servicios')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Servicios' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>⚙️ {L.tabs.Servicios}</button>
+              <button onClick={() => selectTab('Reportes')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Reportes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📊 {L.tabs.Reportes}</button>
+              <button onClick={() => selectTab('Admin')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Admin' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🔒 {L.tabs.Admin}</button>
             </>
           )}
         </nav>
@@ -1300,8 +1404,12 @@ export default function AppLayout() {
         {/* VISTA AGENDA */}
         {activeTab === 'Agenda' && (
           <div className="flex flex-col h-full relative z-10">
-            <header className="bg-white p-2 lg:p-4 border-b border-slate-200 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-2 lg:gap-4 shrink-0 shadow-sm z-20">
-              <div className="flex items-center gap-2 lg:gap-4 min-w-0">
+            <header className="bg-white p-2 lg:p-3 border-b border-slate-200 flex flex-col gap-2 shrink-0 shadow-sm z-20">
+              <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-2 lg:gap-3">
+              <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-wrap">
+                <span className={`shrink-0 text-[9px] font-black uppercase px-2 py-0.5 rounded-md border ${activeClinic === 'Guadalajara' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`} title={activeClinicLabel}>
+                  {activeClinicShort}
+                </span>
                 <div className="flex bg-slate-100 p-0.5 lg:p-1 rounded-lg lg:rounded-xl border border-slate-200 shrink-0">
                   <button onClick={() => navigateDate(-1)} className="p-1.5 lg:p-2 hover:bg-white rounded-lg transition text-slate-600 text-sm">◀</button>
                   <div className="px-2 lg:px-4 flex flex-col items-center justify-center min-w-0">
@@ -1311,26 +1419,73 @@ export default function AppLayout() {
                   <button onClick={() => navigateDate(1)} className="p-1.5 lg:p-2 hover:bg-white rounded-lg transition text-slate-600 text-sm">▶</button>
                 </div>
                 <button onClick={() => setCurrentDate(new Date())} className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 hover:text-blue-600 transition border px-2 py-1 rounded shrink-0">{L.today}</button>
+                <div className="lg:hidden flex-1 min-w-0 text-[9px] font-bold text-slate-500 truncate">
+                  {L.agendaSummaryToday}: {agendaSummary.today} · {L.agendaSummaryView}: {agendaSummary.view}
+                </div>
               </div>
 
-              <div className="flex items-center gap-1.5 lg:gap-4 bg-slate-50 p-1 lg:p-1.5 rounded-lg lg:rounded-xl border border-slate-200 flex-wrap">
+              <div className="flex items-center gap-1.5 lg:gap-3 bg-slate-50 p-1 lg:p-1.5 rounded-lg lg:rounded-xl border border-slate-200 flex-wrap">
                 {currentUserLevel <= 2 && (
-                  <button onClick={() => setShowOOOModal(true)} className="bg-red-50 text-red-600 border border-red-200 px-2 lg:px-3 py-1 text-[9px] lg:text-[10px] font-black rounded-lg hover:bg-red-100 transition uppercase shadow-sm shrink-0" title={L.blockSlot}><span className="lg:hidden">🚫</span><span className="hidden lg:inline">🚫 {L.blockSlot}</span></button>
+                  <button onClick={() => setShowOOOModal(true)} className="bg-red-100 text-red-700 border-2 border-red-300 px-2.5 sm:px-3 py-1.5 text-[9px] sm:text-[10px] font-black rounded-lg hover:bg-red-200 transition uppercase shadow-sm shrink-0 flex items-center gap-1" title={L.blockSlot}>
+                    <span>🚫</span>
+                    <span className="sm:inline">{L.blockSlot}</span>
+                  </button>
                 )}
                 <div className="flex items-center gap-1 lg:gap-2 px-1 lg:px-2 border-l border-slate-200">
                   <span className="text-[8px] lg:text-[9px] font-black text-slate-400 uppercase hidden sm:inline">{L.zoom}</span>
-                  <input type="range" min="20" max="300" value={zoomScale} onChange={(e) => setZoomScale(Number(e.target.value))} className="w-14 sm:w-20 lg:w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
+                  <input type="range" min="20" max="300" value={zoomScale} onChange={(e) => { setZoomScale(Number(e.target.value)); setZoomManual(true); }} className="w-14 sm:w-20 lg:w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
                 </div>
-                <select value={equipmentFilter} onChange={e => setEquipmentFilter(e.target.value)} className="bg-white border border-slate-300 text-slate-700 font-bold text-[10px] lg:text-xs rounded-md px-1.5 lg:px-2 py-1 outline-none uppercase max-w-[5.5rem] sm:max-w-none truncate">
+                <select value={equipmentFilter} onChange={e => { setEquipmentFilter(e.target.value); setZoomManual(false); }} className="bg-white border border-slate-300 text-slate-700 font-bold text-[10px] lg:text-xs rounded-md px-1.5 lg:px-2 py-1 outline-none uppercase max-w-[5.5rem] sm:max-w-none truncate">
                   <option value="Todos">{L.allEquipment}</option>
                   {dynamicColumns.map(e => <option key={e} value={e}>{e}</option>)}
                 </select>
                 <div className="flex items-center bg-slate-200/50 p-0.5 lg:p-1 rounded-lg shrink-0">
-                  <button onClick={() => setViewMode('Día')} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Día' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewDay}</button>
-                  <button onClick={() => setViewMode('Semana')} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Semana' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewWeekShort}</button>
+                  <button onClick={() => { setZoomManual(false); setViewMode('Día'); }} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Día' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewDay}</button>
+                  <button onClick={() => { setZoomManual(false); setViewMode('Semana'); }} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Semana' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewWeekShort}</button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCalendarLegend(v => !v)}
+                  className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border shrink-0 ${showCalendarLegend ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-300'}`}
+                  title={L.calendarLegend}
+                >
+                  ?
+                </button>
+              </div>
+              </div>
+
+              {showCalendarLegend && (
+                <div className="flex flex-wrap gap-2 px-1 pb-1 text-[9px] font-bold text-slate-600">
+                  <span className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg"><span className="w-3 h-3 bg-emerald-100 border border-emerald-300 rounded" /> {L.legendAvailable}</span>
+                  <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg">🟡 {L.legendOutsideHours}</span>
+                  <span className="inline-flex items-center gap-1 bg-violet-50 border border-violet-200 px-2 py-1 rounded-lg">🟣 {L.legendExtended}</span>
+                  <span className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">⭐ {L.legendNewPatient}</span>
+                  <span className="hidden lg:inline text-slate-400 self-center">{L.shortcutsHint}</span>
+                </div>
+              )}
+            </header>
+
+            {showWeekFilterHint && (
+              <div className="mx-1.5 lg:mx-4 mt-1 lg:mt-0 shrink-0 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 flex flex-col sm:flex-row sm:items-center gap-2 text-slate-800">
+                <p className="text-[10px] font-bold flex-1">{L.weekFilterHint}</p>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => { setZoomManual(false); setEquipmentFilter(dynamicColumns[0]); setWeekFilterHintDismissed(true); }}
+                    className="text-[9px] font-black uppercase bg-blue-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-blue-700"
+                  >
+                    {L.weekFilterApply}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWeekFilterHintDismissed(true)}
+                    className="text-[9px] font-black uppercase text-blue-700 px-2 py-1.5"
+                  >
+                    {L.weekFilterDismiss}
+                  </button>
                 </div>
               </div>
-            </header>
+            )}
 
             {/* --- CONTENEDOR DEL CALENDARIO: SCROLL UNIFICADO (CIRUGÍA CSS) --- */}
             <div className="flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0">
