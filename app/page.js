@@ -23,7 +23,8 @@ import { InstallGuideLink } from '../components/InstallGuide';
 import PatientSearchInput from '../components/PatientSearchInput';
 import { StaffLocaleProvider } from '../components/StaffLocaleContext';
 import StaffBookingOverrides from '../components/StaffBookingOverrides';
-import { getServiceScheduleBounds, buildAvailabilitySlotTimes, normalizeTimeInput } from '../lib/serviceSchedule';
+import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
+import { insertStaffAppointment, updateStaffAppointment } from '../lib/staffAppointmentSave';
 import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
 
 export default function AppLayout() {
@@ -371,7 +372,11 @@ export default function AppLayout() {
       setDbRoles(resRoles.data || []);
       
       if (resC.data) {
-        setDbCompanyConfig({ ...dbCompanyConfig, ...resC.data });
+        setDbCompanyConfig({
+          ...resC.data,
+          start_time: normalizeTimeInput(resC.data.start_time) || '07:00',
+          end_time: normalizeTimeInput(resC.data.end_time) || '20:00',
+        });
       } else {
         const defaultCfg = { 
           clinic: activeClinic, 
@@ -494,16 +499,18 @@ export default function AppLayout() {
   };
 
   const PIXELS_PER_MINUTE = 1.5;
-  const startMins = getMinutes(dbCompanyConfig.start_time || '07:00');
-  const endMins = getMinutes(dbCompanyConfig.end_time || '20:00');
+  const CALENDAR_PAD_MINS = 30;
+  const startMins = getMinutes(normalizeTimeInput(dbCompanyConfig.start_time) || '07:00');
+  const endMins = getMinutes(normalizeTimeInput(dbCompanyConfig.end_time) || '20:00');
+  const calendarStartMins = startMins - CALENDAR_PAD_MINS;
   const intervalMins = Number(dbCompanyConfig.interval_mins) || 30;
-  
-  const CALENDAR_HEIGHT = (endMins - startMins) * PIXELS_PER_MINUTE;
+
+  const CALENDAR_HEIGHT = (endMins - calendarStartMins) * PIXELS_PER_MINUTE;
   const currentColWidth = (160 * zoomScale) / 100;
   const isCompact = currentColWidth < 100;
 
   const timeToPixels = (timeStr) => {
-    return (getMinutes(timeStr) - startMins) * PIXELS_PER_MINUTE;
+    return (getMinutes(timeStr) - calendarStartMins) * PIXELS_PER_MINUTE;
   };
 
   const activeServices = dbServices.filter(s => s.is_active);
@@ -512,7 +519,7 @@ export default function AppLayout() {
 
   const timeOptions = useMemo(() => {
     const slots = [];
-    for (let m = startMins; m < endMins; m += intervalMins) {
+    for (let m = calendarStartMins; m < endMins; m += intervalMins) {
       const h = Math.floor(m / 60); 
       const mins = m % 60; 
       const ampm = h >= 12 ? 'PM' : 'AM'; 
@@ -520,7 +527,7 @@ export default function AppLayout() {
       slots.push(`${displayH.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')} ${ampm}`);
     }
     return slots;
-  }, [startMins, endMins, intervalMins]);
+  }, [calendarStartMins, endMins, intervalMins]);
 
   const createEmptyAppointmentDraft = () => {
     const firstSrv = dbServices.find(s => s.is_active);
@@ -553,12 +560,12 @@ export default function AppLayout() {
   const appointmentTimeOptions = useMemo(() => {
     const srv = getServiceForSlot(selectedSlot);
     const { duration, buffer } = resolveSessionTimes(selectedSlot || {});
-    return buildAvailabilitySlotTimes({
-      service: selectedSlot?.outside_normal_hours ? {} : (srv || {}),
+    return buildStaffAppointmentTimeOptions({
+      service: srv,
       companyConfig: dbCompanyConfig,
       duration,
       buffer,
-      stepByBlock: true,
+      outsideNormalHours: !!selectedSlot?.outside_normal_hours,
     });
   }, [
     selectedSlot?.serviceId,
@@ -766,7 +773,7 @@ export default function AppLayout() {
   const confirmMove = async () => {
     try {
       const times = resolveSessionTimes(moveConfirmation.app);
-      const { error } = await activeSupabase.from('appointments').update({ 
+      const { error } = await updateStaffAppointment(activeSupabase, moveConfirmation.app.id, { 
         time: moveConfirmation.newTime, 
         appointment_time: moveConfirmation.newTime,
         equipment: moveConfirmation.newEquipment, 
@@ -777,7 +784,7 @@ export default function AppLayout() {
         buffer: times.buffer,
         outside_normal_hours: !!moveConfirmation.app.outside_normal_hours,
         is_extended_block: isExtendedSession(moveConfirmation.app),
-      }).eq('id', moveConfirmation.app.id);
+      });
       
       if (error) alert(a('moveError', error.message));
       else {
@@ -1288,10 +1295,10 @@ export default function AppLayout() {
                   <div className="h-12 border-b border-slate-200 bg-slate-100 flex items-center justify-center sticky top-0 z-[60]">
                     <span className="text-[9px] font-black text-slate-400 uppercase">{L.time}</span>
                   </div>
-                  <div className="relative" style={{ height: `${CALENDAR_HEIGHT}px` }}>
+                  <div className="relative pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
                     {timeOptions.map((timeStr) => (
                       <div key={timeStr} className="absolute w-full text-right pr-2 border-b border-slate-300" style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}>
-                        <span className="text-[9px] font-black text-slate-500 relative block top-[-7px] bg-slate-50">{timeStr}</span>
+                        <span className="text-[9px] font-black text-slate-500 relative inline-block top-0 translate-y-[-50%] bg-slate-50 px-0.5">{timeStr}</span>
                       </div>
                     ))}
                   </div>
@@ -1308,13 +1315,13 @@ export default function AppLayout() {
                             <span className="text-[10px] font-black uppercase leading-none">{eqName}</span>
                             <span className="text-[11px] font-bold opacity-80">{currentDayInfo.date}</span>
                           </div>
-                          <div className="relative w-full" style={{ height: `${CALENDAR_HEIGHT}px` }}>
+                          <div className="relative w-full pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
                             
                             <div className="absolute inset-0 z-0">{renderBackgroundSlots(eqName, currentDayInfo.name, currentDayInfo.fullDate)}</div>
                             
                             {/* LÍNEA DE HORA ACTUAL (MULTIHUSO) */}
-                            {currentDayInfo.fullDate === clinicNow.dateStr && clinicNow.mins >= startMins && clinicNow.mins <= endMins && (
-                              <div className="absolute left-0 right-0 pointer-events-none flex items-center z-20" style={{ top: `${(clinicNow.mins - startMins) * PIXELS_PER_MINUTE}px`, marginTop: '-1px' }}>
+                            {currentDayInfo.fullDate === clinicNow.dateStr && clinicNow.mins >= calendarStartMins && clinicNow.mins <= endMins && (
+                              <div className="absolute left-0 right-0 pointer-events-none flex items-center z-20" style={{ top: `${(clinicNow.mins - calendarStartMins) * PIXELS_PER_MINUTE}px`, marginTop: '-1px' }}>
                                 <div className="w-2 h-2 rounded-full bg-red-500 shadow -ml-1"></div>
                                 <div className="flex-1 border-t-2 border-red-500"></div>
                               </div>
@@ -1377,7 +1384,7 @@ export default function AppLayout() {
                             <span className="text-[10px] font-black text-slate-800 uppercase leading-none">{dayInfo.name}</span>
                             <span className="text-[11px] font-bold text-blue-600">{dayInfo.date}</span>
                           </div>
-                          <div className="flex w-full relative" style={{ height: `${CALENDAR_HEIGHT}px` }}>
+                          <div className="flex w-full relative pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
                             {displayedEquipments.map(eqName => {
                               const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                               return (
@@ -1386,8 +1393,8 @@ export default function AppLayout() {
                                 <div className="absolute inset-0 z-0">{renderBackgroundSlots(eqName, dayInfo.name, dayInfo.fullDate)}</div>
                                 
                                 {/* LÍNEA DE HORA ACTUAL (MULTIHUSO) */}
-                                {dayInfo.fullDate === clinicNow.dateStr && clinicNow.mins >= startMins && clinicNow.mins <= endMins && (
-                                  <div className="absolute left-0 right-0 pointer-events-none flex items-center z-20" style={{ top: `${(clinicNow.mins - startMins) * PIXELS_PER_MINUTE}px`, marginTop: '-1px' }}>
+                                {dayInfo.fullDate === clinicNow.dateStr && clinicNow.mins >= calendarStartMins && clinicNow.mins <= endMins && (
+                                  <div className="absolute left-0 right-0 pointer-events-none flex items-center z-20" style={{ top: `${(clinicNow.mins - calendarStartMins) * PIXELS_PER_MINUTE}px`, marginTop: '-1px' }}>
                                     <div className="w-2 h-2 rounded-full bg-red-500 shadow -ml-1"></div>
                                     <div className="flex-1 border-t-2 border-red-500"></div>
                                   </div>
@@ -1989,11 +1996,11 @@ export default function AppLayout() {
                   </div>
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Apertura</label>
-                    <input type="time" value={dbCompanyConfig.start_time} onChange={e => setDbCompanyConfig({...dbCompanyConfig, start_time: e.target.value})} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" />
+                    <input type="time" value={normalizeTimeInput(dbCompanyConfig.start_time) || '07:00'} onChange={e => setDbCompanyConfig({...dbCompanyConfig, start_time: e.target.value})} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" />
                   </div>
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Cierre</label>
-                    <input type="time" value={dbCompanyConfig.end_time} onChange={e => setDbCompanyConfig({...dbCompanyConfig, end_time: e.target.value})} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" />
+                    <input type="time" value={normalizeTimeInput(dbCompanyConfig.end_time) || '20:00'} onChange={e => setDbCompanyConfig({...dbCompanyConfig, end_time: e.target.value})} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" />
                   </div>
                   <div className="col-span-1 sm:col-span-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Intervalos en Cuadrícula</label>
@@ -2025,8 +2032,8 @@ export default function AppLayout() {
                       address: dbCompanyConfig.address, 
                       phone: dbCompanyConfig.phone, 
                       ticket_message: dbCompanyConfig.ticket_message, 
-                      start_time: dbCompanyConfig.start_time, 
-                      end_time: dbCompanyConfig.end_time, 
+                      start_time: normalizeTimeInput(dbCompanyConfig.start_time) || '07:00', 
+                      end_time: normalizeTimeInput(dbCompanyConfig.end_time) || '20:00', 
                       interval_mins: dbCompanyConfig.interval_mins,
                       booking_limit_hours: dbCompanyConfig.booking_limit_hours,
                       cancel_limit_hours: dbCompanyConfig.cancel_limit_hours,
@@ -2035,11 +2042,13 @@ export default function AppLayout() {
                       notify_on_booking: dbCompanyConfig.notify_on_booking,
                       reminder_hours: dbCompanyConfig.reminder_hours
                     };
+                    let error;
                     if (dbCompanyConfig.id) {
-                      await activeSupabase.from('company_config').update(p).eq('id', dbCompanyConfig.id);
+                      ({ error } = await activeSupabase.from('company_config').update(p).eq('id', dbCompanyConfig.id));
                     } else {
-                      await activeSupabase.from('company_config').insert([{...p, clinic: activeClinic}]);
+                      ({ error } = await activeSupabase.from('company_config').insert([{...p, clinic: activeClinic}]));
                     }
+                    if (error) throw new Error(error.message);
                     alert(L.p.admin.configSaved); 
                     fetchAllData();
                   } catch (e) {
@@ -2649,12 +2658,13 @@ export default function AppLayout() {
               <button onClick={async () => {
                 try {
                   if(!selectedSlot?.patient || !selectedSlot?.equipment || !selectedSlot?.time) return alert(staffAlert(locale, 'missingData'));
-                  if (isPastTime(selectedSlot.fullDate, selectedSlot.time) && selectedSlot.status !== 'booked') return alert(staffAlert(locale, 'pastSchedule'));
+                  const apptDate = selectedSlot.fullDate || selectedSlot.full_date || currentFullDate;
+                  if (isPastTime(apptDate, selectedSlot.time) && selectedSlot.status !== 'booked') return alert(staffAlert(locale, 'pastSchedule'));
                   const existingP = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
                   if (existingP && existingP.is_blocked) return alert(staffAlert(locale, 'patientBlockedShort'));
                   if (checkOverlap(
                     selectedSlot.equipment,
-                    selectedSlot.fullDate,
+                    apptDate,
                     selectedSlot.time,
                     resolveSessionTimes(selectedSlot).duration,
                     resolveSessionTimes(selectedSlot).buffer,
@@ -2698,8 +2708,8 @@ export default function AppLayout() {
                     equipment: selectedSlot.equipment,
                     duration: sessionTimes.duration,
                     buffer: sessionTimes.buffer,
-                    full_date: selectedSlot.fullDate || currentFullDate,
-                    appointment_date: selectedSlot.fullDate || currentFullDate,
+                    full_date: apptDate,
+                    appointment_date: apptDate,
                     day: selectedSlot.day || currentDayInfo.name,
                     time: selectedSlot.time,
                     appointment_time: selectedSlot.time,
@@ -2710,20 +2720,19 @@ export default function AppLayout() {
                     outside_normal_hours: !!selectedSlot.outside_normal_hours,
                     is_extended_block: isExtendedSession(selectedSlot),
                   };
-                  const { data: na, error } = await activeSupabase.from('appointments').insert([payload]).select();
-                  if(error) alert(a('genericError', error.message)); else {
-                    if (na && na[0]) {
-                      const flags = [
-                        selectedSlot.outside_normal_hours ? L.p.appt.badgeOutsideHours : '',
-                        isExtendedSession(selectedSlot) ? L.p.appt.badgeExtended : '',
-                      ].filter(Boolean).join(' · ');
-                      await logAudit(na[0].id, payload.patient, 'CREACIÓN', `${payload.time}${flags ? ` (${flags})` : ''}`);
-                    }
-                    setShowNewAppointment(false);
-                    setSelectedSlot(null);
-                    fetchAllData();
+                  const { data: na, error } = await insertStaffAppointment(activeSupabase, payload);
+                  if (error) return alert(a('genericError', error.message));
+                  if (na && na[0]) {
+                    const flags = [
+                      selectedSlot.outside_normal_hours ? L.p.appt.badgeOutsideHours : '',
+                      isExtendedSession(selectedSlot) ? L.p.appt.badgeExtended : '',
+                    ].filter(Boolean).join(' · ');
+                    await logAudit(na[0].id, payload.patient, 'CREACIÓN', `${payload.time}${flags ? ` (${flags})` : ''}`);
                   }
-                } catch (e) { alert(staffAlert(locale, 'connectionError')); }
+                  setShowNewAppointment(false);
+                  setSelectedSlot(null);
+                  fetchAllData();
+                } catch (e) { alert(a('connectionErrorMsg', e?.message || String(e))); }
               }} className="w-full sm:flex-1 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-emerald-700 transition">Agendar Espacio</button>
             </div>
           </div>
