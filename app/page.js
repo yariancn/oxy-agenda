@@ -20,7 +20,9 @@ import BitacoraModal from '../components/BitacoraModal';
 import PatientProfileModal from '../components/PatientProfileModal';
 import GFEManager from '../components/GFEManager';
 import { InstallGuideLink } from '../components/InstallGuide';
+import PatientSearchInput from '../components/PatientSearchInput';
 import { StaffLocaleProvider } from '../components/StaffLocaleContext';
+import { getServiceScheduleBounds } from '../lib/serviceSchedule';
 import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
 
 export default function AppLayout() {
@@ -48,6 +50,8 @@ export default function AppLayout() {
   const [showBitacora, setShowBitacora] = useState(false);
   const [showPatientProfile, setShowPatientProfile] = useState(false);
   const [showNewAppointment, setShowNewAppointment] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelDeductSession, setCancelDeductSession] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [draggedApp, setDraggedApp] = useState(null);
   const [moveConfirmation, setMoveConfirmation] = useState(null);
@@ -86,7 +90,7 @@ export default function AppLayout() {
   const [dbErrorMessage, setDbErrorMessage] = useState('');
 
   // --- FORMULARIOS GLOBALES ---
-  const [newSrv, setNewSrv] = useState({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1' });
+  const [newSrv, setNewSrv] = useState({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });
   const [isEditingSrv, setIsEditingSrv] = useState(false);
   
   const [newProtocol, setNewProtocol] = useState({ id: null, name: '', is_active: true });
@@ -751,6 +755,70 @@ export default function AppLayout() {
     }
   };
 
+  const deductPatientSession = async (patientName, equipment, appId) => {
+    const p = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(patientName));
+    if (!p) return { deducted: false, detail: 'Paciente no encontrado en expediente.' };
+
+    const eq = equipment;
+    const currentWallets = { ...(p.wallets || {}) };
+    let deducted = false;
+
+    if (currentWallets[eq] && currentWallets[eq] > 0) {
+      currentWallets[eq] -= 1;
+      deducted = true;
+    } else {
+      const fallbackEq = Object.keys(currentWallets).find(key =>
+        (key.toLowerCase().includes('cámara') || key.toLowerCase().includes('camara')) && currentWallets[key] > 0
+      );
+      if (fallbackEq) {
+        currentWallets[fallbackEq] -= 1;
+        deducted = true;
+      }
+    }
+
+    await activeSupabase.from('patients').update({
+      wallets: currentWallets,
+      historico_sesiones: (p.historicoSesiones || 0) + (deducted ? 1 : 0),
+    }).eq('id', p.id);
+
+    return {
+      deducted,
+      detail: deducted
+        ? `Se descontó 1 sesión pagada de cartera (${eq}).`
+        : 'Sin sesiones pagadas en cartera para descontar.',
+    };
+  };
+
+  const handleCancelAppointment = async () => {
+    if (!selectedSlot?.id || !activeSupabase) return;
+    try {
+      const app = selectedSlot;
+      const patientName = app.patient;
+      let auditDetail = `Cancelada por ${currentUser?.name || 'staff'}. Descuento de sesión: ${cancelDeductSession ? 'Sí' : 'No'}.`;
+
+      if (cancelDeductSession) {
+        const result = await deductPatientSession(patientName, app.equipment, app.id);
+        auditDetail += ` ${result.detail}`;
+      }
+
+      const cancelNote = `[CANCELADA ${new Date().toLocaleString()}] ${auditDetail}`;
+      const newNotes = app.notes ? `${app.notes}\n${cancelNote}` : cancelNote;
+
+      await activeSupabase.from('appointments').update({
+        check_in_status: 'Cancelado',
+        notes: newNotes,
+      }).eq('id', app.id);
+
+      await logAudit(app.id, patientName, 'CITA CANCELADA', auditDetail);
+      setShowCancelModal(false);
+      setCancelDeductSession(false);
+      closeAppointmentPanel();
+      fetchAllData();
+    } catch (e) {
+      alert(a('connectionErrorMsg', e.message));
+    }
+  };
+
   // --- MOTOR DE IMPRESIÓN CON IFRAME (Anti-bloqueo) ---
   const printHTML = (htmlContent, title) => {
     const iframe = document.createElement('iframe');
@@ -836,11 +904,17 @@ export default function AppLayout() {
     }
     
     const srv = dbServices.find(s => s.name === equipment) || { duration: 60, buffer: 0, id: null };
+    const { startMins: svcStart, endMins: svcEnd } = getServiceScheduleBounds(srv, dbCompanyConfig);
 
-    return slots.map((time, idx) => (
+    return slots.map((time, idx) => {
+      const slotMins = getMinutes(time);
+      const withinHours = slotMins >= svcStart && slotMins < svcEnd;
+
+      return (
       <div 
         key={idx} 
         onClick={() => {
+          if (!withinHours) return;
           if (isPastTime(fullDate, time)) {
              alert(a('pastScheduleAppt'));
              return;
@@ -867,12 +941,13 @@ export default function AppLayout() {
           });
           setShowNewAppointment(true);
         }} 
-        onDragOver={handleDragOver} 
-        onDrop={(e) => handleDrop(e, time, equipment, day, fullDate)} 
-        className="border-b border-slate-300 hover:shadow-[inset_0_2px_0_0_#3b82f6] cursor-pointer transition-colors box-border" 
+        onDragOver={withinHours ? handleDragOver : undefined} 
+        onDrop={withinHours ? (e) => handleDrop(e, time, equipment, day, fullDate) : undefined} 
+        className={`border-b border-slate-300 box-border ${withinHours ? 'hover:shadow-[inset_0_2px_0_0_#3b82f6] cursor-pointer transition-colors' : 'bg-slate-200/60 cursor-not-allowed'}`} 
         style={{ height: `${intervalMins * PIXELS_PER_MINUTE}px` }}
       />
-    ));
+    );
+    });
   };
 
   const isNewPatientInline = selectedSlot?.patient && selectedSlot.patient.length > 0 && !dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
@@ -1307,6 +1382,20 @@ export default function AppLayout() {
                       </div>
                     </div>
                   </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                    <p className="text-[9px] font-black text-slate-500 uppercase">{L.p.appt.workHours}</p>
+                    <p className="text-[8px] font-bold text-slate-500">{L.p.appt.workHoursHint}</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.appt.workStart}</label>
+                        <input type="time" className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none text-slate-900 bg-white" value={newSrv.start_time || ''} onChange={e => setNewSrv({...newSrv, start_time: e.target.value})} />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.appt.workEnd}</label>
+                        <input type="time" className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none text-slate-900 bg-white" value={newSrv.end_time || ''} onChange={e => setNewSrv({...newSrv, end_time: e.target.value})} />
+                      </div>
+                    </div>
+                  </div>
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1">
                     <p className="text-[9px] font-black text-slate-500 uppercase">Duración al agendar</p>
                     <p className="text-[10px] font-bold text-slate-700">Estándar: 60 min · 1h 30 en agenda</p>
@@ -1317,17 +1406,26 @@ export default function AppLayout() {
                     <span className="text-xs font-black uppercase text-slate-700">Visible en calendario</span>
                   </label>
                   <div className="flex gap-2 pt-1">
-                    {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1' });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
+                    {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
                     <button onClick={async () => {
                       if(!newSrv.name) return alert(L.p.services.missingName);
-                      const p = { name: newSrv.name.trim(), duration: 60, buffer: 30, price: newSrv.price, color: newSrv.color, is_active: newSrv.is_active };
+                      const p = {
+                        name: newSrv.name.trim(),
+                        duration: 60,
+                        buffer: 30,
+                        price: newSrv.price,
+                        color: newSrv.color,
+                        is_active: newSrv.is_active,
+                        start_time: newSrv.start_time?.trim() || null,
+                        end_time: newSrv.end_time?.trim() || null,
+                      };
                       if(isEditingSrv && newSrv.id) {
                         await activeSupabase.from('services').update(p).eq('id', newSrv.id);
                       } else {
                         await activeSupabase.from('services').insert([p]);
                       }
                       setIsEditingSrv(false); 
-                      setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1' }); 
+                      setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' }); 
                       fetchAllData();
                     }} className="flex-1 bg-blue-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-md hover:bg-blue-700 transition">{isEditingSrv ? 'Actualizar' : 'Guardar'}</button>
                   </div>
@@ -1341,7 +1439,7 @@ export default function AppLayout() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
                     <thead className="border-b border-slate-100 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                      <tr><th className="px-5 py-3">Equipo</th><th className="px-5 py-3">Precio</th><th className="px-5 py-3">Estado</th><th className="px-5 py-3 text-right">Acciones</th></tr>
+                      <tr><th className="px-5 py-3">Equipo</th><th className="px-5 py-3">Horario</th><th className="px-5 py-3">Precio</th><th className="px-5 py-3">Estado</th><th className="px-5 py-3 text-right">Acciones</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {(dbServices || []).map(s => (
@@ -1351,6 +1449,9 @@ export default function AppLayout() {
                               <div className={`w-3 h-3 rounded-full shrink-0 ${getDynamicColorClass(s.color)}`} />
                               <span className="font-black text-slate-800 uppercase text-sm truncate">{s.name}</span>
                             </div>
+                          </td>
+                          <td className="px-5 py-4 font-bold text-slate-500 text-[10px] whitespace-nowrap uppercase">
+                            {s.start_time && s.end_time ? `${s.start_time} – ${s.end_time}` : 'Clínica'}
                           </td>
                           <td className="px-5 py-4 font-bold text-slate-600 text-sm whitespace-nowrap">${s.price} {currencyStr}</td>
                           <td className="px-5 py-4">
@@ -1369,7 +1470,7 @@ export default function AppLayout() {
                           </td>
                         </tr>
                       ))}
-                      {(!dbServices || dbServices.length === 0) && <tr><td colSpan="4" className="px-5 py-12 text-center text-slate-400 font-bold uppercase text-sm">Sin equipos configurados</td></tr>}
+                      {(!dbServices || dbServices.length === 0) && <tr><td colSpan="5" className="px-5 py-12 text-center text-slate-400 font-bold uppercase text-sm">Sin equipos configurados</td></tr>}
                     </tbody>
                   </table>
                 </div>
@@ -1885,6 +1986,32 @@ export default function AppLayout() {
 
       {/* --- MODALES Z-INDEX 50+ FLOTANTES FUERA DE MAIN --- */}
 
+      {showCancelModal && selectedSlot && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[99999]">
+          <div className="bg-white rounded-t-2xl sm:rounded-3xl w-full max-w-md shadow-2xl border overflow-hidden text-slate-900">
+            <div className="bg-red-50 px-4 sm:px-8 py-4 border-b border-red-100 flex justify-between items-center">
+              <h3 className="font-black text-lg uppercase text-red-700">{L.p.appt.cancelApptTitle}</h3>
+              <button onClick={() => { setShowCancelModal(false); setCancelDeductSession(false); }} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
+            </div>
+            <div className="p-4 sm:p-8 space-y-4">
+              <p className="text-sm font-bold text-slate-600">{L.p.appt.cancelApptHint}</p>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <span className="block font-black uppercase text-slate-800">{selectedSlot.patient}</span>
+                <span className="block text-[10px] font-bold text-slate-500 mt-1 uppercase">{selectedSlot.equipment} · {selectedSlot.time} · {selectedSlot.full_date || selectedSlot.fullDate}</span>
+              </div>
+              <label className="flex items-start gap-3 bg-amber-50 border border-amber-200 p-4 rounded-xl cursor-pointer">
+                <input type="checkbox" checked={cancelDeductSession} onChange={e => setCancelDeductSession(e.target.checked)} className="w-4 h-4 mt-0.5" />
+                <span className="text-xs font-black uppercase text-amber-900">{L.p.appt.cancelDeductSession}</span>
+              </label>
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => { setShowCancelModal(false); setCancelDeductSession(false); }} className="flex-1 bg-white border border-slate-300 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-50">{L.p.common.cancel}</button>
+                <button onClick={handleCancelAppointment} className="flex-1 bg-red-600 text-white font-black py-3 rounded-xl uppercase text-xs hover:bg-red-700 shadow-md">{L.p.appt.cancelConfirm}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CAJA NEGRA: VISOR DE AUDITORÍA DE CITA */}
       {showAudit && (
          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[99999]">
@@ -1939,15 +2066,8 @@ export default function AppLayout() {
                    </>
                  )}
                  
-                 {selectedSlot.check_in_status !== 'Finalizado' && selectedSlot.check_in_status !== 'Devuelto' && !isRescheduling && (
-                     <button onClick={async () => {
-                       if(window.confirm(L.p.appt.deleteConfirm)){
-                          await activeSupabase.from('appointments').delete().eq('id', selectedSlot.id);
-                          await logAudit(selectedSlot.id, selectedSlot.patient, 'CITA BORRADA', `Cita físicamente eliminada del sistema.`);
-                          closeAppointmentPanel();
-                          fetchAllData();
-                       }
-                     }} className="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-200 transition ml-auto border border-red-200">{L.p.appt.deleteAppt}</button>
+                 {selectedSlot.check_in_status !== 'Finalizado' && selectedSlot.check_in_status !== 'Devuelto' && selectedSlot.check_in_status !== 'Cancelado' && !isRescheduling && (
+                     <button onClick={() => { setCancelDeductSession(false); setShowCancelModal(true); }} className="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-200 transition ml-auto border border-red-200">{L.p.appt.cancelAppt}</button>
                  )}
               </div>
               
@@ -2177,13 +2297,35 @@ export default function AppLayout() {
             <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-3 sm:space-y-4 min-h-0">
               <div className="min-w-0">
                 <label className="text-[10px] font-black uppercase text-slate-400">Paciente</label>
-                <input type="text" list="patients-list" placeholder="Escribe para buscar..." value={selectedSlot?.patient || ''} onChange={e => {
-                  const pName = e.target.value; 
-                  const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(pName));
-                  const p = matchingPatients.find(c => c.notes && c.notes.trim() !== '') || matchingPatients[0];
-                  setSelectedSlot({...selectedSlot, patient: pName, phone: p ? p.phone : '', protocol: p ? p.protocol : '', patientNotes: p ? p.notes : '', prefers_email: p ? p.prefers_email !== false : true, prefers_sms: p ? p.prefers_sms !== false : true});
-                }} className="w-full p-3 border border-slate-300 rounded-xl font-bold uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white" />
-                <datalist id="patients-list">{dbPatients.map(p => <option key={p.id} value={p.patient} />)}</datalist>
+                <PatientSearchInput
+                  patients={dbPatients}
+                  value={selectedSlot?.patient || ''}
+                  placeholder={L.p.appt.searchPatient}
+                  className="w-full p-3 border border-slate-300 rounded-xl font-bold uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white"
+                  onQueryChange={(pName) => {
+                    const exact = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(pName));
+                    setSelectedSlot({
+                      ...selectedSlot,
+                      patient: pName,
+                      phone: exact ? exact.phone : (selectedSlot?.phone || ''),
+                      protocol: exact ? exact.protocol : (selectedSlot?.protocol || ''),
+                      patientNotes: exact ? exact.notes : (selectedSlot?.patientNotes || ''),
+                      prefers_email: exact ? exact.prefers_email !== false : selectedSlot?.prefers_email !== false,
+                      prefers_sms: exact ? exact.prefers_sms !== false : selectedSlot?.prefers_sms !== false,
+                    });
+                  }}
+                  onSelectPatient={(p) => {
+                    setSelectedSlot({
+                      ...selectedSlot,
+                      patient: p.patient,
+                      phone: p.phone || '',
+                      protocol: p.protocol || '',
+                      patientNotes: p.notes || '',
+                      prefers_email: p.prefers_email !== false,
+                      prefers_sms: p.prefers_sms !== false,
+                    });
+                  }}
+                />
               </div>
 
               {selectedSlot?.patient && !isNewPatientInline && (

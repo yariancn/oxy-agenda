@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { submitPublicBooking } from '../lib/publicBooking';
 import { buildDaySlots, countAvailableSlots } from '../lib/publicBookingSlots';
+import { PUBLIC_SESSION } from '../lib/sessionPresets';
 import { PUBLIC_BOOKING_COPY, PUBLIC_SLOT_STATUS } from '../lib/i18n';
 import {
   fetchPromoters,
@@ -119,9 +120,12 @@ export default function PublicBookingPortal({
       dbConfig,
       selectedDate,
       equipmentName: selectedService.name,
+      service: selectedService,
       dbAppointments,
       dbBlockedSlots,
       timezone: branding.timezone,
+      duration: selectedService.duration || PUBLIC_SESSION.duration,
+      buffer: selectedService.buffer ?? PUBLIC_SESSION.buffer,
     });
   }, [dbConfig, selectedDate, selectedService, dbAppointments, dbBlockedSlots, branding.timezone]);
 

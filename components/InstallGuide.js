@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import IosInstallWizard from './IosInstallWizard';
 import {
   getInstallContext,
@@ -19,7 +20,14 @@ function readContext() {
   return getInstallContext();
 }
 
+function isStaffInstallPath(pathname) {
+  if (!pathname) return false;
+  return !pathname.startsWith('/booking');
+}
+
 export default function InstallGuide() {
+  const pathname = usePathname();
+  const staffOnly = isStaffInstallPath(pathname);
   const [open, setOpen] = useState(false);
   const [ctx, setCtx] = useState(readContext);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -40,7 +48,9 @@ export default function InstallGuide() {
       setDeferredPrompt(e);
     };
 
-    const onOpenGuide = () => setOpen(true);
+    const onOpenGuide = () => {
+      if (isStaffInstallPath(window.location.pathname)) setOpen(true);
+    };
     const onInstalled = () => {
       setDeferredPrompt(null);
       setOpen(false);
@@ -50,9 +60,11 @@ export default function InstallGuide() {
     window.addEventListener(INSTALL_GUIDE_EVENT, onOpenGuide);
     window.addEventListener('appinstalled', onInstalled);
 
-    const context = getInstallContext();
-    if (shouldAutoShowInstallGuide(context)) {
-      setOpen(true);
+    if (isStaffInstallPath(window.location.pathname)) {
+      const context = getInstallContext();
+      if (shouldAutoShowInstallGuide(context)) {
+        setOpen(true);
+      }
     }
 
     return () => {
@@ -109,6 +121,7 @@ export default function InstallGuide() {
     }
   };
 
+  if (!staffOnly) return null;
   if (!ctx || ctx.isStandalone) return null;
 
   const isIosWizard = ctx.platform === 'ios' && open;
@@ -258,6 +271,9 @@ function InstallFab({ onOpen, className, ig }) {
 }
 
 export function InstallGuideLink({ className = '' }) {
+  const pathname = usePathname();
+  if (pathname?.startsWith('/booking')) return null;
+
   const installLocale = typeof window !== 'undefined' ? localeFromPathname(window.location.pathname) : 'es';
   const ig = INSTALL_GUIDE_COPY[installLocale] || INSTALL_GUIDE_COPY.es;
   return (
