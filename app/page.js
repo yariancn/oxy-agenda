@@ -23,10 +23,17 @@ import { InstallGuideLink } from '../components/InstallGuide';
 import PatientSearchInput from '../components/PatientSearchInput';
 import { StaffLocaleProvider } from '../components/StaffLocaleContext';
 import StaffBookingOverrides from '../components/StaffBookingOverrides';
+import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
 import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
 import { insertStaffAppointment, updateStaffAppointment } from '../lib/staffAppointmentSave';
 import { saveCompanyConfigRow } from '../lib/companyConfigSave';
 import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
+import {
+  computeDefaultZoomScale,
+  getEquipmentShortLabel,
+  isCompactColumn,
+  WEEK_STICKY_HEADER_PX,
+} from '../lib/calendarDisplay';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -40,7 +47,8 @@ export default function AppLayout() {
   const [activeTab, setActiveTab] = useState('Agenda');
   const [viewMode, setViewMode] = useState('Semana'); 
   const [equipmentFilter, setEquipmentFilter] = useState('Todos');
-  const [zoomScale, setZoomScale] = useState(20);
+  const [zoomScale, setZoomScale] = useState(80);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
   
   // --- RELOJ MULTIHUSO HORARIO ---
@@ -128,6 +136,14 @@ export default function AppLayout() {
   useEffect(() => {
     document.documentElement.lang = locale === 'en' ? 'en' : 'es';
   }, [locale]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1023px)');
+    const update = () => setIsMobileViewport(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   const activeSupabase = activeClinic === 'Shenandoah' ? supabaseShenandoah : supabaseGdl;
 
@@ -508,7 +524,7 @@ export default function AppLayout() {
 
   const CALENDAR_HEIGHT = (endMins - calendarStartMins) * PIXELS_PER_MINUTE;
   const currentColWidth = (160 * zoomScale) / 100;
-  const isCompact = currentColWidth < 100;
+  const isCompact = isCompactColumn(currentColWidth);
 
   const timeToPixels = (timeStr) => {
     return (getMinutes(timeStr) - calendarStartMins) * PIXELS_PER_MINUTE;
@@ -517,6 +533,15 @@ export default function AppLayout() {
   const activeServices = dbServices.filter(s => s.is_active);
   const dynamicColumns = activeServices.map(s => s.name);
   const displayedEquipments = equipmentFilter === 'Todos' ? dynamicColumns : [equipmentFilter];
+
+  useEffect(() => {
+    if (displayedEquipments.length === 0) return;
+    setZoomScale(computeDefaultZoomScale({
+      viewMode,
+      equipmentCount: displayedEquipments.length,
+      isMobile: isMobileViewport,
+    }));
+  }, [viewMode, equipmentFilter, displayedEquipments.length, isMobileViewport, activeClinic]);
 
   const timeOptions = useMemo(() => {
     const slots = [];
@@ -556,6 +581,25 @@ export default function AppLayout() {
   const openNewAppointment = (draft = {}) => {
     setSelectedSlot({ ...createEmptyAppointmentDraft(), ...draft });
     setShowNewAppointment(true);
+  };
+
+  const openAppointmentDetails = (app) => {
+    const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(app.patient));
+    const patInfo = matchingPatients.find(x => x.notes && x.notes.trim() !== '') || matchingPatients[0];
+    setSelectedSlot({
+      ...app,
+      status: 'booked',
+      patientId: patInfo?.id,
+      phone: patInfo?.phone || app.phone,
+      email: patInfo?.email,
+      protocol: patInfo?.protocol || app.protocol,
+      wallets: patInfo?.wallets || {},
+      historicoSesiones: patInfo?.historicoSesiones || 0,
+      packageHistory: patInfo?.packageHistory || [],
+      patientNotes: patInfo ? patInfo.notes : '',
+      sessionPreset: getPresetFromTimes(app.duration, app.buffer).id,
+      ...appointmentFlagsFromApp(app),
+    });
   };
 
   const appointmentTimeOptions = useMemo(() => {
@@ -1293,7 +1337,10 @@ export default function AppLayout() {
               <div className="flex min-w-max">
                 
                 <div className="w-16 md:w-20 shrink-0 border-r border-slate-200 bg-slate-50 sticky left-0 z-50">
-                  <div className="h-12 border-b border-slate-200 bg-slate-100 flex items-center justify-center sticky top-0 z-[60]">
+                  <div
+                    className="border-b border-slate-200 bg-slate-100 flex items-center justify-center sticky top-0 z-[60]"
+                    style={{ height: viewMode === 'Semana' ? `${WEEK_STICKY_HEADER_PX}px` : '48px' }}
+                  >
                     <span className="text-[9px] font-black text-slate-400 uppercase">{L.time}</span>
                   </div>
                   <div className="relative pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
@@ -1338,40 +1385,20 @@ export default function AppLayout() {
 
                             {/* CITAS */}
                             {dbAppointments.filter(app => app.equipment === eqName && app.full_date === currentDayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
-                              <div key={app.id} onClick={() => { 
-                                   // USO DE RADAR MÚLTIPLE PARA ENCONTRAR CLONES CON NOTAS
-                                   const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(app.patient));
-                                   const patInfo = matchingPatients.find(x => x.notes && x.notes.trim() !== '') || matchingPatients[0];
-                                   setSelectedSlot({
-                                     ...app,
-                                     status: 'booked',
-                                     patientId: patInfo?.id,
-                                     phone: patInfo?.phone || app.phone,
-                                     email: patInfo?.email,
-                                     protocol: patInfo?.protocol || app.protocol,
-                                     wallets: patInfo?.wallets || {},
-                                     historicoSesiones: patInfo?.historicoSesiones || 0,
-                                     packageHistory: patInfo?.packageHistory || [],
-                                     patientNotes: patInfo ? patInfo.notes : '',
-                                     sessionPreset: getPresetFromTimes(app.duration, app.buffer).id,
-                                     ...appointmentFlagsFromApp(app),
-                                   });
-                                 }} draggable={selectedSlot?.id !== app.id || !isRescheduling} onDragStart={(e) => handleDragStart(e, app)}
-                                   className={`absolute left-1 right-1 rounded-lg p-1 border-l-4 shadow-md cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-105 hover:ring-1 hover:ring-black/20 hover:z-30 ${getEquipmentColors(srvColor)} ${selectedSlot?.id === app.id ? 'ring-2 ring-blue-600 ring-offset-1 z-30' : ''}`}
-                                   style={{ top: `${timeToPixels(app.time)}px`, height: `${((Number(app.duration)||60) + (Number(app.buffer) || 0)) * PIXELS_PER_MINUTE}px`, zIndex: 10 }}>
-                                <div className="flex justify-between items-start gap-1 mb-0.5">
-                                  <span className="text-[7px] font-black uppercase bg-black/10 px-1 rounded leading-none truncate">{app.time} {(Number(app.duration)||60) >= 40 ? `- ${calculateEndTime(app.time, app.duration)}` : ''}</span>
-                                  {getStatusBadge(app.check_in_status)}
-                                </div>
-                                <div className={`font-black uppercase truncate leading-none ${(Number(app.duration)||60) + (Number(app.buffer)||0) <= 40 ? 'text-[8px]' : 'text-[10px]'}`}>{app.is_new_patient ? '⭐ ' : ''}{app.patient}</div>
-                                {(Number(app.duration)||60) + (Number(app.buffer)||0) > 45 && <div className="text-[7px] font-bold opacity-70 uppercase truncate mt-0.5">{(app.duration||60)}m + {app.buffer || 0}m Lmpz.</div>}
-                                {(app.outside_normal_hours || app.is_extended_block) && (
-                                  <div className="flex flex-wrap gap-0.5 mt-0.5">
-                                    {app.outside_normal_hours && <span className="text-[6px] font-black uppercase bg-amber-200 text-amber-900 px-1 rounded">{L.p.appt.badgeOutsideHours}</span>}
-                                    {app.is_extended_block && <span className="text-[6px] font-black uppercase bg-violet-200 text-violet-900 px-1 rounded">{L.p.appt.badgeExtended}</span>}
-                                  </div>
-                                )}
-                              </div>
+                              <CalendarAppointmentBlock
+                                key={app.id}
+                                app={app}
+                                colWidth={currentColWidth * 2}
+                                locale={locale}
+                                L={L}
+                                isSelected={selectedSlot?.id === app.id}
+                                colorClasses={getEquipmentColors(srvColor)}
+                                topPx={timeToPixels(app.time)}
+                                calculateEndTime={calculateEndTime}
+                                onSelect={() => openAppointmentDetails(app)}
+                                draggable={selectedSlot?.id !== app.id || !isRescheduling}
+                                onDragStart={(e) => handleDragStart(e, app)}
+                              />
                             ))}
                           </div>
                         </div>
@@ -1380,10 +1407,29 @@ export default function AppLayout() {
                   ) : (
                     <div className="flex min-w-full">
                       {weekDays.map((dayInfo) => (
-                        <div key={dayInfo.fullDate} className="flex-1 shrink-0 border-r-2 border-slate-300" style={{ minWidth: `${dynamicColumns.length * currentColWidth}px` }}>
-                          <div className="h-12 border-b border-slate-200 bg-slate-50 flex flex-col items-center justify-center sticky top-0 z-40">
-                            <span className="text-[10px] font-black text-slate-800 uppercase leading-none">{dayInfo.name}</span>
-                            <span className="text-[11px] font-bold text-blue-600">{dayInfo.date}</span>
+                        <div key={dayInfo.fullDate} className="flex-1 shrink-0 border-r-2 border-slate-300" style={{ minWidth: `${displayedEquipments.length * currentColWidth}px` }}>
+                          <div className="sticky top-0 z-40 bg-slate-50 border-b border-slate-200">
+                            <div className="h-8 flex flex-col items-center justify-center">
+                              <span className="text-[9px] font-black text-slate-800 uppercase leading-none">{dayInfo.name}</span>
+                              <span className="text-[10px] font-bold text-blue-600 leading-none">{dayInfo.date}</span>
+                            </div>
+                            <div className="flex border-t border-slate-200 h-7">
+                              {displayedEquipments.map((eqName) => {
+                                const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
+                                return (
+                                  <div
+                                    key={`${dayInfo.fullDate}-hdr-${eqName}`}
+                                    className={`flex-1 flex items-center justify-center border-r border-slate-300/80 last:border-r-0 ${getEquipmentHeaderColor(srvColor)}`}
+                                    style={{ minWidth: `${currentColWidth}px` }}
+                                    title={eqName}
+                                  >
+                                    <span className="text-[7px] sm:text-[8px] font-black uppercase truncate px-0.5 text-center w-full leading-none">
+                                      {currentColWidth >= 104 ? eqName : getEquipmentShortLabel(eqName)}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                           <div className="flex w-full relative pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
                             {displayedEquipments.map(eqName => {
@@ -1408,40 +1454,22 @@ export default function AppLayout() {
                                 ))}
 
                                 {dbAppointments.filter(app => app.equipment === eqName && app.full_date === dayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
-                                  <div key={app.id} onClick={() => { 
-                                       // USO DE RADAR MÚLTIPLE PARA ENCONTRAR CLONES CON NOTAS
-                                       const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(app.patient));
-                                       const patInfo = matchingPatients.find(x => x.notes && x.notes.trim() !== '') || matchingPatients[0];
-                                       setSelectedSlot({
-                                     ...app,
-                                     status: 'booked',
-                                     patientId: patInfo?.id,
-                                     phone: patInfo?.phone || app.phone,
-                                     email: patInfo?.email,
-                                     protocol: patInfo?.protocol || app.protocol,
-                                     wallets: patInfo?.wallets || {},
-                                     historicoSesiones: patInfo?.historicoSesiones || 0,
-                                     packageHistory: patInfo?.packageHistory || [],
-                                     patientNotes: patInfo ? patInfo.notes : '',
-                                     sessionPreset: getPresetFromTimes(app.duration, app.buffer).id,
-                                     ...appointmentFlagsFromApp(app),
-                                   });
-                                     }} draggable={selectedSlot?.id !== app.id || !isRescheduling} onDragStart={(e) => handleDragStart(e, app)}
-                                       className={`absolute left-0.5 right-0.5 rounded-md p-1 border-l-4 shadow-md cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-105 hover:ring-1 hover:ring-black/20 hover:z-30 ${getEquipmentColors(srvColor)} ${selectedSlot?.id === app.id ? 'ring-2 ring-blue-600 ring-offset-1 z-30' : ''}`}
-                                       style={{ top: `${timeToPixels(app.time)}px`, height: `${((Number(app.duration)||60) + (Number(app.buffer) || 0)) * PIXELS_PER_MINUTE}px`, zIndex: 10 }}>
-                                    <div className="flex justify-between items-start gap-1 mb-0.5">
-                                      <span className="text-[7px] font-black uppercase bg-black/10 px-1 rounded leading-none truncate">{app.time} {(Number(app.duration)||60) >= 40 ? `- ${calculateEndTime(app.time, app.duration)}` : ''}</span>
-                                      {getStatusBadge(app.check_in_status)}
-                                    </div>
-                                    <div className={`font-black uppercase truncate leading-none ${(Number(app.duration)||60) + (Number(app.buffer)||0) <= 40 ? 'text-[7px]' : 'text-[9px]'}`}>{app.is_new_patient ? '⭐ ' : ''}{app.patient}</div>
-                                    {(Number(app.duration)||60) + (Number(app.buffer)||0) > 45 && <div className="text-[7px] font-bold opacity-70 uppercase truncate mt-0.5">{(app.duration||60)}m + {app.buffer || 0}m L.</div>}
-                                    {(app.outside_normal_hours || app.is_extended_block) && (
-                                      <div className="flex flex-wrap gap-0.5 mt-0.5">
-                                        {app.outside_normal_hours && <span className="text-[5px] font-black uppercase bg-amber-200 text-amber-900 px-0.5 rounded">{L.p.appt.badgeOutsideHours}</span>}
-                                        {app.is_extended_block && <span className="text-[5px] font-black uppercase bg-violet-200 text-violet-900 px-0.5 rounded">{L.p.appt.badgeExtended}</span>}
-                                      </div>
-                                    )}
-                                  </div>
+                                  <CalendarAppointmentBlock
+                                    key={app.id}
+                                    app={app}
+                                    colWidth={currentColWidth}
+                                    locale={locale}
+                                    L={L}
+                                    isSelected={selectedSlot?.id === app.id}
+                                    colorClasses={getEquipmentColors(srvColor)}
+                                    topPx={timeToPixels(app.time)}
+                                    paddingClass="left-0.5 right-0.5"
+                                    roundedClass="rounded-md"
+                                    calculateEndTime={calculateEndTime}
+                                    onSelect={() => openAppointmentDetails(app)}
+                                    draggable={selectedSlot?.id !== app.id || !isRescheduling}
+                                    onDragStart={(e) => handleDragStart(e, app)}
+                                  />
                                 ))}
                               </div>
                             )})}
