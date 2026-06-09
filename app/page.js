@@ -25,6 +25,7 @@ import { StaffLocaleProvider } from '../components/StaffLocaleContext';
 import StaffBookingOverrides from '../components/StaffBookingOverrides';
 import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
 import { insertStaffAppointment, updateStaffAppointment } from '../lib/staffAppointmentSave';
+import { saveCompanyConfigRow } from '../lib/companyConfigSave';
 import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
 
 export default function AppLayout() {
@@ -2042,14 +2043,13 @@ export default function AppLayout() {
                       notify_on_booking: dbCompanyConfig.notify_on_booking,
                       reminder_hours: dbCompanyConfig.reminder_hours
                     };
-                    let error;
-                    if (dbCompanyConfig.id) {
-                      ({ error } = await activeSupabase.from('company_config').update(p).eq('id', dbCompanyConfig.id));
-                    } else {
-                      ({ error } = await activeSupabase.from('company_config').insert([{...p, clinic: activeClinic}]));
-                    }
+                    const { error, warning } = await saveCompanyConfigRow(activeSupabase, {
+                      id: dbCompanyConfig.id,
+                      clinic: activeClinic,
+                      payload: p,
+                    });
                     if (error) throw new Error(error.message);
-                    alert(L.p.admin.configSaved); 
+                    alert(warning || L.p.admin.configSaved);
                     fetchAllData();
                   } catch (e) {
                     alert(a('configSaveError', e.message));

@@ -65,6 +65,23 @@ function shouldSkipHttp() {
   return process.argv.includes('--skip-http');
 }
 
+async function checkCompanyConfigColumns() {
+  console.log('\n=== company_config (schema horarios) ===');
+
+  for (const clinic of CLINICS) {
+    const { error } = await clinic.client
+      .from('company_config')
+      .select('id, start_time, end_time, interval_mins')
+      .limit(1);
+
+    if (error) {
+      record('fail', `${clinic.label}: start_time/end_time — ${error.message}`, fail);
+    } else {
+      record('pass', `${clinic.label}: columnas de horario OK`, ok);
+    }
+  }
+}
+
 async function checkAppointmentOverrideColumns() {
   console.log('\n=== Overrides staff en citas (schema) ===');
 
@@ -228,6 +245,7 @@ async function main() {
   console.log(`Fecha: ${new Date().toLocaleString('es-MX')}`);
 
   await checkSupabase();
+  await checkCompanyConfigColumns();
   await checkServiceHoursColumns();
   await checkAppointmentOverrideColumns();
   checkStaticAssets();
