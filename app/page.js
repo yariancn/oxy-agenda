@@ -48,6 +48,13 @@ import {
   emptyEmailTemplateState,
   resolveAppointmentNotifyType,
 } from '../lib/emailTemplates';
+import {
+  defaultNotifySettings,
+  getSessionInstructionsLabel,
+  isAutoNotifyEnabled,
+  NOTIFY_SETTING_FIELDS,
+  resolveSessionInstructions,
+} from '../lib/notifySettings';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -113,6 +120,7 @@ export default function AppLayout() {
     financial_pin: '123456',
     notify_on_booking: true,
     reminder_hours: 24,
+    ...defaultNotifySettings('es'),
     ...emptyEmailTemplateState('es'),
   });
   
@@ -181,12 +189,21 @@ export default function AppLayout() {
     notify_extra_info: config.notify_extra_info,
   });
 
+  const pickNotifySettings = (config = dbCompanyConfig) => {
+    const picked = {};
+    for (const key of NOTIFY_SETTING_FIELDS) {
+      picked[key] = config[key];
+    }
+    return picked;
+  };
+
   const openEmailPreview = () => {
     const sampleDate = new Date();
     sampleDate.setDate(sampleDate.getDate() + 3);
     const dateStr = sampleDate.toISOString().split('T')[0];
     const sampleService = dbServices.find((s) => s.is_active)?.name
       || (locale === 'en' ? 'Hyperbaric Chamber' : 'Cámara Hiperbárica');
+    const previewInstructions = resolveSessionInstructions('', dbCompanyConfig);
     const preview = buildNotifyContent({
       locale,
       notifyType: emailTemplateTab,
@@ -196,9 +213,8 @@ export default function AppLayout() {
       date: dateStr,
       time: '10:00',
       equipment: sampleService,
-      instructions: locale === 'en'
-        ? 'Avoid heavy meals 2 hours before your session.'
-        : 'Evitar comidas pesadas 2 horas antes de la sesión.',
+      instructions: previewInstructions,
+      instructionsLabel: getSessionInstructionsLabel(dbCompanyConfig, locale),
       address: dbCompanyConfig.address || (locale === 'en' ? '123 Medical Center Dr, Houston TX' : 'Av. Patria 123, Guadalajara'),
       clinicPhone: dbCompanyConfig.phone || (locale === 'en' ? '2815550100' : '3312345678'),
       ticketMessage: dbCompanyConfig.ticket_message,
@@ -222,6 +238,7 @@ export default function AppLayout() {
     notify_on_booking: dbCompanyConfig.notify_on_booking,
     reminder_hours: dbCompanyConfig.reminder_hours,
     ...pickEmailTemplates(),
+    ...pickNotifySettings(),
   });
 
   const saveCompanyConfig = async () => {
@@ -502,11 +519,20 @@ export default function AppLayout() {
         const clinicLocale = localeForClinic(activeClinic);
         setDbCompanyConfig({
           ...emptyEmailTemplateState(clinicLocale),
+          ...defaultNotifySettings(clinicLocale),
           ...resC.data,
           name: formatClinicField(resC.data.name),
           address: formatClinicField(resC.data.address),
           phone: formatClinicPhone(resC.data.phone),
           ticket_message: formatClinicField(resC.data.ticket_message),
+          notify_session_label: resC.data.notify_session_label || defaultNotifySettings(clinicLocale).notify_session_label,
+          notify_session_default: resC.data.notify_session_default ?? defaultNotifySettings(clinicLocale).notify_session_default,
+          notify_auto_first: resC.data.notify_auto_first !== false,
+          notify_auto_booking: resC.data.notify_auto_booking !== false,
+          notify_auto_reschedule: resC.data.notify_auto_reschedule !== false,
+          notify_auto_cancel: resC.data.notify_auto_cancel !== false,
+          notify_channel_email: resC.data.notify_channel_email !== false,
+          notify_channel_sms: resC.data.notify_channel_sms !== false,
           start_time: normalizeTimeInput(resC.data.start_time) || '07:00',
           end_time: normalizeTimeInput(resC.data.end_time) || '20:00',
         });
@@ -527,6 +553,7 @@ export default function AppLayout() {
           financial_pin: '123456',
           notify_on_booking: true,
           reminder_hours: 24,
+          ...defaultNotifySettings(clinicLocale),
           ...emptyEmailTemplateState(clinicLocale),
         };
         await activeSupabase.from('company_config').insert([defaultCfg]);
@@ -775,20 +802,10 @@ export default function AppLayout() {
   };
 
   const notifyPatientFromSlot = async (slot, { showSuccess = false, notifyReason, notifyType: notifyTypeOverride } = {}) => {
-    if (dbCompanyConfig.notify_on_booking === false) {
-      if (showSuccess) alert(L.p.appt.notifyDisabled);
-      return null;
-    }
-
     const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(slot.patient));
     const patInfo = matchingPatients[0];
     const email = (slot.email || patInfo?.email || '').trim();
     const phone = (slot.phone || patInfo?.phone || '').trim();
-
-    if (!email && !phone) {
-      if (showSuccess) alert(L.p.appt.notifyNoContact);
-      return null;
-    }
 
     const notifyType = notifyTypeOverride || resolveAppointmentNotifyType({
       notifyReason,
@@ -798,6 +815,24 @@ export default function AppLayout() {
       excludeAppointmentId: slot.id,
       normalize: normalizeStr,
     });
+
+    const isManual = showSuccess;
+    if (!isAutoNotifyEnabled(dbCompanyConfig, notifyType, { manual: isManual })) {
+      if (showSuccess) alert(L.p.appt.notifyDisabled);
+      return null;
+    }
+
+    if (!email && !phone) {
+      if (showSuccess) alert(L.p.appt.notifyNoContact);
+      return null;
+    }
+
+    const sendEmail = dbCompanyConfig.notify_channel_email !== false;
+    const sendSms = dbCompanyConfig.notify_channel_sms !== false;
+    if (!sendEmail && !sendSms) {
+      if (showSuccess) alert(locale === 'en' ? 'Email and SMS channels are disabled in Admin.' : 'Correo y SMS están desactivados en Admin.');
+      return null;
+    }
 
     try {
       const data = await sendAppointmentNotification({
@@ -809,16 +844,19 @@ export default function AppLayout() {
         equipment: slot.equipment,
         clinicName: activeClinic,
         clinicDisplayName: dbCompanyConfig.name,
-        instructions: slot.notes || '',
+        instructions: resolveSessionInstructions(slot.notes, dbCompanyConfig),
+        instructionsLabel: getSessionInstructionsLabel(dbCompanyConfig, locale),
         address: dbCompanyConfig.address,
         clinicPhone: dbCompanyConfig.phone,
         ticketMessage: dbCompanyConfig.ticket_message,
         locale,
         prefers_email: slot.prefers_email ?? patInfo?.prefers_email,
         prefers_sms: slot.prefers_sms ?? patInfo?.prefers_sms,
-        notifyEnabled: dbCompanyConfig.notify_on_booking !== false,
+        notifyEnabled: true,
         notifyType,
         emailTemplates: pickEmailTemplates(),
+        sendEmail,
+        sendSms,
       });
 
       const summary = summarizeNotifyReport(data.report, locale);
@@ -2453,6 +2491,36 @@ export default function AppLayout() {
                   </div>
                 </div>
 
+                <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 sm:p-5 mb-4">
+                  <h4 className="text-xs font-black uppercase text-amber-900 mb-1">Indicaciones para tu sesión (bloque amarillo del correo)</h4>
+                  <p className="text-[10px] font-bold text-amber-800/90 mb-4 leading-relaxed">
+                    Texto por defecto si la cita no trae notas del día. Si al agendar escribes instrucciones en la cita, esas tienen prioridad.
+                    Usa {'{{instrucciones}}'} en el mensaje principal si quieres insertarlo ahí también.
+                  </p>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Título del bloque</label>
+                      <input
+                        type="text"
+                        value={dbCompanyConfig.notify_session_label || ''}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_label: e.target.value })}
+                        className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1"
+                        placeholder="Indicaciones para tu sesión"
+                      />
+                    </div>
+                    <div className="lg:col-span-2">
+                      <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Texto de indicaciones</label>
+                      <textarea
+                        rows={4}
+                        value={dbCompanyConfig.notify_session_default || ''}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_default: e.target.value })}
+                        className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
+                        placeholder="Evitar comidas pesadas 2 horas antes de la sesión."
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <button
                   onClick={async () => {
                     try {
@@ -2537,17 +2605,47 @@ export default function AppLayout() {
                 {/* CONFIGURACIÓN DE NOTIFICACIONES */}
                 <h3 className="font-black text-slate-800 uppercase text-sm mb-4 pb-2 border-b mt-6">Motor de Notificaciones (Email y SMS)</h3>
                 <p className="text-[10px] font-bold text-slate-500 mb-3 leading-relaxed">
-                  Activa o desactiva el envío automático al agendar, reprogramar o cancelar.
+                  Elige qué eventos envían correo/SMS automáticamente. El botón manual &quot;Enviar indicaciones&quot; en la cita sigue funcionando aunque desactives un tipo.
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                  <div className="flex items-center gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-                    <input type="checkbox" checked={dbCompanyConfig.notify_on_booking} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_on_booking: e.target.checked})} className="w-4 h-4 cursor-pointer" />
-                    <label className="text-[10px] font-black text-slate-700 uppercase cursor-pointer">Notificar al crear cita</label>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Horas previas (Recordatorio)</label>
-                    <input type="number" value={dbCompanyConfig.reminder_hours} onChange={e => setDbCompanyConfig({...dbCompanyConfig, reminder_hours: Number(e.target.value)})} className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm" />
-                  </div>
+                <div className="flex items-center gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm mb-4">
+                  <input type="checkbox" checked={dbCompanyConfig.notify_on_booking !== false} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_on_booking: e.target.checked})} className="w-4 h-4 cursor-pointer" />
+                  <label className="text-[10px] font-black text-slate-700 uppercase cursor-pointer">Master: notificaciones automáticas activas</label>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                  {[
+                    { key: 'notify_auto_first', label: locale === 'en' ? 'First appointment' : 'Primera cita' },
+                    { key: 'notify_auto_booking', label: locale === 'en' ? 'Recurring / scheduling' : 'Programación (recurrente)' },
+                    { key: 'notify_auto_reschedule', label: locale === 'en' ? 'Reschedule' : 'Reprogramación' },
+                    { key: 'notify_auto_cancel', label: locale === 'en' ? 'Cancellation' : 'Cancelación' },
+                  ].map((item) => (
+                    <label key={item.key} className="flex items-center gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={dbCompanyConfig[item.key] !== false}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [item.key]: e.target.checked })}
+                        className="w-4 h-4"
+                      />
+                      <span className="text-[10px] font-black text-slate-700 uppercase">{item.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                  <label className="flex items-center gap-2 bg-blue-50 p-3 rounded-lg border border-blue-200 cursor-pointer">
+                    <input type="checkbox" checked={dbCompanyConfig.notify_channel_email !== false} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_channel_email: e.target.checked})} className="w-4 h-4" />
+                    <span className="text-[10px] font-black text-blue-900 uppercase">Canal: correo electrónico</span>
+                  </label>
+                  <label className="flex items-center gap-2 bg-violet-50 p-3 rounded-lg border border-violet-200 cursor-pointer">
+                    <input type="checkbox" checked={dbCompanyConfig.notify_channel_sms !== false} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_channel_sms: e.target.checked})} className="w-4 h-4" />
+                    <span className="text-[10px] font-black text-violet-900 uppercase">Canal: SMS (Twilio)</span>
+                  </label>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Horas previas (recordatorio automático — próximamente)</label>
+                  <input type="number" value={dbCompanyConfig.reminder_hours} onChange={e => setDbCompanyConfig({...dbCompanyConfig, reminder_hours: Number(e.target.value)})} className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm" />
+                </div>
+                <div className="mt-4 mb-4 p-3 rounded-lg bg-slate-100 border border-slate-200 text-[10px] font-bold text-slate-600 leading-relaxed">
+                  <span className="font-black uppercase text-slate-500 block mb-1">Notificaciones push (teléfono)</span>
+                  Aún no están disponibles. La app se puede instalar como PWA, pero no envía push al paciente ni al staff. Solo correo (Resend) y SMS (Twilio).
                 </div>
                 <button
                   type="button"

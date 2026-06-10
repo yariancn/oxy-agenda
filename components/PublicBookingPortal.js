@@ -17,6 +17,11 @@ import {
   summarizeNotifyReport,
 } from '../lib/appointmentNotify';
 import { resolveAppointmentNotifyType } from '../lib/emailTemplates';
+import {
+  getSessionInstructionsLabel,
+  isAutoNotifyEnabled,
+  resolveSessionInstructions,
+} from '../lib/notifySettings';
 
 export default function PublicBookingPortal({
   supabase,
@@ -162,13 +167,14 @@ export default function PublicBookingPortal({
         throw result.error;
       }
 
-      if (dbConfig?.notify_on_booking !== false) {
+      const notifyType = resolveAppointmentNotifyType({
+        isNewPatient: result.patient.isNew,
+        patientName: result.patient.displayName,
+        appointments: dbAppointments,
+      });
+
+      if (isAutoNotifyEnabled(dbConfig || {}, notifyType)) {
         try {
-          const notifyType = resolveAppointmentNotifyType({
-            isNewPatient: result.patient.isNew,
-            patientName: result.patient.displayName,
-            appointments: dbAppointments,
-          });
           const notifyData = await sendAppointmentNotification({
             patientName: result.patient.displayName,
             phone: result.patient.phone,
@@ -178,7 +184,8 @@ export default function PublicBookingPortal({
             equipment: selectedService.name,
             clinicName,
             clinicDisplayName: dbConfig?.name || branding.title,
-            instructions: formData.notes,
+            instructions: resolveSessionInstructions(formData.notes, dbConfig || {}),
+            instructionsLabel: getSessionInstructionsLabel(dbConfig || {}, locale),
             address: dbConfig?.address || '',
             clinicPhone: dbConfig?.phone || '',
             ticketMessage: dbConfig?.ticket_message || '',
@@ -186,6 +193,8 @@ export default function PublicBookingPortal({
             notifyEnabled: true,
             notifyType,
             emailTemplates: dbConfig || {},
+            sendEmail: dbConfig?.notify_channel_email !== false,
+            sendSms: dbConfig?.notify_channel_sms !== false,
           });
           if (notifyHadFailure(notifyData.report)) {
             console.warn('Booking notify partial failure', notifyData.report);

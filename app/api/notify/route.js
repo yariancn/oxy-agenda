@@ -24,6 +24,7 @@ export async function POST(request) {
       prefers_sms = true,
       notifyType = 'booking',
       emailTemplates = {},
+      instructionsLabel = '',
     } = body;
 
     let emailStatus = locale === 'en' ? 'Not requested' : 'No solicitado';
@@ -43,6 +44,7 @@ export async function POST(request) {
       clinicPhone,
       ticketMessage,
       emailTemplates,
+      instructionsLabel,
     });
 
     if (email && prefers_email !== false && (type === 'both' || type === 'email')) {
