@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { buildNotifyContent, toE164Phone } from '../../../lib/appointmentNotify.js';
+import { getResendApiKey, getResendFromAddress } from '../../../lib/resendConfig.js';
 
 export async function POST(request) {
   try {
@@ -21,6 +22,8 @@ export async function POST(request) {
       type = 'both',
       prefers_email = true,
       prefers_sms = true,
+      notifyType = 'booking',
+      emailTemplates = {},
     } = body;
 
     let emailStatus = locale === 'en' ? 'Not requested' : 'No solicitado';
@@ -28,6 +31,7 @@ export async function POST(request) {
 
     const { subject, emailHtml, smsBody } = buildNotifyContent({
       locale,
+      notifyType,
       patientName,
       clinicName,
       clinicDisplayName,
@@ -38,17 +42,16 @@ export async function POST(request) {
       address,
       clinicPhone,
       ticketMessage,
+      emailTemplates,
     });
 
     if (email && prefers_email !== false && (type === 'both' || type === 'email')) {
-      const resendKey = process.env.RESEND_API_KEY;
+      const resendKey = getResendApiKey();
 
       if (!resendKey) {
         emailStatus = locale === 'en' ? 'Missing RESEND_API_KEY on server' : 'Falta RESEND_API_KEY en el servidor';
       } else {
-        const fromEmail = clinicName.includes('Shenandoah')
-          ? 'Citas Regenoxy <citas@regenoxy.com>'
-          : 'Citas OxyHyperbaric <citas@oxyhyperbaric.com>';
+        const fromEmail = getResendFromAddress(clinicName);
 
         const emailReq = await fetch('https://api.resend.com/emails', {
           method: 'POST',

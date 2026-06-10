@@ -16,6 +16,7 @@ import {
   sendAppointmentNotification,
   summarizeNotifyReport,
 } from '../lib/appointmentNotify';
+import { resolveAppointmentNotifyType } from '../lib/emailTemplates';
 
 export default function PublicBookingPortal({
   supabase,
@@ -163,6 +164,11 @@ export default function PublicBookingPortal({
 
       if (dbConfig?.notify_on_booking !== false) {
         try {
+          const notifyType = resolveAppointmentNotifyType({
+            isNewPatient: result.patient.isNew,
+            patientName: result.patient.displayName,
+            appointments: dbAppointments,
+          });
           const notifyData = await sendAppointmentNotification({
             patientName: result.patient.displayName,
             phone: result.patient.phone,
@@ -178,6 +184,8 @@ export default function PublicBookingPortal({
             ticketMessage: dbConfig?.ticket_message || '',
             locale,
             notifyEnabled: true,
+            notifyType,
+            emailTemplates: dbConfig || {},
           });
           if (notifyHadFailure(notifyData.report)) {
             console.warn('Booking notify partial failure', notifyData.report);

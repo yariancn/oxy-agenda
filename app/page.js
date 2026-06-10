@@ -37,10 +37,16 @@ import {
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
 import { buildPromoterBookingUrl, normalizePromoCode } from '../lib/promoters';
 import {
+  buildNotifyContent,
   notifyHadFailure,
   sendAppointmentNotification,
   summarizeNotifyReport,
 } from '../lib/appointmentNotify';
+import {
+  EMAIL_PLACEHOLDER_HINT,
+  emptyEmailTemplateState,
+  resolveAppointmentNotifyType,
+} from '../lib/emailTemplates';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -105,11 +111,16 @@ export default function AppLayout() {
     master_pin: '000000',
     financial_pin: '123456',
     notify_on_booking: true,
-    reminder_hours: 24
+    reminder_hours: 24,
+    ...emptyEmailTemplateState('es'),
   });
   
-  const [dbStatus, setDbStatus] = useState('cargando'); 
+  const [emailTemplateTab, setEmailTemplateTab] = useState('first');
+  const [emailPreview, setEmailPreview] = useState(null);
+  const [adminSubTab, setAdminSubTab] = useState('general');
+
   const [searchQuery, setSearchQuery] = useState('');
+  const [dbStatus, setDbStatus] = useState('cargando');
   const [dbErrorMessage, setDbErrorMessage] = useState('');
 
   // --- FORMULARIOS GLOBALES ---
@@ -149,6 +160,79 @@ export default function AppLayout() {
   const L = useMemo(() => staffStrings(locale), [locale]);
   const presetLabels = useMemo(() => getSessionPresetLabels(locale), [locale]);
   const a = (key, ...args) => staffAlert(locale, key, ...args);
+
+  const emailTemplateTabLabels = {
+    first: locale === 'en' ? 'First appointment' : 'Primera cita',
+    booking: locale === 'en' ? 'Scheduling' : 'Programación',
+    reschedule: locale === 'en' ? 'Reschedule' : 'Reprogramación',
+    cancel: locale === 'en' ? 'Cancellation' : 'Cancelación',
+  };
+
+  const pickEmailTemplates = (config = dbCompanyConfig) => ({
+    notify_subject_first: config.notify_subject_first,
+    notify_body_first: config.notify_body_first,
+    notify_subject_booking: config.notify_subject_booking,
+    notify_body_booking: config.notify_body_booking,
+    notify_subject_reschedule: config.notify_subject_reschedule,
+    notify_body_reschedule: config.notify_body_reschedule,
+    notify_subject_cancel: config.notify_subject_cancel,
+    notify_body_cancel: config.notify_body_cancel,
+    notify_extra_info: config.notify_extra_info,
+  });
+
+  const openEmailPreview = () => {
+    const sampleDate = new Date();
+    sampleDate.setDate(sampleDate.getDate() + 3);
+    const dateStr = sampleDate.toISOString().split('T')[0];
+    const sampleService = dbServices.find((s) => s.is_active)?.name
+      || (locale === 'en' ? 'Hyperbaric Chamber' : 'Cámara Hiperbárica');
+    const preview = buildNotifyContent({
+      locale,
+      notifyType: emailTemplateTab,
+      patientName: locale === 'en' ? 'John Smith' : 'María González',
+      clinicName: activeClinic,
+      clinicDisplayName: dbCompanyConfig.name,
+      date: dateStr,
+      time: '10:00',
+      equipment: sampleService,
+      instructions: locale === 'en'
+        ? 'Avoid heavy meals 2 hours before your session.'
+        : 'Evitar comidas pesadas 2 horas antes de la sesión.',
+      address: dbCompanyConfig.address || (locale === 'en' ? '123 Medical Center Dr, Houston TX' : 'Av. Patria 123, Guadalajara'),
+      clinicPhone: dbCompanyConfig.phone || (locale === 'en' ? '2815550100' : '3312345678'),
+      ticketMessage: dbCompanyConfig.ticket_message,
+      emailTemplates: pickEmailTemplates(),
+    });
+    setEmailPreview(preview);
+  };
+
+  const buildCompanyConfigPayload = () => ({
+    name: dbCompanyConfig.name,
+    address: dbCompanyConfig.address,
+    phone: dbCompanyConfig.phone,
+    ticket_message: dbCompanyConfig.ticket_message,
+    start_time: normalizeTimeInput(dbCompanyConfig.start_time) || '07:00',
+    end_time: normalizeTimeInput(dbCompanyConfig.end_time) || '20:00',
+    interval_mins: dbCompanyConfig.interval_mins,
+    booking_limit_hours: dbCompanyConfig.booking_limit_hours,
+    cancel_limit_hours: dbCompanyConfig.cancel_limit_hours,
+    master_pin: dbCompanyConfig.master_pin,
+    financial_pin: dbCompanyConfig.financial_pin,
+    notify_on_booking: dbCompanyConfig.notify_on_booking,
+    reminder_hours: dbCompanyConfig.reminder_hours,
+    ...pickEmailTemplates(),
+  });
+
+  const saveCompanyConfig = async () => {
+    const { error, warning } = await saveCompanyConfigRow(activeSupabase, {
+      id: dbCompanyConfig.id,
+      clinic: activeClinic,
+      payload: buildCompanyConfigPayload(),
+    });
+    if (error) throw new Error(error.message);
+    alert(warning || L.p.admin.configSaved);
+    fetchAllData();
+  };
 
   useEffect(() => {
     document.documentElement.lang = locale === 'en' ? 'en' : 'es';
@@ -414,12 +498,15 @@ export default function AppLayout() {
       }
       
       if (resC.data) {
+        const clinicLocale = localeForClinic(activeClinic);
         setDbCompanyConfig({
+          ...emptyEmailTemplateState(clinicLocale),
           ...resC.data,
           start_time: normalizeTimeInput(resC.data.start_time) || '07:00',
           end_time: normalizeTimeInput(resC.data.end_time) || '20:00',
         });
       } else {
+        const clinicLocale = localeForClinic(activeClinic);
         const defaultCfg = { 
           clinic: activeClinic, 
           name: activeClinic === 'Shenandoah' ? 'REGENOXY LLC' : 'OXYGENGDL', 
@@ -434,7 +521,8 @@ export default function AppLayout() {
           master_pin: '000000',
           financial_pin: '123456',
           notify_on_booking: true,
-          reminder_hours: 24
+          reminder_hours: 24,
+          ...emptyEmailTemplateState(clinicLocale),
         };
         await activeSupabase.from('company_config').insert([defaultCfg]);
         setDbCompanyConfig(defaultCfg);
@@ -681,7 +769,7 @@ export default function AppLayout() {
     });
   };
 
-  const notifyPatientFromSlot = async (slot, { showSuccess = false } = {}) => {
+  const notifyPatientFromSlot = async (slot, { showSuccess = false, notifyReason, notifyType: notifyTypeOverride } = {}) => {
     if (dbCompanyConfig.notify_on_booking === false) {
       if (showSuccess) alert(L.p.appt.notifyDisabled);
       return null;
@@ -696,6 +784,15 @@ export default function AppLayout() {
       if (showSuccess) alert(L.p.appt.notifyNoContact);
       return null;
     }
+
+    const notifyType = notifyTypeOverride || resolveAppointmentNotifyType({
+      notifyReason,
+      isNewPatient: slot.is_new_patient,
+      patientName: slot.patient,
+      appointments: dbAppointments,
+      excludeAppointmentId: slot.id,
+      normalize: normalizeStr,
+    });
 
     try {
       const data = await sendAppointmentNotification({
@@ -715,6 +812,8 @@ export default function AppLayout() {
         prefers_email: slot.prefers_email ?? patInfo?.prefers_email,
         prefers_sms: slot.prefers_sms ?? patInfo?.prefers_sms,
         notifyEnabled: dbCompanyConfig.notify_on_booking !== false,
+        notifyType,
+        emailTemplates: pickEmailTemplates(),
       });
 
       const summary = summarizeNotifyReport(data.report, locale);
@@ -988,6 +1087,13 @@ export default function AppLayout() {
       if (error) alert(a('moveError', error.message));
       else {
         await logAudit(moveConfirmation.app.id, moveConfirmation.app.patient, 'REUBICACIÓN', `De ${moveConfirmation.app.full_date} ${moveConfirmation.app.time} (${moveConfirmation.app.equipment}) a ${moveConfirmation.newFullDate} ${moveConfirmation.newTime} (${moveConfirmation.newEquipment})`);
+        await notifyPatientFromSlot({
+          ...moveConfirmation.app,
+          full_date: moveConfirmation.newFullDate,
+          fullDate: moveConfirmation.newFullDate,
+          time: moveConfirmation.newTime,
+          equipment: moveConfirmation.newEquipment,
+        }, { notifyReason: 'reschedule' });
       }
       
       setMoveConfirmation(null);
@@ -1120,6 +1226,7 @@ export default function AppLayout() {
       }).eq('id', app.id);
 
       await logAudit(app.id, patientName, 'CITA CANCELADA', auditDetail);
+      await notifyPatientFromSlot(app, { notifyReason: 'cancel' });
       setShowCancelModal(false);
       setCancelDeductSession(false);
       closeAppointmentPanel();
@@ -2242,8 +2349,122 @@ export default function AppLayout() {
         {/* VISTA ADMIN */}
         {activeTab === 'Admin' && currentUserLevel <= 2 && (
           <div className="flex-1 p-3 lg:p-6 bg-white overflow-auto flex flex-col h-full z-10">
-            <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight mb-6 pb-4 border-b border-slate-200">Ajustes de Clínica y Horarios</h2>
-            
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6 pb-4 border-b border-slate-200">
+              <div>
+                <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Ajustes de Clínica</h2>
+                <p className="text-[10px] font-bold text-slate-500 uppercase mt-1">
+                  {activeClinic === 'Shenandoah' ? 'Houston · USA' : 'Guadalajara · MX'}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAdminSubTab('general')}
+                  className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase transition ${adminSubTab === 'general' ? 'bg-slate-900 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                >
+                  ⚙️ General y horarios
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminSubTab('mensajes')}
+                  className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase transition ${adminSubTab === 'mensajes' ? 'bg-emerald-600 text-white shadow' : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'}`}
+                >
+                  ✉️ Mensajes de correo
+                </button>
+              </div>
+            </div>
+
+            {adminSubTab === 'mensajes' && (
+              <div className="bg-emerald-50/50 p-4 sm:p-8 rounded-2xl border-2 border-emerald-200 shadow-sm mb-8">
+                <h3 className="font-black text-emerald-900 uppercase text-lg mb-1">Mensajes que se envían al paciente</h3>
+                <p className="text-xs font-bold text-emerald-800/80 mb-6 leading-relaxed max-w-3xl">
+                  Edita el texto de cada tipo de aviso. Cada clínica (GDL y Houston) tiene sus propios mensajes.
+                  Al agendar, reprogramar o cancelar se usa la plantilla correspondiente. Los datos de fecha, hora y servicio se agregan solos.
+                </p>
+
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {[
+                    { id: 'first', label: locale === 'en' ? 'First visit' : 'Primera cita' },
+                    { id: 'booking', label: locale === 'en' ? 'Scheduling' : 'Programación' },
+                    { id: 'reschedule', label: locale === 'en' ? 'Reschedule' : 'Reprogramación' },
+                    { id: 'cancel', label: locale === 'en' ? 'Cancellation' : 'Cancelación' },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setEmailTemplateTab(tab.id)}
+                      className={`px-4 py-2.5 rounded-lg text-[10px] font-black uppercase transition ${emailTemplateTab === tab.id ? 'bg-emerald-600 text-white shadow' : 'bg-white border border-emerald-200 text-emerald-900 hover:bg-emerald-100'}`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+                  <div className="space-y-3 bg-white p-4 sm:p-5 rounded-xl border border-emerald-100 shadow-sm">
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Asunto del correo</label>
+                      <input
+                        type="text"
+                        value={dbCompanyConfig[`notify_subject_${emailTemplateTab}`] || ''}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_subject_${emailTemplateTab}`]: e.target.value })}
+                        className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Mensaje principal</label>
+                      <textarea
+                        rows={8}
+                        value={dbCompanyConfig[`notify_body_${emailTemplateTab}`] || ''}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_body_${emailTemplateTab}`]: e.target.value })}
+                        className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={openEmailPreview}
+                      className="w-full sm:w-auto px-4 py-2.5 bg-blue-50 border border-blue-200 text-blue-800 font-black text-[10px] uppercase rounded-lg hover:bg-blue-100 transition"
+                    >
+                      👁 {locale === 'en' ? 'Preview email' : 'Vista previa del correo'}
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="bg-white p-4 sm:p-5 rounded-xl border border-emerald-100 shadow-sm">
+                      <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Datos relevantes (en todos los correos)</label>
+                      <p className="text-[9px] font-bold text-slate-400 mb-2">Estacionamiento, qué traer, políticas, maps, etc.</p>
+                      <textarea
+                        rows={8}
+                        value={dbCompanyConfig.notify_extra_info || ''}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_extra_info: e.target.value })}
+                        className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white text-sm leading-relaxed"
+                        placeholder={locale === 'en' ? 'Free parking in lot B. Wear comfortable clothes.' : 'Estacionamiento gratuito. Traer ropa cómoda y evitar perfumes fuertes.'}
+                      />
+                    </div>
+                    <div className="bg-slate-800 text-slate-200 p-4 rounded-xl text-[10px] font-bold leading-relaxed">
+                      <p className="font-black uppercase text-slate-400 mb-2">Variables que puedes usar</p>
+                      <p className="font-mono text-[9px] break-all">{EMAIL_PLACEHOLDER_HINT}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={async () => {
+                    try {
+                      await saveCompanyConfig();
+                    } catch (e) {
+                      alert(a('configSaveError', e.message));
+                    }
+                  }}
+                  className="w-full sm:w-auto sm:min-w-[280px] bg-emerald-600 text-white font-black py-4 px-8 rounded-xl uppercase shadow-lg hover:bg-emerald-700 transition"
+                >
+                  Guardar mensajes de correo
+                </button>
+              </div>
+            )}
+
+            {adminSubTab === 'general' && (
+            <>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               
               <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 shadow-sm h-fit">
@@ -2308,13 +2529,12 @@ export default function AppLayout() {
                   </div>
                 </div>
 
-                {/* NUEVO: CONFIGURACIÓN DE NOTIFICACIONES */}
+                {/* CONFIGURACIÓN DE NOTIFICACIONES */}
                 <h3 className="font-black text-slate-800 uppercase text-sm mb-4 pb-2 border-b mt-6">Motor de Notificaciones (Email y SMS)</h3>
-                <p className="text-[10px] font-bold text-slate-500 mb-4 leading-relaxed">
-                  Al agendar o al pulsar &quot;Enviar indicaciones&quot;, se envía confirmación con fecha, hora, servicio e instrucciones de la cita.
-                  Requiere variables en Vercel: RESEND_API_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER.
+                <p className="text-[10px] font-bold text-slate-500 mb-3 leading-relaxed">
+                  Activa o desactiva el envío automático al agendar, reprogramar o cancelar.
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                   <div className="flex items-center gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
                     <input type="checkbox" checked={dbCompanyConfig.notify_on_booking} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_on_booking: e.target.checked})} className="w-4 h-4 cursor-pointer" />
                     <label className="text-[10px] font-black text-slate-700 uppercase cursor-pointer">Notificar al crear cita</label>
@@ -2324,32 +2544,25 @@ export default function AppLayout() {
                     <input type="number" value={dbCompanyConfig.reminder_hours} onChange={e => setDbCompanyConfig({...dbCompanyConfig, reminder_hours: Number(e.target.value)})} className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm" />
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setAdminSubTab('mensajes')}
+                  className="w-full mb-6 p-4 rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50 text-left hover:bg-emerald-100 transition group"
+                >
+                  <span className="block text-[10px] font-black uppercase text-emerald-800">✉️ Editar textos de correo y SMS</span>
+                  <span className="block text-xs font-bold text-emerald-700 mt-1">Primera cita · Programación · Reprogramación · Cancelación · Datos relevantes</span>
+                </button>
+                <details className="mb-6 text-[10px] font-bold text-slate-500">
+                  <summary className="cursor-pointer uppercase text-slate-400 font-black">Configuración técnica (Vercel / Resend / Twilio)</summary>
+                  <p className="mt-2 leading-relaxed pl-2 border-l-2 border-slate-200">
+                    Variables en Vercel: RESEND_API_KEY, RESEND_FROM_GDL, RESEND_FROM_TX, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER.
+                    Remitentes: GDL citas@oxygengdl.com · USA inf@oxyhyperbaric.com
+                  </p>
+                </details>
 
                 <button onClick={async () => {
                   try {
-                    const p = { 
-                      name: dbCompanyConfig.name, 
-                      address: dbCompanyConfig.address, 
-                      phone: dbCompanyConfig.phone, 
-                      ticket_message: dbCompanyConfig.ticket_message, 
-                      start_time: normalizeTimeInput(dbCompanyConfig.start_time) || '07:00', 
-                      end_time: normalizeTimeInput(dbCompanyConfig.end_time) || '20:00', 
-                      interval_mins: dbCompanyConfig.interval_mins,
-                      booking_limit_hours: dbCompanyConfig.booking_limit_hours,
-                      cancel_limit_hours: dbCompanyConfig.cancel_limit_hours,
-                      master_pin: dbCompanyConfig.master_pin, 
-                      financial_pin: dbCompanyConfig.financial_pin,
-                      notify_on_booking: dbCompanyConfig.notify_on_booking,
-                      reminder_hours: dbCompanyConfig.reminder_hours
-                    };
-                    const { error, warning } = await saveCompanyConfigRow(activeSupabase, {
-                      id: dbCompanyConfig.id,
-                      clinic: activeClinic,
-                      payload: p,
-                    });
-                    if (error) throw new Error(error.message);
-                    alert(warning || L.p.admin.configSaved);
-                    fetchAllData();
+                    await saveCompanyConfig();
                   } catch (e) {
                     alert(a('configSaveError', e.message));
                   }
@@ -2637,12 +2850,53 @@ export default function AppLayout() {
                 </div>
               )}
             </div>
+            </>
+            )}
           </div>
         )}
 
       </main>
 
-      {/* --- MODALES Z-INDEX 50+ FLOTANTES FUERA DE MAIN --- */}
+      {emailPreview && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[99999]">
+          <div className="bg-white rounded-t-2xl sm:rounded-3xl w-full max-w-2xl shadow-2xl border max-h-[92dvh] sm:max-h-[90vh] flex flex-col overflow-hidden text-slate-900">
+            <div className="bg-blue-50 px-4 sm:px-8 py-3 sm:py-4 border-b border-blue-100 shrink-0 flex justify-between items-start gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase text-blue-600 mb-1">
+                  {locale === 'en' ? 'Email preview' : 'Vista previa'} · {emailTemplateTabLabels[emailTemplateTab]}
+                </p>
+                <h3 className="font-black text-sm sm:text-base uppercase text-slate-800 truncate">{emailPreview.subject}</h3>
+                <p className="text-[9px] font-bold text-slate-500 mt-1">
+                  {locale === 'en' ? 'Sample data — not sent' : 'Datos de ejemplo — no se envía'}
+                </p>
+              </div>
+              <button onClick={() => setEmailPreview(null)} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition shrink-0">&times;</button>
+            </div>
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 min-h-0">
+              <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
+                <iframe
+                  title={locale === 'en' ? 'Email preview' : 'Vista previa correo'}
+                  srcDoc={emailPreview.emailHtml}
+                  className="w-full min-h-[320px] sm:min-h-[420px] bg-white border-0"
+                  sandbox=""
+                />
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <p className="text-[10px] font-black uppercase text-slate-400 mb-2">SMS</p>
+                <p className="text-xs font-bold text-slate-700 leading-relaxed whitespace-pre-wrap">{emailPreview.smsBody}</p>
+              </div>
+            </div>
+            <div className="px-4 sm:px-8 py-3 border-t bg-slate-50 shrink-0">
+              <button
+                onClick={() => setEmailPreview(null)}
+                className="w-full bg-slate-900 text-white font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-800 transition"
+              >
+                {locale === 'en' ? 'Close' : 'Cerrar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showCancelModal && selectedSlot && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[99999]">
@@ -3206,6 +3460,7 @@ export default function AppLayout() {
                       fullDate: apptDate,
                       prefers_email: selectedSlot.prefers_email,
                       prefers_sms: selectedSlot.prefers_sms,
+                      is_new_patient: isNewForAppointment,
                     });
                   }
                   setShowNewAppointment(false);
