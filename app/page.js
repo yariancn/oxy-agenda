@@ -36,6 +36,11 @@ import {
 } from '../lib/calendarDisplay';
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
 import { buildPromoterBookingUrl, normalizePromoCode } from '../lib/promoters';
+import {
+  notifyHadFailure,
+  sendAppointmentNotification,
+  summarizeNotifyReport,
+} from '../lib/appointmentNotify';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -670,8 +675,59 @@ export default function AppLayout() {
       packageHistory: patInfo?.packageHistory || [],
       patientNotes: patInfo ? patInfo.notes : '',
       sessionPreset: getPresetFromTimes(app.duration, app.buffer).id,
+      prefers_email: patInfo?.prefers_email !== false,
+      prefers_sms: patInfo?.prefers_sms !== false,
       ...appointmentFlagsFromApp(app),
     });
+  };
+
+  const notifyPatientFromSlot = async (slot, { showSuccess = false } = {}) => {
+    if (dbCompanyConfig.notify_on_booking === false) {
+      if (showSuccess) alert(L.p.appt.notifyDisabled);
+      return null;
+    }
+
+    const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(slot.patient));
+    const patInfo = matchingPatients[0];
+    const email = (slot.email || patInfo?.email || '').trim();
+    const phone = (slot.phone || patInfo?.phone || '').trim();
+
+    if (!email && !phone) {
+      if (showSuccess) alert(L.p.appt.notifyNoContact);
+      return null;
+    }
+
+    try {
+      const data = await sendAppointmentNotification({
+        patientName: slot.patient,
+        phone,
+        email,
+        date: slot.full_date || slot.fullDate,
+        time: slot.time,
+        equipment: slot.equipment,
+        clinicName: activeClinic,
+        clinicDisplayName: dbCompanyConfig.name,
+        instructions: slot.notes || '',
+        address: dbCompanyConfig.address,
+        clinicPhone: dbCompanyConfig.phone,
+        ticketMessage: dbCompanyConfig.ticket_message,
+        locale,
+        prefers_email: slot.prefers_email ?? patInfo?.prefers_email,
+        prefers_sms: slot.prefers_sms ?? patInfo?.prefers_sms,
+        notifyEnabled: dbCompanyConfig.notify_on_booking !== false,
+      });
+
+      const summary = summarizeNotifyReport(data.report, locale);
+      if (showSuccess) {
+        alert(notifyHadFailure(data.report) ? a('notifyFailed', summary) : a('notifySent', summary));
+      } else if (notifyHadFailure(data.report)) {
+        alert(a('notifyFailed', summary));
+      }
+      return data;
+    } catch (error) {
+      alert(a('notifyFailed', error.message));
+      return null;
+    }
   };
 
   useEffect(() => {
@@ -2254,6 +2310,10 @@ export default function AppLayout() {
 
                 {/* NUEVO: CONFIGURACIÓN DE NOTIFICACIONES */}
                 <h3 className="font-black text-slate-800 uppercase text-sm mb-4 pb-2 border-b mt-6">Motor de Notificaciones (Email y SMS)</h3>
+                <p className="text-[10px] font-bold text-slate-500 mb-4 leading-relaxed">
+                  Al agendar o al pulsar &quot;Enviar indicaciones&quot;, se envía confirmación con fecha, hora, servicio e instrucciones de la cita.
+                  Requiere variables en Vercel: RESEND_API_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER.
+                </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                   <div className="flex items-center gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
                     <input type="checkbox" checked={dbCompanyConfig.notify_on_booking} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_on_booking: e.target.checked})} className="w-4 h-4 cursor-pointer" />
@@ -2879,6 +2939,14 @@ export default function AppLayout() {
               </div>
               
               <button onClick={() => loadAuditLogs(selectedSlot.id)} className="w-full text-slate-400 py-2 rounded-2xl font-black uppercase text-[9px] hover:text-slate-600 transition mt-1 underline">👁️ Ver Caja Negra (Auditoría)</button>
+
+              <button
+                type="button"
+                onClick={() => notifyPatientFromSlot(selectedSlot, { showSuccess: true })}
+                className="w-full bg-indigo-50 text-indigo-800 border border-indigo-200 py-3 rounded-2xl font-black uppercase text-[10px] hover:bg-indigo-100 transition mt-2"
+              >
+                {L.p.appt.sendInstructions}
+              </button>
               </>
               )}
             </div>
@@ -3132,6 +3200,13 @@ export default function AppLayout() {
                       isExtendedSession(selectedSlot) ? L.p.appt.badgeExtended : '',
                     ].filter(Boolean).join(' · ');
                     await logAudit(na[0].id, payload.patient, 'CREACIÓN', `${payload.time}${flags ? ` (${flags})` : ''}`);
+                    await notifyPatientFromSlot({
+                      ...payload,
+                      full_date: apptDate,
+                      fullDate: apptDate,
+                      prefers_email: selectedSlot.prefers_email,
+                      prefers_sms: selectedSlot.prefers_sms,
+                    });
                   }
                   setShowNewAppointment(false);
                   setSelectedSlot(null);

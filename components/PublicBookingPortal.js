@@ -11,6 +11,11 @@ import {
   normalizePromoCode,
   resolvePromoter,
 } from '../lib/promoters';
+import {
+  notifyHadFailure,
+  sendAppointmentNotification,
+  summarizeNotifyReport,
+} from '../lib/appointmentNotify';
 
 export default function PublicBookingPortal({
   supabase,
@@ -155,6 +160,33 @@ export default function PublicBookingPortal({
         }
         throw result.error;
       }
+
+      if (dbConfig?.notify_on_booking !== false) {
+        try {
+          const notifyData = await sendAppointmentNotification({
+            patientName: result.patient.displayName,
+            phone: result.patient.phone,
+            email: (formData.email || result.patient.email || '').trim(),
+            date: selectedDate,
+            time: selectedTime,
+            equipment: selectedService.name,
+            clinicName,
+            clinicDisplayName: dbConfig?.name || branding.title,
+            instructions: formData.notes,
+            address: dbConfig?.address || '',
+            clinicPhone: dbConfig?.phone || '',
+            ticketMessage: dbConfig?.ticket_message || '',
+            locale,
+            notifyEnabled: true,
+          });
+          if (notifyHadFailure(notifyData.report)) {
+            console.warn('Booking notify partial failure', notifyData.report);
+          }
+        } catch (notifyError) {
+          console.warn('Booking notify failed', notifyError);
+        }
+      }
+
       setStep(4);
     } catch (error) {
       alert(error.message || t.genericError);
