@@ -1,8 +1,9 @@
 "use client";
 import React, { useState } from 'react';
 import { useStaffLocale } from './StaffLocaleContext';
+import { formatClinicField, formatClinicPhone } from '../lib/clinicText';
 
-export default function PatientProfileModal({ initialData, onSave, onClose, servicios, currentUserLevel }) {
+export default function PatientProfileModal({ initialData, onSave, onClose, servicios, companyConfig = {}, currentUserLevel }) {
   const { locale, a, L } = useStaffLocale();
   const t = L.modals.patient;
 
@@ -139,17 +140,23 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
   };
 
   const handlePrint = () => {
+    const clinicName = formatClinicField(companyConfig.name) || 'OXYHYPERBARIC';
+    const clinicAddress = formatClinicField(companyConfig.address);
+    const clinicPhone = formatClinicPhone(companyConfig.phone);
+    const thanks = formatClinicField(companyConfig.ticket_message) || t.receiptThanks;
     const printContent = `
-      <div style="width:48mm;font-family:monospace;font-size:11px;">
-        <h2 style="text-align:center;font-size:16px;">OXYHYPERBARIC</h2>
+      <div style="width:48mm;font-family:monospace;font-size:11px;text-transform:uppercase;">
+        <h2 style="text-align:center;font-size:16px;margin:0 0 8px;">${clinicName}</h2>
+        ${clinicAddress ? `<p style="text-align:center;margin:0 0 4px;font-size:10px;">${clinicAddress}</p>` : ''}
+        ${clinicPhone ? `<p style="text-align:center;margin:0 0 8px;font-size:10px;">Tel: ${clinicPhone}</p>` : ''}
         <p>${t.receiptDate} ${receipt.date}</p>
         <p>${t.receiptTicket} #${receipt.id.toString().slice(-6)}</p>
-        <p><strong>${t.receiptClient}</strong> ${receipt.patient}</p>
-        <p>${receipt.serviceName} · ${t.receiptSessions} ${receipt.sessions}</p>
+        <p><strong>${t.receiptClient}</strong> ${String(receipt.patient || '').toUpperCase()}</p>
+        <p>${String(receipt.serviceName || '').toUpperCase()} · ${t.receiptSessions} ${receipt.sessions}</p>
         <p><strong>${t.receiptTotal}</strong> $${receipt.price.toFixed(2)}</p>
         <p>${t.receiptPaidWith} ${receipt.paymentMethod}</p>
         <p>${t.receiptServedBy} ${receipt.operator}</p>
-        <p style="text-align:center;font-style:italic;">${t.receiptThanks}</p>
+        <p style="text-align:center;font-style:italic;margin-top:8px;">${thanks}</p>
       </div>`;
     printHTML(printContent, locale === 'en' ? 'POS receipt' : 'Ticket POS');
   };
@@ -283,11 +290,17 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
       {receipt && (
         <div className="fixed inset-0 bg-slate-900/80 flex items-center justify-center p-4 z-[200]">
           <div className="bg-slate-100 rounded-xl max-w-sm w-full p-4">
-            <div className="bg-white p-6 font-mono text-sm mb-4">
-              <h2 className="font-bold text-lg uppercase text-center">OXYHYPERBARIC</h2>
-              <p className="text-xs">{t.receiptDate} {receipt.date}</p>
-              <p className="text-xs font-bold uppercase">{t.receiptClient} {receipt.patient}</p>
-              <p className="text-xs uppercase">{receipt.serviceName}</p>
+            <div className="bg-white p-6 font-mono text-sm mb-4 uppercase">
+              <h2 className="font-bold text-lg text-center">{formatClinicField(companyConfig.name) || 'OXYHYPERBARIC'}</h2>
+              {companyConfig.address && (
+                <p className="text-[10px] text-center text-slate-600">{formatClinicField(companyConfig.address)}</p>
+              )}
+              {companyConfig.phone && (
+                <p className="text-[10px] text-center text-slate-600 mb-2">Tel: {formatClinicPhone(companyConfig.phone)}</p>
+              )}
+              <p className="text-xs normal-case">{t.receiptDate} {receipt.date}</p>
+              <p className="text-xs font-bold">{t.receiptClient} {receipt.patient}</p>
+              <p className="text-xs">{receipt.serviceName}</p>
               <p className="font-bold mt-2">{t.receiptTotal} ${receipt.price.toFixed(2)}</p>
             </div>
             <div className="flex gap-3">

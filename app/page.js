@@ -27,6 +27,7 @@ import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
 import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
 import { insertStaffAppointment, updateStaffAppointment } from '../lib/staffAppointmentSave';
 import { saveCompanyConfigRow } from '../lib/companyConfigSave';
+import { formatClinicField, formatClinicPhone } from '../lib/clinicText';
 import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
 import {
   computeDefaultZoomScale,
@@ -207,10 +208,10 @@ export default function AppLayout() {
   };
 
   const buildCompanyConfigPayload = () => ({
-    name: dbCompanyConfig.name,
-    address: dbCompanyConfig.address,
-    phone: dbCompanyConfig.phone,
-    ticket_message: dbCompanyConfig.ticket_message,
+    name: formatClinicField(dbCompanyConfig.name),
+    address: formatClinicField(dbCompanyConfig.address),
+    phone: formatClinicPhone(dbCompanyConfig.phone),
+    ticket_message: formatClinicField(dbCompanyConfig.ticket_message),
     start_time: normalizeTimeInput(dbCompanyConfig.start_time) || '07:00',
     end_time: normalizeTimeInput(dbCompanyConfig.end_time) || '20:00',
     interval_mins: dbCompanyConfig.interval_mins,
@@ -502,6 +503,10 @@ export default function AppLayout() {
         setDbCompanyConfig({
           ...emptyEmailTemplateState(clinicLocale),
           ...resC.data,
+          name: formatClinicField(resC.data.name),
+          address: formatClinicField(resC.data.address),
+          phone: formatClinicPhone(resC.data.phone),
+          ticket_message: formatClinicField(resC.data.ticket_message),
           start_time: normalizeTimeInput(resC.data.start_time) || '07:00',
           end_time: normalizeTimeInput(resC.data.end_time) || '20:00',
         });
@@ -1284,8 +1289,8 @@ export default function AppLayout() {
       pagesHTML += `
         <div style="padding: 40px; font-family: sans-serif; page-break-after: always;">
           <div style="text-align: center; margin-bottom: 30px;">
-            <h1 style="margin: 0; font-size: 24px; text-transform: uppercase;">${dbCompanyConfig.name || 'OXYHYPERBARIC'}</h1>
-            <p style="margin: 0; font-size: 12px;">${dbCompanyConfig.address || ''} | Tel: ${dbCompanyConfig.phone || ''}</p>
+            <h1 style="margin: 0; font-size: 24px; text-transform: uppercase;">${formatClinicField(dbCompanyConfig.name) || 'OXYHYPERBARIC'}</h1>
+            <p style="margin: 0; font-size: 12px; text-transform: uppercase;">${formatClinicField(dbCompanyConfig.address)} | Tel: ${formatClinicPhone(dbCompanyConfig.phone)}</p>
             <h2 style="margin-top: 20px; font-size: 18px; border-bottom: 2px solid #000; display: inline-block; padding-bottom: 5px;">BITÁCORA OFICIAL DE ASISTENCIA</h2>
           </div>
           <div style="margin-bottom: 20px;">
@@ -2485,19 +2490,19 @@ export default function AppLayout() {
                 <div className="space-y-4">
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Nombre Comercial</label>
-                    <input type="text" value={dbCompanyConfig.name} onChange={e => setDbCompanyConfig({...dbCompanyConfig, name: e.target.value})} className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" />
+                    <input type="text" value={dbCompanyConfig.name} onChange={e => setDbCompanyConfig({...dbCompanyConfig, name: formatClinicField(e.target.value)})} className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" />
                   </div>
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Dirección Clínica</label>
-                    <input type="text" value={dbCompanyConfig.address} onChange={e => setDbCompanyConfig({...dbCompanyConfig, address: e.target.value})} className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" />
+                    <input type="text" value={dbCompanyConfig.address} onChange={e => setDbCompanyConfig({...dbCompanyConfig, address: formatClinicField(e.target.value)})} className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" />
                   </div>
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Teléfono Público</label>
-                    <input type="text" value={dbCompanyConfig.phone} onChange={e => setDbCompanyConfig({...dbCompanyConfig, phone: e.target.value})} className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" />
+                    <input type="text" value={dbCompanyConfig.phone} onChange={e => setDbCompanyConfig({...dbCompanyConfig, phone: formatClinicPhone(e.target.value)})} className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" />
                   </div>
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Mensaje de Agradecimiento</label>
-                    <input type="text" value={dbCompanyConfig.ticket_message} onChange={e => setDbCompanyConfig({...dbCompanyConfig, ticket_message: e.target.value})} className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" />
+                    <input type="text" value={dbCompanyConfig.ticket_message} onChange={e => setDbCompanyConfig({...dbCompanyConfig, ticket_message: formatClinicField(e.target.value)})} className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" />
                   </div>
                 </div>
                 
@@ -3682,6 +3687,7 @@ export default function AppLayout() {
           <PatientProfileModal 
             initialData={selectedSlot} 
             servicios={dbServices} 
+            companyConfig={dbCompanyConfig}
             currentUserLevel={currentUserLevel}
             onClose={() => setShowPatientProfile(false)} 
             onSave={async (ud) => {
