@@ -35,6 +35,7 @@ import {
   WEEK_STICKY_HEADER_PX,
 } from '../lib/calendarDisplay';
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
+import { buildPromoterBookingUrl, normalizePromoCode } from '../lib/promoters';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -112,6 +113,11 @@ export default function AppLayout() {
   
   const [newProtocol, setNewProtocol] = useState({ id: null, name: '', is_active: true });
   const [isEditingProtocol, setIsEditingProtocol] = useState(false);
+
+  const [dbPromoters, setDbPromoters] = useState([]);
+  const [promotersLoadError, setPromotersLoadError] = useState('');
+  const [newPromoter, setNewPromoter] = useState({ id: null, code: '', name: '', is_active: true });
+  const [isEditingPromoter, setIsEditingPromoter] = useState(false);
 
   const [newRole, setNewRole] = useState({ id: null, name: '', level: 3 });
   const [isEditingRole, setIsEditingRole] = useState(false);
@@ -359,7 +365,7 @@ export default function AppLayout() {
         return allData;
       };
 
-      const [patientsData, appointmentsData, resS, resU, resB, resC, resProt, resRoles] = await Promise.all([
+      const [patientsData, appointmentsData, resS, resU, resB, resC, resProt, resRoles, resPromo] = await Promise.all([
         fetchPaginated('patients'),
         fetchPaginated('appointments'),
         activeSupabase.from('services').select('*'),
@@ -367,7 +373,8 @@ export default function AppLayout() {
         activeSupabase.from('blocked_slots').select('*'),
         activeSupabase.from('company_config').select('*').eq('clinic', activeClinic).maybeSingle(),
         activeSupabase.from('protocols').select('*'),
-        activeSupabase.from('user_roles').select('*')
+        activeSupabase.from('user_roles').select('*'),
+        activeSupabase.from('promoters').select('id, code, name, is_active, created_at').order('code'),
       ]);
 
       const safePatients = (patientsData || []).map(p => ({
@@ -393,6 +400,13 @@ export default function AppLayout() {
       setDbBlockedSlots(resB.data || []);
       setDbProtocols(resProt.data || []);
       setDbRoles(resRoles.data || []);
+      if (resPromo.error) {
+        setDbPromoters([]);
+        setPromotersLoadError(resPromo.error.message || 'promoters');
+      } else {
+        setDbPromoters(resPromo.data || []);
+        setPromotersLoadError('');
+      }
       
       if (resC.data) {
         setDbCompanyConfig({
@@ -1241,6 +1255,48 @@ export default function AppLayout() {
   const selectTab = (tab) => {
     setActiveTab(tab);
     setMobileMoreOpen(false);
+  };
+
+  const copyPromoterLink = async (code) => {
+    const url = buildPromoterBookingUrl(activeClinic, code, typeof window !== 'undefined' ? window.location.origin : '');
+    try {
+      await navigator.clipboard.writeText(url);
+      alert(L.p.admin.promoterCopied);
+    } catch {
+      window.prompt(L.p.admin.promoterCopy, url);
+    }
+  };
+
+  const savePromoter = async () => {
+    const code = normalizePromoCode(newPromoter.code);
+    const name = String(newPromoter.name || '').trim();
+    if (code.length < 2) return alert(L.p.admin.promoterCodeRequired);
+    if (!name) return alert(L.p.admin.promoterNameRequired);
+    if (promotersLoadError) return alert(L.p.admin.promoterTableMissing);
+
+    const duplicate = dbPromoters.some(
+      (p) => normalizePromoCode(p.code) === code && p.id !== newPromoter.id,
+    );
+    if (duplicate) return alert(L.p.admin.promoterDuplicate);
+
+    const payload = { code, name, is_active: newPromoter.is_active !== false };
+    let res;
+    if (isEditingPromoter && newPromoter.id) {
+      res = await activeSupabase.from('promoters').update(payload).eq('id', newPromoter.id);
+    } else {
+      res = await activeSupabase.from('promoters').insert([payload]);
+    }
+    if (res.error) return alert(`${L.p.admin.promoterSaveError}: ${res.error.message}`);
+
+    await logAudit(
+      null,
+      name,
+      isEditingPromoter ? 'PROMOTOR ACTUALIZADO' : 'ALTA PROMOTOR',
+      `Código ${code} · ${activeClinic}`,
+    );
+    setIsEditingPromoter(false);
+    setNewPromoter({ id: null, code: '', name: '', is_active: true });
+    fetchAllData();
   };
 
   const mobilePrimaryTabs = [
@@ -2369,6 +2425,157 @@ export default function AppLayout() {
                 )}
 
               </div>
+            </div>
+
+            <div className="mt-8 bg-slate-50 p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="mb-4">
+                <h3 className="font-black text-slate-800 uppercase text-sm">{L.p.admin.promotersTitle}</h3>
+                <p className="text-[10px] font-bold text-slate-500 mt-1">{L.p.admin.promotersHint}</p>
+                <p className="text-[10px] font-black text-blue-600 mt-1 uppercase">{activeClinicLabel}</p>
+              </div>
+
+              {promotersLoadError ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-[11px] font-bold text-amber-900">
+                  {L.p.admin.promoterTableMissing}
+                  <pre className="mt-2 text-[9px] font-mono text-amber-800/80 whitespace-pre-wrap">{promotersLoadError}</pre>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+                  <div className="xl:col-span-2 bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 h-fit">
+                    <h4 className="font-black text-slate-800 uppercase text-xs mb-4 pb-2 border-b">
+                      {isEditingPromoter ? L.p.admin.promoterEdit : L.p.admin.promoterNew}
+                    </h4>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.admin.promoterCode}</label>
+                        <input
+                          type="text"
+                          value={newPromoter.code}
+                          onChange={(e) => setNewPromoter({ ...newPromoter, code: e.target.value.toUpperCase() })}
+                          placeholder="ANA01"
+                          className="w-full p-3 rounded-xl border border-slate-300 font-black text-sm outline-none uppercase focus:border-blue-500 text-slate-900 bg-white tracking-wider"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.admin.promoterName}</label>
+                        <input
+                          type="text"
+                          value={newPromoter.name}
+                          onChange={(e) => setNewPromoter({ ...newPromoter, name: e.target.value })}
+                          placeholder="Ana García"
+                          className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none focus:border-blue-500 text-slate-900 bg-white"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newPromoter.is_active !== false}
+                          onChange={(e) => setNewPromoter({ ...newPromoter, is_active: e.target.checked })}
+                          className="w-4 h-4"
+                        />
+                        <span className="text-xs font-black uppercase text-slate-700">{L.p.admin.promoterActive}</span>
+                      </label>
+                      {normalizePromoCode(newPromoter.code).length >= 2 && (
+                        <p className="text-[9px] font-mono text-slate-500 break-all bg-slate-50 p-2 rounded-lg border border-slate-200">
+                          {buildPromoterBookingUrl(activeClinic, newPromoter.code, typeof window !== 'undefined' ? window.location.origin : '')}
+                        </p>
+                      )}
+                      <div className="flex gap-2 pt-1">
+                        {isEditingPromoter && (
+                          <button
+                            type="button"
+                            onClick={() => { setIsEditingPromoter(false); setNewPromoter({ id: null, code: '', name: '', is_active: true }); }}
+                            className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200"
+                          >
+                            {L.p.common.cancel}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={savePromoter}
+                          className="flex-1 bg-blue-600 text-white font-black py-3 rounded-xl uppercase text-xs shadow-md hover:bg-blue-700 transition"
+                        >
+                          {isEditingPromoter ? L.p.admin.promoterUpdate : L.p.admin.promoterSave}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="xl:col-span-3 bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                    <div className="px-4 sm:px-5 py-3 border-b border-slate-100 bg-slate-50">
+                      <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{L.p.admin.promoterList}</h4>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left min-w-[320px]">
+                        <thead className="border-b border-slate-100 text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                          <tr>
+                            <th className="px-4 py-3">{L.p.admin.promoterCode}</th>
+                            <th className="px-4 py-3">{L.p.admin.promoterName}</th>
+                            <th className="px-4 py-3">{L.p.admin.promoterLink}</th>
+                            <th className="px-4 py-3 text-right">{L.p.common.edit}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {(dbPromoters || []).map((pr) => (
+                            <tr key={pr.id} className={`hover:bg-slate-50/80 ${!pr.is_active ? 'opacity-50' : ''}`}>
+                              <td className="px-4 py-3 font-black text-slate-800 text-xs tracking-wider">{pr.code}</td>
+                              <td className="px-4 py-3 font-bold text-slate-700 text-xs">{pr.name}</td>
+                              <td className="px-4 py-3">
+                                <button
+                                  type="button"
+                                  onClick={() => copyPromoterLink(pr.code)}
+                                  className="text-[9px] font-black uppercase text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded border border-blue-100"
+                                >
+                                  {L.p.admin.promoterCopy}
+                                </button>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex justify-end gap-1 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => { setNewPromoter(pr); setIsEditingPromoter(true); }}
+                                    className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-[9px] font-black uppercase hover:bg-blue-100 border border-blue-100"
+                                  >
+                                    {L.p.common.edit}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      await activeSupabase.from('promoters').update({ is_active: !pr.is_active }).eq('id', pr.id);
+                                      fetchAllData();
+                                    }}
+                                    className="bg-slate-50 text-slate-600 px-2 py-1 rounded-lg text-[9px] font-black uppercase hover:bg-slate-100 border border-slate-200"
+                                  >
+                                    {pr.is_active ? L.p.admin.promoterDeactivate : L.p.admin.promoterActivate}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      if (!window.confirm(L.p.admin.promoterDeleteConfirm)) return;
+                                      await activeSupabase.from('promoters').delete().eq('id', pr.id);
+                                      fetchAllData();
+                                    }}
+                                    className="bg-red-50 text-red-600 px-2 py-1 rounded-lg text-[9px] font-black uppercase hover:bg-red-100 border border-red-100"
+                                  >
+                                    {L.p.admin.promoterDelete}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                          {(!dbPromoters || dbPromoters.length === 0) && (
+                            <tr>
+                              <td colSpan="4" className="px-4 py-10 text-center text-slate-400 font-bold uppercase text-xs">
+                                {L.p.admin.noPromoters}
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
