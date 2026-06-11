@@ -55,6 +55,10 @@ import {
   NOTIFY_SETTING_FIELDS,
   resolveSessionInstructions,
 } from '../lib/notifySettings';
+import {
+  notifyStaffNewBooking,
+  STAFF_ALERT_FIELDS,
+} from '../lib/staffBookingAlert';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -189,6 +193,35 @@ export default function AppLayout() {
     notify_extra_info: config.notify_extra_info,
   });
 
+  const pickStaffAlertSettings = (config = dbCompanyConfig) => {
+    const picked = {};
+    for (const key of STAFF_ALERT_FIELDS) {
+      picked[key] = config[key];
+    }
+    return picked;
+  };
+
+  const alertStaffNewBooking = async (slot, { source = 'staff', promoterCode = '' } = {}) => {
+    if (dbCompanyConfig.notify_staff_on_booking !== true) return null;
+    try {
+      return await notifyStaffNewBooking({
+        companyConfig: { ...pickStaffAlertSettings(), notify_staff_on_booking: true },
+        clinicName: activeClinic,
+        clinicDisplayName: dbCompanyConfig.name,
+        patientName: slot.patient,
+        date: slot.full_date || slot.fullDate,
+        time: slot.time,
+        equipment: slot.equipment,
+        locale,
+        source,
+        promoterCode,
+      });
+    } catch (error) {
+      console.warn('Staff booking alert failed', error);
+      return null;
+    }
+  };
+
   const pickNotifySettings = (config = dbCompanyConfig) => {
     const picked = {};
     for (const key of NOTIFY_SETTING_FIELDS) {
@@ -239,6 +272,7 @@ export default function AppLayout() {
     reminder_hours: dbCompanyConfig.reminder_hours,
     ...pickEmailTemplates(),
     ...pickNotifySettings(),
+    ...pickStaffAlertSettings(),
   });
 
   const saveCompanyConfig = async () => {
@@ -533,6 +567,9 @@ export default function AppLayout() {
           notify_auto_cancel: resC.data.notify_auto_cancel !== false,
           notify_channel_email: resC.data.notify_channel_email !== false,
           notify_channel_sms: resC.data.notify_channel_sms !== false,
+          notify_staff_on_booking: resC.data.notify_staff_on_booking === true,
+          staff_alert_phones: resC.data.staff_alert_phones || '',
+          staff_alert_emails: resC.data.staff_alert_emails || '',
           start_time: normalizeTimeInput(resC.data.start_time) || '07:00',
           end_time: normalizeTimeInput(resC.data.end_time) || '20:00',
         });
@@ -2643,9 +2680,47 @@ export default function AppLayout() {
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Horas previas (recordatorio automático — próximamente)</label>
                   <input type="number" value={dbCompanyConfig.reminder_hours} onChange={e => setDbCompanyConfig({...dbCompanyConfig, reminder_hours: Number(e.target.value)})} className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm" />
                 </div>
+                <div className="mt-6 mb-4 p-4 rounded-xl bg-indigo-50 border-2 border-indigo-200">
+                  <h4 className="text-xs font-black uppercase text-indigo-900 mb-2">Alertas al equipo — cita nueva</h4>
+                  <p className="text-[10px] font-bold text-indigo-800/90 mb-3 leading-relaxed">
+                    Cuando un cliente o promotor agenda (web o staff), avisa por SMS y/o correo a los números y emails que pongas abajo.
+                    Para todo el equipo, agrega varios separados por coma. Requiere Twilio (SMS) y Resend (correo) en Vercel.
+                  </p>
+                  <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-indigo-200 shadow-sm cursor-pointer mb-3">
+                    <input
+                      type="checkbox"
+                      checked={dbCompanyConfig.notify_staff_on_booking === true}
+                      onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_staff_on_booking: e.target.checked })}
+                      className="w-4 h-4"
+                    />
+                    <span className="text-[10px] font-black text-indigo-900 uppercase">Avisar al equipo cuando hay cita nueva</span>
+                  </label>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">Teléfonos del equipo (SMS)</label>
+                      <textarea
+                        rows={2}
+                        value={dbCompanyConfig.staff_alert_phones || ''}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, staff_alert_phones: e.target.value })}
+                        placeholder="3312345678, 3398765432"
+                        className="w-full p-2.5 border border-indigo-200 rounded-lg font-bold text-sm outline-none bg-white mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">Correos del equipo</label>
+                      <textarea
+                        rows={2}
+                        value={dbCompanyConfig.staff_alert_emails || ''}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, staff_alert_emails: e.target.value })}
+                        placeholder="recepcion@oxygengdl.com, gerencia@oxygengdl.com"
+                        className="w-full p-2.5 border border-indigo-200 rounded-lg font-bold text-sm outline-none bg-white mt-1"
+                      />
+                    </div>
+                  </div>
+                </div>
                 <div className="mt-4 mb-4 p-3 rounded-lg bg-slate-100 border border-slate-200 text-[10px] font-bold text-slate-600 leading-relaxed">
-                  <span className="font-black uppercase text-slate-500 block mb-1">Notificaciones push (teléfono)</span>
-                  Aún no están disponibles. La app se puede instalar como PWA, pero no envía push al paciente ni al staff. Solo correo (Resend) y SMS (Twilio).
+                  <span className="font-black uppercase text-slate-500 block mb-1">Notificaciones push en el teléfono (icono de la app)</span>
+                  Aún no disponibles. Las alertas al equipo funcionan por SMS al número de arriba (llega como mensaje de texto) o por correo. Push nativo requiere desarrollo adicional.
                 </div>
                 <button
                   type="button"
@@ -3565,6 +3640,11 @@ export default function AppLayout() {
                       prefers_sms: selectedSlot.prefers_sms,
                       is_new_patient: isNewForAppointment,
                     });
+                    await alertStaffNewBooking({
+                      ...payload,
+                      full_date: apptDate,
+                      fullDate: apptDate,
+                    }, { source: 'staff' });
                   }
                   setShowNewAppointment(false);
                   setSelectedSlot(null);

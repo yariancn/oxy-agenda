@@ -22,6 +22,7 @@ import {
   isAutoNotifyEnabled,
   resolveSessionInstructions,
 } from '../lib/notifySettings';
+import { notifyStaffNewBooking } from '../lib/staffBookingAlert';
 
 export default function PublicBookingPortal({
   supabase,
@@ -201,6 +202,25 @@ export default function PublicBookingPortal({
           }
         } catch (notifyError) {
           console.warn('Booking notify failed', notifyError);
+        }
+      }
+
+      if (dbConfig?.notify_staff_on_booking === true) {
+        try {
+          await notifyStaffNewBooking({
+            companyConfig: dbConfig,
+            clinicName,
+            clinicDisplayName: dbConfig?.name || branding.title,
+            patientName: result.patient.displayName,
+            date: selectedDate,
+            time: selectedTime,
+            equipment: selectedService.name,
+            locale,
+            source: activePromoter.code ? 'promoter' : 'public',
+            promoterCode: activePromoter.code || '',
+          });
+        } catch (staffErr) {
+          console.warn('Staff alert failed', staffErr);
         }
       }
 
