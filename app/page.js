@@ -2832,7 +2832,7 @@ export default function AppLayout() {
                   <summary className="cursor-pointer uppercase text-slate-400 font-black">Configuración técnica (Vercel / Resend / Twilio / WhatsApp)</summary>
                   <p className="mt-2 leading-relaxed pl-2 border-l-2 border-slate-200">
                     Un solo deploy: oxy-agenda.vercel.app. Diagnóstico: /api/health/notify
-                    Correo: RESEND_* · USA SMS: TWILIO_* (≠ teléfono del paciente) · MX: WHATSAPP_*
+                    Correo: RESEND_* · USA SMS: TWILIO_* + TWILIO_MESSAGING_SERVICE_SID (A2P) · MX: WHATSAPP_*
                   </p>
                 </details>
 

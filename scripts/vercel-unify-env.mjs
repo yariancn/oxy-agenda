@@ -25,6 +25,7 @@ const USA_SMS = [
   { key: 'TWILIO_ACCOUNT_SID', clinic: 'SMS Shenandoah' },
   { key: 'TWILIO_AUTH_TOKEN', clinic: 'SMS Shenandoah' },
   { key: 'TWILIO_PHONE_NUMBER', clinic: 'SMS Shenandoah (+1)' },
+  { key: 'TWILIO_MESSAGING_SERVICE_SID', clinic: 'A2P Messaging Service (MG...)' },
 ];
 
 const WHATSAPP_MX = [
