@@ -151,7 +151,7 @@ export default function AppLayout() {
   const [newRole, setNewRole] = useState({ id: null, name: '', level: 3 });
   const [isEditingRole, setIsEditingRole] = useState(false);
 
-  const [newUser, setNewUser] = useState({ id: null, name: '', email: '', role: 'Técnico Certificado IBUM', cert: '', is_active: true, pin: '' });
+  const [newUser, setNewUser] = useState({ id: null, name: '', email: '', phone: '', notify_on_booking: true, role: 'Técnico Certificado IBUM', cert: '', is_active: true, pin: '' });
   const [isEditingUser, setIsEditingUser] = useState(false);
 
   const [showNewPatientModal, setShowNewPatientModal] = useState(false);
@@ -206,6 +206,7 @@ export default function AppLayout() {
     try {
       return await notifyStaffNewBooking({
         companyConfig: { ...pickStaffAlertSettings(), notify_staff_on_booking: true },
+        staffRoster: (dbUsers || []).filter((u) => u.is_active),
         clinicName: activeClinic,
         clinicDisplayName: dbCompanyConfig.name,
         patientName: slot.patient,
@@ -478,6 +479,67 @@ export default function AppLayout() {
       return { error: result.error };
     }
     return { data: [{ id: result.id }], error: null };
+  };
+
+  const persistPatientContactFromSlot = async (slot) => {
+    const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(slot.patient));
+    const canonicalPhone = (slot.phone || '').trim();
+    const canonicalEmail = (slot.email || '').trim();
+    const phoneDigits = digitsOnly(canonicalPhone).slice(-10);
+
+    if (phoneDigits.length === 10) {
+      const ensured = await ensurePatient(activeSupabase, {
+        name: slot.patient,
+        phone: canonicalPhone,
+        email: canonicalEmail,
+        protocol: slot.protocol || matchingPatients[0]?.protocol || 'Wellness',
+        notes: slot.patientNotes ?? matchingPatients[0]?.notes ?? '',
+        prefers_email: slot.prefers_email !== false,
+        prefers_sms: slot.prefers_sms !== false,
+      });
+      if (ensured.error) return ensured;
+      return {
+        error: null,
+        phone: ensured.phone,
+        email: ensured.email,
+        patient: ensured.displayName,
+      };
+    }
+
+    for (const pat of matchingPatients) {
+      const legacyPatch = {
+        notes: slot.patientNotes ?? pat.notes ?? '',
+        prefers_email: slot.prefers_email !== false,
+        prefers_sms: slot.prefers_sms !== false,
+      };
+      if (canonicalPhone) {
+        legacyPatch.Phone = canonicalPhone;
+        legacyPatch.phone = canonicalPhone;
+      }
+      if (canonicalEmail) {
+        legacyPatch.Email = canonicalEmail;
+        legacyPatch.email = canonicalEmail;
+      }
+      let upRes = await activeSupabase.from('patients').update(legacyPatch).eq('id', pat.id);
+      if (upRes.error) {
+        const lowerPatch = {
+          notes: legacyPatch.notes,
+          prefers_email: legacyPatch.prefers_email,
+          prefers_sms: legacyPatch.prefers_sms,
+        };
+        if (canonicalPhone) lowerPatch.phone = canonicalPhone;
+        if (canonicalEmail) lowerPatch.email = canonicalEmail;
+        upRes = await activeSupabase.from('patients').update(lowerPatch).eq('id', pat.id);
+        if (upRes.error) return { error: upRes.error };
+      }
+    }
+
+    return {
+      error: null,
+      phone: canonicalPhone,
+      email: canonicalEmail,
+      patient: slot.patient,
+    };
   };
 
   // --- SINCRONIZACIÓN CON PAGINACIÓN INTELIGENTE ---
@@ -2685,8 +2747,9 @@ export default function AppLayout() {
                 <div className="mt-6 mb-4 p-4 rounded-xl bg-indigo-50 border-2 border-indigo-200">
                   <h4 className="text-xs font-black uppercase text-indigo-900 mb-2">Alertas al equipo — cita nueva</h4>
                   <p className="text-[10px] font-bold text-indigo-800/90 mb-3 leading-relaxed">
-                    Cuando un cliente o promotor agenda (web o staff), avisa por {activeClinic === 'Shenandoah' ? 'SMS' : 'WhatsApp'} y/o correo a los números y emails que pongas abajo.
-                    Para todo el equipo, agrega varios separados por coma. Requiere {activeClinic === 'Shenandoah' ? 'Twilio (SMS)' : 'WhatsApp Business (Meta)'} y Resend (correo) en Vercel.
+                    Cuando un cliente o promotor agenda (web o staff), avisa por {activeClinic === 'Shenandoah' ? 'SMS' : 'WhatsApp'} y/o correo.
+                    Puedes poner números extra abajo <strong>o</strong> agregar celular y correo en cada empleado (Admin → Personal autorizado).
+                    Requiere {activeClinic === 'Shenandoah' ? 'Twilio (SMS)' : 'WhatsApp Business (Meta)'} y Resend (correo) en Vercel.
                   </p>
                   <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-indigo-200 shadow-sm cursor-pointer mb-3">
                     <input
@@ -2807,14 +2870,19 @@ export default function AppLayout() {
                     <h3 className="font-black text-slate-800 uppercase text-sm mb-4 pb-2 border-b">{isEditingUser ? 'Editar Empleado' : 'Alta de Nuevo Empleado'}</h3>
                     <div className="space-y-4 mb-6">
                       <input type="text" placeholder="Nombre Completo" className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" value={newUser.name} onChange={e => setNewUser({...newUser, name: e.target.value})} />
-                      <input type="email" placeholder="Correo (para invitaciones futuras)" className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" value={newUser.email || ''} onChange={e => setNewUser({...newUser, email: e.target.value})} />
+                      <input type="tel" placeholder={L.p.admin.staffPhonePh} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" value={newUser.phone || ''} onChange={e => setNewUser({...newUser, phone: e.target.value})} />
+                      <input type="email" placeholder={L.p.admin.staffEmailPh} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" value={newUser.email || ''} onChange={e => setNewUser({...newUser, email: e.target.value})} />
+                      <label className="flex items-center gap-2 bg-indigo-50 p-3 rounded-lg border border-indigo-200 cursor-pointer">
+                        <input type="checkbox" checked={newUser.notify_on_booking !== false} onChange={e => setNewUser({ ...newUser, notify_on_booking: e.target.checked })} className="w-4 h-4" />
+                        <span className="text-[10px] font-black uppercase text-indigo-900">{L.p.admin.staffNotifyBooking}</span>
+                      </label>
                       <select className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})}>
                         {dbRoles.map(r => <option key={r.id} value={r.name}>{r.name} (Nivel {r.level})</option>)}
                       </select>
                       <input type="text" placeholder="Certificación (Ej. IBUM, D.O.)" className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" value={newUser.cert} onChange={e => setNewUser({...newUser, cert: e.target.value})} />
                       <input type="text" placeholder="PIN Personal (6 Dígitos)" maxLength="6" className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none tracking-widest text-slate-900 bg-white" value={newUser.pin || ''} onChange={e => setNewUser({...newUser, pin: e.target.value})} />
                       <div className="flex gap-2">
-                        {isEditingUser && <button onClick={() => {setIsEditingUser(false); setNewUser({ id: null, name: '', email: '', role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' });}} className="w-1/3 bg-slate-300 text-slate-700 font-black py-3 rounded-xl uppercase text-xs">Cancelar</button>}
+                        {isEditingUser && <button onClick={() => {setIsEditingUser(false); setNewUser({ id: null, name: '', email: '', phone: '', notify_on_booking: true, role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' });}} className="w-1/3 bg-slate-300 text-slate-700 font-black py-3 rounded-xl uppercase text-xs">Cancelar</button>}
                         <button onClick={async () => {
                           if (!newUser.name) return alert(L.p.admin.userName);
                           if (!newUser.pin || newUser.pin.length !== 6) return alert(L.p.admin.pinSix);
@@ -2824,9 +2892,12 @@ export default function AppLayout() {
                             cert: newUser.cert,
                             is_active: newUser.is_active,
                             pin: newUser.pin,
+                            notify_on_booking: newUser.notify_on_booking !== false,
                           };
                           const email = (newUser.email || '').trim();
+                          const phone = (newUser.phone || '').trim();
                           if (email) staffPayload.email = email;
+                          if (phone) staffPayload.phone = phone;
 
                           const saveStaff = async (payload) => {
                             if (isEditingUser && newUser.id) {
@@ -2836,7 +2907,23 @@ export default function AppLayout() {
                           };
 
                           let res = await saveStaff(staffPayload);
-                          if (res.error && res.error.message.toLowerCase().includes('column') && staffPayload.email) {
+                          if (res.error && res.error.message.toLowerCase().includes('column')) {
+                            const fallback = { ...staffPayload };
+                            delete fallback.phone;
+                            delete fallback.notify_on_booking;
+                            if (fallback.email) {
+                              res = await saveStaff(fallback);
+                              if (res.error && res.error.message.toLowerCase().includes('column')) {
+                                const { email: _e, ...rest } = fallback;
+                                res = await saveStaff(rest);
+                              }
+                            } else {
+                              res = await saveStaff(fallback);
+                            }
+                            if (!res.error && (phone || newUser.notify_on_booking !== false)) {
+                              alert(L.p.admin.staffPhoneColumnMissing);
+                            }
+                          } else if (res.error && res.error.message.toLowerCase().includes('column') && staffPayload.email) {
                             const { email: _e, ...rest } = staffPayload;
                             res = await saveStaff(rest);
                           }
@@ -2848,19 +2935,20 @@ export default function AppLayout() {
                             await logAudit(null, newUser.name, 'ALTA DE EMPLEADO', `Rol: ${newUser.role} · ${activeClinic}`);
                           }
                           setIsEditingUser(false); 
-                          setNewUser({ id: null, name: '', email: '', role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' }); 
+                          setNewUser({ id: null, name: '', email: '', phone: '', notify_on_booking: true, role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' }); 
                           fetchAllData();
                         }} className="flex-1 bg-slate-900 text-white font-black py-3 rounded-xl uppercase text-xs shadow-md">{isEditingUser ? 'Actualizar' : 'Guardar'}</button>
                       </div>
                     </div>
                     <table className="w-full text-left bg-white border rounded-xl overflow-hidden">
                       <thead className="bg-slate-100 text-[10px] font-black uppercase text-slate-400">
-                        <tr><th className="p-3">Nombre</th><th className="p-3">Correo</th><th className="p-3">Rol</th><th className="p-3"></th></tr>
+                        <tr><th className="p-3">Nombre</th><th className="p-3">Teléfono</th><th className="p-3">Correo</th><th className="p-3">Rol</th><th className="p-3"></th></tr>
                       </thead>
                       <tbody className="divide-y text-slate-900">
                         {(dbUsers || []).map(u => (
                           <tr key={u.id} className={`text-xs font-bold uppercase ${!u.is_active && 'opacity-40 grayscale'}`}>
                             <td className="p-3">{u.name}</td>
+                            <td className="p-3 text-slate-600 normal-case text-[10px]">{u.phone || '—'}</td>
                             <td className="p-3 text-slate-500 normal-case text-[10px]">{u.email || '—'}</td>
                             <td className="p-3 text-blue-600">{u.role}</td>
                             <td className="p-3 text-right">
@@ -3171,17 +3259,43 @@ export default function AppLayout() {
               <div className="bg-white border border-slate-300 rounded-xl p-4 shadow-sm flex flex-col relative overflow-hidden">
                 <span className="font-black text-slate-800 text-lg uppercase pr-6">{selectedSlot.is_new_patient ? '⭐ ' : ''}{selectedSlot.patient}</span>
                 <span className="text-[10px] text-blue-600 font-black uppercase tracking-widest">{selectedSlot.protocol}</span>
-                {selectedSlot.phone ? (
-                  <a
-                    href={`tel:${digitsOnly(selectedSlot.phone)}`}
-                    className="mt-2 inline-flex items-center gap-1.5 text-sm font-bold text-slate-700 hover:text-blue-600 transition"
-                  >
-                    <span className="text-[10px] font-black uppercase text-slate-400">{L.p.appt.phone}:</span>
-                    <span className="normal-case tracking-wide">{selectedSlot.phone}</span>
-                  </a>
-                ) : (
-                  <span className="mt-2 text-[10px] font-bold text-slate-400 uppercase">{L.p.appt.phone}: {L.noPhone}</span>
-                )}
+
+                <div className="mt-3 bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-3">
+                  <label className="text-[10px] font-black uppercase text-slate-500">{L.p.appt.contactSection}</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-slate-400 mb-1 block">{L.p.appt.phone}</label>
+                      <input
+                        type="tel"
+                        value={selectedSlot.phone || ''}
+                        onChange={e => setSelectedSlot({ ...selectedSlot, phone: e.target.value })}
+                        className="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold outline-none bg-white text-slate-900"
+                        placeholder={L.p.appt.noPhone}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-slate-400 mb-1 block">{L.p.appt.email}</label>
+                      <input
+                        type="email"
+                        value={selectedSlot.email || ''}
+                        onChange={e => setSelectedSlot({ ...selectedSlot, email: e.target.value })}
+                        className="w-full p-2 border border-slate-200 rounded-lg text-xs font-bold outline-none bg-white text-slate-900"
+                        placeholder={L.p.appt.noEmail}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <label className="flex items-center gap-2 text-[9px] font-black uppercase text-slate-700">
+                      <input type="checkbox" checked={selectedSlot.prefers_sms !== false} onChange={e => setSelectedSlot({ ...selectedSlot, prefers_sms: e.target.checked })} className="w-4 h-4" />
+                      {L.modals.patient.receiveSms}
+                    </label>
+                    <label className="flex items-center gap-2 text-[9px] font-black uppercase text-slate-700">
+                      <input type="checkbox" checked={selectedSlot.prefers_email !== false} onChange={e => setSelectedSlot({ ...selectedSlot, prefers_email: e.target.checked })} className="w-4 h-4" />
+                      {L.modals.patient.receiveEmail}
+                    </label>
+                  </div>
+                  <p className="text-[8px] text-slate-500 font-bold uppercase">{L.p.appt.contactHint}</p>
+                </div>
                 
                 <div className="mt-4 space-y-3">
                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl">
@@ -3204,18 +3318,19 @@ export default function AppLayout() {
                    </div>
                    <button onClick={async () => {
                       try {
-                        await activeSupabase.from('appointments').update({ notes: selectedSlot.notes }).eq('id', selectedSlot.id);
-                        const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
-                        for (const pat of matchingPatients) {
-                           let upRes = await activeSupabase.from('patients').update({ notes: selectedSlot.patientNotes }).eq('id', pat.id);
-                           if (upRes.error) {
-                               await activeSupabase.from('patients').update({ Notes: selectedSlot.patientNotes }).eq('id', pat.id);
-                           }
-                        }
+                        const contactResult = await persistPatientContactFromSlot(selectedSlot);
+                        if (contactResult.error) return alert(staffAlert(locale, 'patientFileError', contactResult.error.message));
+
+                        await activeSupabase.from('appointments').update({
+                          notes: selectedSlot.notes,
+                          phone: contactResult.phone || selectedSlot.phone || '',
+                          email: contactResult.email || selectedSlot.email || '',
+                        }).eq('id', selectedSlot.id);
+
                         alert(a('notesSavedOk'));
                         fetchAllData();
                       } catch(e) { alert(a('notesSaveError')); }
-                   }} className="w-full bg-slate-800 text-white font-black py-2 rounded-lg text-[10px] uppercase hover:bg-slate-700 shadow-sm transition">{L.p.appt.saveNotes}</button>
+                   }} className="w-full bg-slate-800 text-white font-black py-2 rounded-lg text-[10px] uppercase hover:bg-slate-700 shadow-sm transition">{L.p.appt.saveNotesAndContact}</button>
                 </div>
               </div>
 
@@ -3413,6 +3528,7 @@ export default function AppLayout() {
                       ...(selectedSlot || createEmptyAppointmentDraft()),
                       patient: pName,
                       phone: exact ? exact.phone : (selectedSlot?.phone || ''),
+                      email: exact ? exact.email : (selectedSlot?.email || ''),
                       protocol: exact ? exact.protocol : (selectedSlot?.protocol || ''),
                       patientNotes: exact ? exact.notes : (selectedSlot?.patientNotes || ''),
                       prefers_email: exact ? exact.prefers_email !== false : selectedSlot?.prefers_email !== false,
@@ -3424,6 +3540,7 @@ export default function AppLayout() {
                       ...(selectedSlot || createEmptyAppointmentDraft()),
                       patient: p.patient,
                       phone: p.phone || '',
+                      email: p.email || '',
                       protocol: p.protocol || '',
                       patientNotes: p.notes || '',
                       prefers_email: p.prefers_email !== false,
@@ -3447,29 +3564,34 @@ export default function AppLayout() {
                 </div>
               )}
               
-              {isNewPatientInline && (
-                <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl space-y-3">
-                  <p className="text-xs font-black text-blue-800 uppercase flex items-center gap-2">✨ Paciente Nuevo Detectado</p>
+              {selectedSlot?.patient && (
+                <div className={`${isNewPatientInline ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'} border p-4 rounded-xl space-y-3`}>
+                  {isNewPatientInline && (
+                    <p className="text-xs font-black text-blue-800 uppercase flex items-center gap-2">✨ Paciente Nuevo Detectado</p>
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-[9px] font-black uppercase text-blue-700">Teléfono</label>
-                      <input type="text" value={selectedSlot?.phone || ''} onChange={e => setSelectedSlot({...selectedSlot, phone: e.target.value})} className="w-full p-2 border border-blue-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white" />
+                      <label className="text-[9px] font-black uppercase text-slate-600">{L.p.appt.phone}</label>
+                      <input type="text" value={selectedSlot?.phone || ''} onChange={e => setSelectedSlot({...selectedSlot, phone: e.target.value})} className="w-full p-2 border border-slate-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white mt-1" />
                     </div>
                     <div>
-                      <label className="text-[9px] font-black uppercase text-blue-700">Correo</label>
-                      <input type="email" value={selectedSlot?.email || ''} onChange={e => setSelectedSlot({...selectedSlot, email: e.target.value})} className="w-full p-2 border border-blue-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white" />
+                      <label className="text-[9px] font-black uppercase text-slate-600">{L.p.appt.email}</label>
+                      <input type="email" value={selectedSlot?.email || ''} onChange={e => setSelectedSlot({...selectedSlot, email: e.target.value})} className="w-full p-2 border border-slate-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white mt-1" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="flex items-center gap-2">
                       <input type="checkbox" checked={selectedSlot?.prefers_sms !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_sms: e.target.checked})} className="w-4 h-4" />
-                      <label className="text-[9px] font-black uppercase text-blue-800">Recibir SMS</label>
+                      <label className="text-[9px] font-black uppercase text-slate-700">{L.modals.patient.receiveSms}</label>
                     </div>
                     <div className="flex items-center gap-2">
                       <input type="checkbox" checked={selectedSlot?.prefers_email !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_email: e.target.checked})} className="w-4 h-4" />
-                      <label className="text-[9px] font-black uppercase text-blue-800">Recibir Correo</label>
+                      <label className="text-[9px] font-black uppercase text-slate-700">{L.modals.patient.receiveEmail}</label>
                     </div>
                   </div>
+                  {!isNewPatientInline && (
+                    <p className="text-[8px] text-slate-500 font-bold uppercase">{L.p.appt.contactHint}</p>
+                  )}
                 </div>
               )}
 
@@ -3602,9 +3724,12 @@ export default function AppLayout() {
                     isNewForAppointment = ensured.isNew;
                   } else if (isNewPatientInline && !selectedSlot.id) {
                     return alert(staffAlert(locale, 'phoneRequired'));
-                  } else if (!isNewPatientInline && selectedSlot.patientNotes !== undefined) {
-                    const matching = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
-                    for (const pat of matching) { await activeSupabase.from('patients').update({ notes: selectedSlot.patientNotes }).eq('id', pat.id); }
+                  } else if (!isNewPatientInline) {
+                    const contactResult = await persistPatientContactFromSlot(selectedSlot);
+                    if (contactResult.error) return alert(staffAlert(locale, 'patientFileError', contactResult.error.message));
+                    if (contactResult.phone) canonicalPhone = contactResult.phone;
+                    if (contactResult.email) canonicalEmail = contactResult.email;
+                    if (contactResult.patient) canonicalPatient = contactResult.patient;
                   }
 
                   const sessionTimes = resolveSessionTimes(selectedSlot);
@@ -3867,14 +3992,29 @@ export default function AppLayout() {
       {showPatientProfile && selectedSlot && (
         <div className="relative z-50" style={{ zIndex: 9999 }}>
           <PatientProfileModal 
-            initialData={selectedSlot} 
+            initialData={(() => {
+              const profilePatient = dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
+              return {
+                ...selectedSlot,
+                ...profilePatient,
+                id: profilePatient?.id || selectedSlot.patientId || null,
+                patientId: profilePatient?.id || selectedSlot.patientId || null,
+                patient: profilePatient?.patient || selectedSlot.patient,
+                phone: profilePatient?.phone || selectedSlot.phone || '',
+                email: profilePatient?.email || selectedSlot.email || '',
+                patientNotes: profilePatient?.notes || selectedSlot.patientNotes || '',
+                prefers_email: profilePatient?.prefers_email !== false && selectedSlot.prefers_email !== false,
+                prefers_sms: profilePatient?.prefers_sms !== false && selectedSlot.prefers_sms !== false,
+              };
+            })()}
             servicios={dbServices} 
             companyConfig={dbCompanyConfig}
             currentUserLevel={currentUserLevel}
             onClose={() => setShowPatientProfile(false)} 
             onSave={async (ud) => {
               const activeSupabase = activeClinic === 'Shenandoah' ? supabaseShenandoah : supabaseGdl;
-              if (ud.id && String(ud.id).length > 10) {
+              const patientDbId = ud.id || selectedSlot.patientId;
+              if (patientDbId) {
                 let p = { 
                   Name: ud.patient, 
                   Phone: ud.phone, 
@@ -3888,7 +4028,7 @@ export default function AppLayout() {
                   package_history: ud.packageHistory, 
                   historico_sesiones: ud.historicoSesiones 
                 };
-                let res = await activeSupabase.from('patients').update(p).eq('id', ud.id);
+                let res = await activeSupabase.from('patients').update(p).eq('id', patientDbId);
 
                 if (res.error && res.error.message.toLowerCase().includes('column')) {
                   await activeSupabase.from('patients').update({ 
@@ -3903,8 +4043,18 @@ export default function AppLayout() {
                     wallets: ud.wallets, 
                     package_history: ud.packageHistory, 
                     historico_sesiones: ud.historicoSesiones 
-                  }).eq('id', ud.id);
+                  }).eq('id', patientDbId);
                 }
+              } else if (digitsOnly(ud.phone).slice(-10).length === 10) {
+                await ensurePatient(activeSupabase, {
+                  name: ud.patient,
+                  phone: ud.phone,
+                  email: ud.email || '',
+                  protocol: ud.protocol,
+                  notes: ud.notes || '',
+                  prefers_email: ud.prefers_email,
+                  prefers_sms: ud.prefers_sms,
+                });
               }
               setShowPatientProfile(false); 
               fetchAllData();

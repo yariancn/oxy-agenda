@@ -8,7 +8,7 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
   const t = L.modals.patient;
 
   const [formData, setFormData] = useState({
-    id: initialData.id || null,
+    id: initialData.patientId || initialData.patient_id || null,
     patient: initialData.patient || '',
     phone: initialData.phone || '',
     email: initialData.email || '',
@@ -175,19 +175,21 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
               <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.fullName}</label>
               <input disabled={formData.is_blocked && currentUserLevel > 1} type="text" value={formData.patient} onChange={(e) => handleChange('patient', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 font-black text-slate-800 uppercase outline-none text-sm disabled:opacity-50" />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.phone}</label>
-                <input disabled={formData.is_blocked && currentUserLevel > 1} type="tel" value={formData.phone} onChange={(e) => handleChange('phone', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold outline-none disabled:opacity-50" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.clinicalProtocol}</label>
-                <select disabled={formData.is_blocked && currentUserLevel > 1} value={formData.protocol} onChange={(e) => handleChange('protocol', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold text-blue-700 uppercase outline-none disabled:opacity-50">
-                  <option value="Médico">Médico</option>
-                  <option value="Wellness">Wellness</option>
-                  <option value="InfraBaldan">InfraBaldan</option>
-                </select>
-              </div>
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.phone}</label>
+              <input disabled={formData.is_blocked && currentUserLevel > 1} type="tel" value={formData.phone} onChange={(e) => handleChange('phone', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold outline-none disabled:opacity-50" />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.email}</label>
+              <input disabled={formData.is_blocked && currentUserLevel > 1} type="email" value={formData.email} onChange={(e) => handleChange('email', e.target.value)} placeholder="correo@ejemplo.com" className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold outline-none disabled:opacity-50" />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.clinicalProtocol}</label>
+              <select disabled={formData.is_blocked && currentUserLevel > 1} value={formData.protocol} onChange={(e) => handleChange('protocol', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold text-blue-700 uppercase outline-none disabled:opacity-50">
+                <option value="Médico">Médico</option>
+                <option value="Wellness">Wellness</option>
+                <option value="InfraBaldan">InfraBaldan</option>
+              </select>
             </div>
             <div className="flex flex-col sm:flex-row gap-3">
               <label className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-700">

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getResendApiKey } from '../../../lib/resendConfig.js';
-import { isWhatsAppConfigured } from '../../../lib/clinicMessaging.js';
+import { getResendApiKey } from '../../../../lib/resendConfig.js';
+import { isWhatsAppConfigured } from '../../../../lib/clinicMessaging.js';
 
 /** Diagnóstico: confirma qué credenciales ve el servidor (sin exponer valores). */
 export async function GET(request) {

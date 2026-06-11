@@ -1,11 +1,23 @@
 import { NextResponse } from 'next/server';
 import { dispatchStaffBookingAlert } from '../../../lib/staffBookingAlert.js';
+import { supabaseGdl, supabaseShenandoah } from '../../../lib/supabase.js';
+
+async function loadStaffRoster(clinicName) {
+  const supabase = clinicName === 'Shenandoah' ? supabaseShenandoah : supabaseGdl;
+  const { data, error } = await supabase
+    .from('users_staff')
+    .select('name, email, phone, notify_on_booking, is_active')
+    .eq('is_active', true);
+  if (error) return [];
+  return data || [];
+}
 
 export async function POST(request) {
   try {
     const body = await request.json();
     const {
       companyConfig = {},
+      staffRoster,
       clinicName = 'Guadalajara',
       clinicDisplayName,
       patientName,
@@ -21,8 +33,13 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'Missing appointment fields' }, { status: 400 });
     }
 
+    const roster = Array.isArray(staffRoster) && staffRoster.length
+      ? staffRoster
+      : await loadStaffRoster(clinicName);
+
     const result = await dispatchStaffBookingAlert({
       companyConfig,
+      staffRoster: roster,
       clinicName,
       clinicDisplayName,
       patientName,
