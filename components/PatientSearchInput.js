@@ -12,18 +12,26 @@ function normalizeStr(str) {
 export default function PatientSearchInput({
   patients = [],
   value = '',
+  selectedPatientId = null,
   onQueryChange,
   onSelectPatient,
   placeholder = 'Escribe para buscar...',
   className = '',
+  selectedLabel = 'Paciente seleccionado',
+  pickHint = 'Clic en la lista para confirmar',
 }) {
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
+  const [pickedId, setPickedId] = useState(selectedPatientId);
   const wrapRef = useRef(null);
 
   useEffect(() => {
     setQuery(value || '');
   }, [value]);
+
+  useEffect(() => {
+    setPickedId(selectedPatientId || null);
+  }, [selectedPatientId]);
 
   useEffect(() => {
     const onDocClick = (e) => {
@@ -34,6 +42,9 @@ export default function PatientSearchInput({
   }, []);
 
   const term = normalizeStr(query);
+  const exactMatch = patients.find((p) => normalizeStr(p.patient) === normalizeStr(query));
+  const confirmed = exactMatch && String(exactMatch.id) === String(pickedId);
+
   const filtered = patients
     .filter((p) => {
       if (!term || term.length < 2) return false;
@@ -45,9 +56,16 @@ export default function PatientSearchInput({
 
   const handlePick = (p) => {
     setQuery(p.patient);
+    setPickedId(p.id);
     setOpen(false);
     onSelectPatient?.(p);
   };
+
+  const inputClass = [
+    className,
+    confirmed ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : '',
+    exactMatch && !confirmed ? 'border-amber-400 bg-amber-50' : '',
+  ].filter(Boolean).join(' ');
 
   return (
     <div ref={wrapRef} className="relative">
@@ -60,11 +78,21 @@ export default function PatientSearchInput({
         onChange={(e) => {
           const next = e.target.value;
           setQuery(next);
+          setPickedId(null);
           setOpen(true);
           onQueryChange?.(next);
         }}
-        className={className}
+        className={inputClass}
       />
+      {confirmed && exactMatch ? (
+        <p className="mt-1.5 text-[10px] font-black uppercase text-emerald-700 flex items-center gap-1">
+          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-white text-[9px]">✓</span>
+          {selectedLabel}: {exactMatch.patient}
+          {exactMatch.phone ? ` · ${exactMatch.phone}` : ''}
+        </p>
+      ) : exactMatch && query.trim() ? (
+        <p className="mt-1.5 text-[10px] font-black uppercase text-amber-700">{pickHint}</p>
+      ) : null}
       {open && term.length >= 2 && filtered.length > 0 && (
         <ul className="absolute z-[10000] w-full mt-1 max-h-52 overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-xl">
           {filtered.map((p) => (
@@ -73,7 +101,7 @@ export default function PatientSearchInput({
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handlePick(p)}
-                className="w-full text-left px-3 py-2.5 hover:bg-emerald-50 border-b border-slate-100 last:border-0 transition"
+                className={`w-full text-left px-3 py-2.5 hover:bg-emerald-50 border-b border-slate-100 last:border-0 transition ${String(p.id) === String(pickedId) ? 'bg-emerald-100' : ''}`}
               >
                 <span className="block font-black uppercase text-sm text-slate-800 truncate">{p.patient}</span>
                 {p.phone ? (

@@ -3548,20 +3548,24 @@ export default function AppLayout() {
                <h3 className="text-base sm:text-xl font-black uppercase text-emerald-600 truncate">{selectedSlot?.status === 'booked' ? 'Editar Cita' : 'Registrar Cita'}</h3>
                <button onClick={() => {setShowNewAppointment(false); setSelectedSlot(null);}} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
             </div>
-            
-            <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-3 sm:space-y-4 min-h-0">
+
+            <div className="shrink-0 px-4 sm:px-8 py-3 border-b-2 border-indigo-300 bg-indigo-50/90 space-y-3">
               <div className="min-w-0">
-                <label className="text-[10px] font-black uppercase text-slate-400">Paciente</label>
+                <label className="text-[10px] font-black uppercase text-slate-500">Paciente</label>
                 <PatientSearchInput
                   patients={dbPatients}
                   value={selectedSlot?.patient || ''}
+                  selectedPatientId={selectedSlot?.patientId || null}
                   placeholder={L.p.appt.searchPatient}
-                  className="w-full p-3 border border-slate-300 rounded-xl font-bold uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white"
+                  selectedLabel={L.p.appt.patientSelected}
+                  pickHint={L.p.appt.pickPatientHint}
+                  className="w-full p-3 border border-slate-300 rounded-xl font-bold uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white mt-1"
                   onQueryChange={(pName) => {
                     const exact = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(pName));
                     setSelectedSlot({
                       ...(selectedSlot || createEmptyAppointmentDraft()),
                       patient: pName,
+                      patientId: exact?.id || null,
                       phone: exact ? exact.phone : (selectedSlot?.phone || ''),
                       email: exact ? exact.email : (selectedSlot?.email || ''),
                       protocol: exact ? exact.protocol : (selectedSlot?.protocol || ''),
@@ -3574,6 +3578,7 @@ export default function AppLayout() {
                     setSelectedSlot({
                       ...(selectedSlot || createEmptyAppointmentDraft()),
                       patient: p.patient,
+                      patientId: p.id,
                       phone: p.phone || '',
                       email: p.email || '',
                       protocol: p.protocol || '',
@@ -3585,43 +3590,36 @@ export default function AppLayout() {
                 />
               </div>
 
-              {selectedSlot?.patient?.trim() && (
-                <div className="sticky top-0 z-20 -mx-1 px-1 py-1 bg-white/95 backdrop-blur-sm border-b-2 border-indigo-200 shadow-sm space-y-3">
-                  <div className={`${isNewPatientInline ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'} border p-4 rounded-xl space-y-3`}>
-                    {isNewPatientInline && (
-                      <p className="text-xs font-black text-blue-800 uppercase flex items-center gap-2">✨ Paciente Nuevo Detectado</p>
-                    )}
-                    <div className="rounded-xl border-2 border-indigo-400 bg-indigo-50 p-4 space-y-3">
-                      <div>
-                        <p className="text-[10px] font-black uppercase text-indigo-900">{L.p.appt.notifyPrefsTitle}</p>
-                        <p className="text-[8px] font-bold text-indigo-800/90 mt-1">{L.p.appt.notifyPrefsHint}</p>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <label className="flex items-center gap-2 rounded-lg border-2 border-indigo-300 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900">
-                          <input type="checkbox" checked={selectedSlot?.prefers_sms !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_sms: e.target.checked})} className="w-4 h-4 shrink-0" />
-                          {L.modals.patient.receiveSms}
-                        </label>
-                        <label className="flex items-center gap-2 rounded-lg border-2 border-indigo-300 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900">
-                          <input type="checkbox" checked={selectedSlot?.prefers_email !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_email: e.target.checked})} className="w-4 h-4 shrink-0" />
-                          {L.modals.patient.receiveEmail}
-                        </label>
-                      </div>
+              {selectedSlot?.patient?.trim() ? (
+                <div className="rounded-xl border-2 border-indigo-500 bg-white p-3 space-y-3 shadow-sm">
+                  <p className="text-[10px] font-black uppercase text-indigo-900">{L.p.appt.notifyPrefsTitle}</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-slate-500">{L.p.appt.phone}</label>
+                      <input type="tel" value={selectedSlot?.phone || ''} onChange={e => setSelectedSlot({...selectedSlot, phone: e.target.value})} placeholder="7135913379" className="w-full p-2 border border-slate-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white mt-0.5" />
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[9px] font-black uppercase text-slate-600">{L.p.appt.phone}</label>
-                        <input type="text" value={selectedSlot?.phone || ''} onChange={e => setSelectedSlot({...selectedSlot, phone: e.target.value})} placeholder="7135913379" className="w-full p-2 border border-slate-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white mt-1" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] font-black uppercase text-slate-600">{L.p.appt.email}</label>
-                        <input type="email" value={selectedSlot?.email || ''} onChange={e => setSelectedSlot({...selectedSlot, email: e.target.value})} placeholder="correo@ejemplo.com" className="w-full p-2 border border-slate-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white mt-1" />
-                      </div>
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-slate-500">{L.p.appt.email}</label>
+                      <input type="email" value={selectedSlot?.email || ''} onChange={e => setSelectedSlot({...selectedSlot, email: e.target.value})} placeholder="correo@ejemplo.com" className="w-full p-2 border border-slate-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white mt-0.5" />
                     </div>
-                    <p className="text-[8px] text-slate-500 font-bold uppercase">{L.p.appt.contactHint}</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label className="flex items-center gap-2 rounded-lg border-2 border-indigo-300 bg-indigo-50 px-3 py-2 text-[10px] font-black uppercase text-indigo-900">
+                      <input type="checkbox" checked={selectedSlot?.prefers_sms !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_sms: e.target.checked})} className="w-4 h-4 shrink-0" />
+                      {L.modals.patient.receiveSms}
+                    </label>
+                    <label className="flex items-center gap-2 rounded-lg border-2 border-indigo-300 bg-indigo-50 px-3 py-2 text-[10px] font-black uppercase text-indigo-900">
+                      <input type="checkbox" checked={selectedSlot?.prefers_email !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_email: e.target.checked})} className="w-4 h-4 shrink-0" />
+                      {L.modals.patient.receiveEmail}
+                    </label>
                   </div>
                 </div>
+              ) : (
+                <p className="text-[10px] font-bold uppercase text-slate-500">{L.p.appt.pickPatientHint}</p>
               )}
-
+            </div>
+            
+            <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-3 sm:space-y-4 min-h-0">
               {selectedSlot?.patient && !isNewPatientInline && (
                 <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl shadow-inner">
                   <label className="text-[9px] font-black uppercase text-amber-800 flex items-center gap-1">⚠️ Notas Generales del Expediente</label>
