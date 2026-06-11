@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { buildNotifyContent } from '../../../lib/appointmentNotify.js';
+import { buildNotifyContent, toE164Phone } from '../../../lib/appointmentNotify.js';
 import { getResendApiKey, getResendFromAddress } from '../../../lib/resendConfig.js';
 import { sendPatientTextMessage, textChannelLabel } from '../../../lib/clinicMessaging.js';
 
@@ -80,7 +80,10 @@ export async function POST(request) {
       }
     }
 
+    let smsTo = null;
+
     if (phone && prefers_sms !== false && (type === 'both' || type === 'sms')) {
+      smsTo = toE164Phone(phone, clinicName);
       const result = await sendPatientTextMessage({
         clinicName,
         phone,
@@ -104,7 +107,7 @@ export async function POST(request) {
 
     return NextResponse.json({
       success: true,
-      report: { email: emailStatus, sms: smsStatus, textChannel },
+      report: { email: emailStatus, sms: smsStatus, textChannel, smsTo },
     });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
