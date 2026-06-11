@@ -39,6 +39,7 @@ import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
 import { buildPromoterBookingUrl, normalizePromoCode } from '../lib/promoters';
 import {
   buildNotifyContent,
+  formatBookingNotifyFeedback,
   notifyHadFailure,
   sendAppointmentNotification,
   summarizeNotifyReport,
@@ -50,6 +51,7 @@ import {
 } from '../lib/emailTemplates';
 import {
   defaultNotifySettings,
+  getAutoNotifyBlockReason,
   getSessionInstructionsLabel,
   isAutoNotifyEnabled,
   NOTIFY_SETTING_FIELDS,
@@ -202,7 +204,9 @@ export default function AppLayout() {
   };
 
   const alertStaffNewBooking = async (slot, { source = 'staff', promoterCode = '' } = {}) => {
-    if (dbCompanyConfig.notify_staff_on_booking !== true) return null;
+    if (dbCompanyConfig.notify_staff_on_booking !== true) {
+      return { skipped: true, reason: 'disabled' };
+    }
     try {
       return await notifyStaffNewBooking({
         companyConfig: { ...pickStaffAlertSettings(), notify_staff_on_booking: true },
@@ -629,6 +633,7 @@ export default function AppLayout() {
           notify_auto_cancel: resC.data.notify_auto_cancel !== false,
           notify_channel_email: resC.data.notify_channel_email !== false,
           notify_channel_sms: resC.data.notify_channel_sms !== false,
+          notify_on_booking: resC.data.notify_on_booking !== false,
           notify_staff_on_booking: resC.data.notify_staff_on_booking === true,
           staff_alert_phones: resC.data.staff_alert_phones || '',
           staff_alert_emails: resC.data.staff_alert_emails || '',
@@ -900,7 +905,7 @@ export default function AppLayout() {
     });
   };
 
-  const notifyPatientFromSlot = async (slot, { showSuccess = false, notifyReason, notifyType: notifyTypeOverride } = {}) => {
+  const notifyPatientFromSlot = async (slot, { showSuccess = false, notifyReason, notifyType: notifyTypeOverride, reportResult = false } = {}) => {
     const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(slot.patient));
     const patInfo = matchingPatients[0];
     const email = (slot.email || patInfo?.email || '').trim();
@@ -916,21 +921,37 @@ export default function AppLayout() {
     });
 
     const isManual = showSuccess;
-    if (!isAutoNotifyEnabled(dbCompanyConfig, notifyType, { manual: isManual })) {
+    const blockReason = getAutoNotifyBlockReason(dbCompanyConfig, notifyType, locale);
+    if (!isManual && blockReason) {
       if (showSuccess) alert(L.p.appt.notifyDisabled);
-      return null;
+      return reportResult ? { skipped: true, reason: blockReason } : null;
     }
 
     if (!email && !phone) {
+      const reason = locale === 'en'
+        ? 'No phone or email on file for this patient.'
+        : 'El paciente no tiene teléfono ni correo.';
       if (showSuccess) alert(L.p.appt.notifyNoContact);
-      return null;
+      return reportResult ? { skipped: true, reason } : null;
     }
 
     const sendEmail = dbCompanyConfig.notify_channel_email !== false;
     const sendSms = dbCompanyConfig.notify_channel_sms !== false;
     if (!sendEmail && !sendSms) {
-      if (showSuccess) alert(locale === 'en' ? 'Email and SMS channels are disabled in Admin.' : 'Correo y SMS están desactivados en Admin.');
-      return null;
+      const reason = locale === 'en'
+        ? 'Email and SMS channels are disabled in Admin.'
+        : 'Correo y SMS están desactivados en Admin.';
+      if (showSuccess) alert(reason);
+      return reportResult ? { skipped: true, reason } : null;
+    }
+
+    const prefersEmail = slot.prefers_email ?? patInfo?.prefers_email;
+    const prefersSms = slot.prefers_sms ?? patInfo?.prefers_sms;
+    if (!isManual && prefersEmail === false && prefersSms === false) {
+      const reason = locale === 'en'
+        ? 'Patient opted out of SMS and email.'
+        : 'El paciente desactivó SMS y correo.';
+      return reportResult ? { skipped: true, reason } : null;
     }
 
     try {
@@ -949,8 +970,8 @@ export default function AppLayout() {
         clinicPhone: dbCompanyConfig.phone,
         ticketMessage: dbCompanyConfig.ticket_message,
         locale,
-        prefers_email: slot.prefers_email ?? patInfo?.prefers_email,
-        prefers_sms: slot.prefers_sms ?? patInfo?.prefers_sms,
+        prefers_email: prefersEmail,
+        prefers_sms: prefersSms,
         notifyEnabled: true,
         notifyType,
         emailTemplates: pickEmailTemplates(),
@@ -964,10 +985,10 @@ export default function AppLayout() {
       } else if (notifyHadFailure(data.report)) {
         alert(a('notifyFailed', summary));
       }
-      return data;
+      return reportResult ? { ...data, skipped: false } : data;
     } catch (error) {
-      alert(a('notifyFailed', error.message));
-      return null;
+      if (showSuccess || reportResult) alert(a('notifyFailed', error.message));
+      return reportResult ? { skipped: true, reason: error.message } : null;
     }
   };
 
@@ -3284,15 +3305,19 @@ export default function AppLayout() {
                       />
                     </div>
                   </div>
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <label className="flex items-center gap-2 text-[9px] font-black uppercase text-slate-700">
-                      <input type="checkbox" checked={selectedSlot.prefers_sms !== false} onChange={e => setSelectedSlot({ ...selectedSlot, prefers_sms: e.target.checked })} className="w-4 h-4" />
-                      {L.modals.patient.receiveSms}
-                    </label>
-                    <label className="flex items-center gap-2 text-[9px] font-black uppercase text-slate-700">
-                      <input type="checkbox" checked={selectedSlot.prefers_email !== false} onChange={e => setSelectedSlot({ ...selectedSlot, prefers_email: e.target.checked })} className="w-4 h-4" />
-                      {L.modals.patient.receiveEmail}
-                    </label>
+                  <div className="rounded-xl border-2 border-indigo-300 bg-indigo-50 p-3 space-y-2">
+                    <p className="text-[10px] font-black uppercase text-indigo-900">{L.p.appt.notifyPrefsTitle}</p>
+                    <p className="text-[8px] font-bold text-indigo-800/90">{L.p.appt.notifyPrefsHint}</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-[9px] font-black uppercase text-indigo-900">
+                        <input type="checkbox" checked={selectedSlot.prefers_sms !== false} onChange={e => setSelectedSlot({ ...selectedSlot, prefers_sms: e.target.checked })} className="w-4 h-4 shrink-0" />
+                        {L.modals.patient.receiveSms}
+                      </label>
+                      <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-[9px] font-black uppercase text-indigo-900">
+                        <input type="checkbox" checked={selectedSlot.prefers_email !== false} onChange={e => setSelectedSlot({ ...selectedSlot, prefers_email: e.target.checked })} className="w-4 h-4 shrink-0" />
+                        {L.modals.patient.receiveEmail}
+                      </label>
+                    </div>
                   </div>
                   <p className="text-[8px] text-slate-500 font-bold uppercase">{L.p.appt.contactHint}</p>
                 </div>
@@ -3569,6 +3594,22 @@ export default function AppLayout() {
                   {isNewPatientInline && (
                     <p className="text-xs font-black text-blue-800 uppercase flex items-center gap-2">✨ Paciente Nuevo Detectado</p>
                   )}
+                  <div className="rounded-xl border-2 border-indigo-300 bg-indigo-50 p-4 space-y-3">
+                    <div>
+                      <p className="text-[10px] font-black uppercase text-indigo-900">{L.p.appt.notifyPrefsTitle}</p>
+                      <p className="text-[8px] font-bold text-indigo-800/90 mt-1">{L.p.appt.notifyPrefsHint}</p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900">
+                        <input type="checkbox" checked={selectedSlot?.prefers_sms !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_sms: e.target.checked})} className="w-4 h-4 shrink-0" />
+                        {L.modals.patient.receiveSms}
+                      </label>
+                      <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900">
+                        <input type="checkbox" checked={selectedSlot?.prefers_email !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_email: e.target.checked})} className="w-4 h-4 shrink-0" />
+                        {L.modals.patient.receiveEmail}
+                      </label>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-[9px] font-black uppercase text-slate-600">{L.p.appt.phone}</label>
@@ -3577,16 +3618,6 @@ export default function AppLayout() {
                     <div>
                       <label className="text-[9px] font-black uppercase text-slate-600">{L.p.appt.email}</label>
                       <input type="email" value={selectedSlot?.email || ''} onChange={e => setSelectedSlot({...selectedSlot, email: e.target.value})} className="w-full p-2 border border-slate-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white mt-1" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="flex items-center gap-2">
-                      <input type="checkbox" checked={selectedSlot?.prefers_sms !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_sms: e.target.checked})} className="w-4 h-4" />
-                      <label className="text-[9px] font-black uppercase text-slate-700">{L.modals.patient.receiveSms}</label>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input type="checkbox" checked={selectedSlot?.prefers_email !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_email: e.target.checked})} className="w-4 h-4" />
-                      <label className="text-[9px] font-black uppercase text-slate-700">{L.modals.patient.receiveEmail}</label>
                     </div>
                   </div>
                   {!isNewPatientInline && (
@@ -3704,7 +3735,7 @@ export default function AppLayout() {
                   let canonicalPatient = selectedSlot.patient.trim();
                   let canonicalPhone = (selectedSlot.phone || '').trim();
                   let canonicalEmail = (selectedSlot.email || '').trim();
-                  let isNewForAppointment = isNewPatientInline;
+                  let isNewForAppointment = !!(selectedSlot.is_new_patient || isNewPatientInline);
 
                   const phoneDigits = digitsOnly(canonicalPhone).slice(-10);
                   if (phoneDigits.length === 10) {
@@ -3721,7 +3752,7 @@ export default function AppLayout() {
                     canonicalPatient = ensured.displayName;
                     canonicalPhone = ensured.phone;
                     canonicalEmail = ensured.email;
-                    isNewForAppointment = ensured.isNew;
+                    if (ensured.isNew) isNewForAppointment = true;
                   } else if (isNewPatientInline && !selectedSlot.id) {
                     return alert(staffAlert(locale, 'phoneRequired'));
                   } else if (!isNewPatientInline) {
@@ -3761,19 +3792,30 @@ export default function AppLayout() {
                       isExtendedSession(selectedSlot) ? L.p.appt.badgeExtended : '',
                     ].filter(Boolean).join(' · ');
                     await logAudit(na[0].id, payload.patient, 'CREACIÓN', `${payload.time}${flags ? ` (${flags})` : ''}`);
-                    await notifyPatientFromSlot({
+                    const patientNotifyResult = await notifyPatientFromSlot({
                       ...payload,
+                      id: na[0].id,
                       full_date: apptDate,
                       fullDate: apptDate,
                       prefers_email: selectedSlot.prefers_email,
                       prefers_sms: selectedSlot.prefers_sms,
                       is_new_patient: isNewForAppointment,
-                    });
-                    await alertStaffNewBooking({
+                    }, { reportResult: true });
+                    const staffNotifyResult = await alertStaffNewBooking({
                       ...payload,
                       full_date: apptDate,
                       fullDate: apptDate,
                     }, { source: 'staff' });
+                    const notifySummary = formatBookingNotifyFeedback({
+                      patientResult: patientNotifyResult,
+                      staffResult: staffNotifyResult,
+                      locale,
+                    });
+                    if (notifySummary) {
+                      alert(notifyHadFailure(patientNotifyResult?.report)
+                        ? a('notifyFailed', notifySummary)
+                        : a('notifySent', notifySummary));
+                    }
                   }
                   setShowNewAppointment(false);
                   setSelectedSlot(null);

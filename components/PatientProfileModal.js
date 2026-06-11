@@ -191,15 +191,21 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
                 <option value="InfraBaldan">InfraBaldan</option>
               </select>
             </div>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <label className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-700">
-                <input disabled={formData.is_blocked && currentUserLevel > 1} type="checkbox" checked={formData.prefers_sms} onChange={(e) => handleChange('prefers_sms', e.target.checked)} className="w-4 h-4" />
-                {t.receiveSms}
-              </label>
-              <label className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-700">
-                <input disabled={formData.is_blocked && currentUserLevel > 1} type="checkbox" checked={formData.prefers_email} onChange={(e) => handleChange('prefers_email', e.target.checked)} className="w-4 h-4" />
-                {t.receiveEmail}
-              </label>
+            <div className="rounded-xl border-2 border-indigo-300 bg-indigo-50 p-4 space-y-3">
+              <div>
+                <p className="text-[10px] font-black uppercase text-indigo-900">{t.notifyPrefsTitle}</p>
+                <p className="text-[8px] font-bold text-indigo-800/90 mt-1">{t.notifyPrefsHint}</p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900 flex-1">
+                  <input disabled={formData.is_blocked && currentUserLevel > 1} type="checkbox" checked={formData.prefers_sms} onChange={(e) => handleChange('prefers_sms', e.target.checked)} className="w-4 h-4 shrink-0" />
+                  {t.receiveSms}
+                </label>
+                <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900 flex-1">
+                  <input disabled={formData.is_blocked && currentUserLevel > 1} type="checkbox" checked={formData.prefers_email} onChange={(e) => handleChange('prefers_email', e.target.checked)} className="w-4 h-4 shrink-0" />
+                  {t.receiveEmail}
+                </label>
+              </div>
             </div>
           </div>
 
