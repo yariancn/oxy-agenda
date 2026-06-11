@@ -2737,9 +2737,8 @@ export default function AppLayout() {
                 <details className="mb-6 text-[10px] font-bold text-slate-500">
                   <summary className="cursor-pointer uppercase text-slate-400 font-black">Configuración técnica (Vercel / Resend / Twilio / WhatsApp)</summary>
                   <p className="mt-2 leading-relaxed pl-2 border-l-2 border-slate-200">
-                    Un solo deploy en Vercel (oxy-agenda.vercel.app). Bases GDL y TX siguen separadas en Supabase.
-                    Correo: RESEND_* · USA SMS: TWILIO_* · México WhatsApp: WHATSAPP_* (cuando Meta esté listo).
-                    oxy-agenda-houston.vercel.app redirige al dominio principal.
+                    Un solo deploy: oxy-agenda.vercel.app. Diagnóstico: /api/health/notify
+                    Correo: RESEND_* · USA SMS: TWILIO_* (≠ teléfono del paciente) · MX: WHATSAPP_*
                   </p>
                 </details>
 
