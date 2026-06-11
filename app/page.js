@@ -2673,7 +2673,9 @@ export default function AppLayout() {
                   </label>
                   <label className="flex items-center gap-2 bg-violet-50 p-3 rounded-lg border border-violet-200 cursor-pointer">
                     <input type="checkbox" checked={dbCompanyConfig.notify_channel_sms !== false} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_channel_sms: e.target.checked})} className="w-4 h-4" />
-                    <span className="text-[10px] font-black text-violet-900 uppercase">Canal: SMS (Twilio)</span>
+                    <span className="text-[10px] font-black text-violet-900 uppercase">
+                      {activeClinic === 'Shenandoah' ? 'Canal: SMS (Twilio — USA)' : 'Canal: WhatsApp (México)'}
+                    </span>
                   </label>
                 </div>
                 <div>
@@ -2683,8 +2685,8 @@ export default function AppLayout() {
                 <div className="mt-6 mb-4 p-4 rounded-xl bg-indigo-50 border-2 border-indigo-200">
                   <h4 className="text-xs font-black uppercase text-indigo-900 mb-2">Alertas al equipo — cita nueva</h4>
                   <p className="text-[10px] font-bold text-indigo-800/90 mb-3 leading-relaxed">
-                    Cuando un cliente o promotor agenda (web o staff), avisa por SMS y/o correo a los números y emails que pongas abajo.
-                    Para todo el equipo, agrega varios separados por coma. Requiere Twilio (SMS) y Resend (correo) en Vercel.
+                    Cuando un cliente o promotor agenda (web o staff), avisa por {activeClinic === 'Shenandoah' ? 'SMS' : 'WhatsApp'} y/o correo a los números y emails que pongas abajo.
+                    Para todo el equipo, agrega varios separados por coma. Requiere {activeClinic === 'Shenandoah' ? 'Twilio (SMS)' : 'WhatsApp Business (Meta)'} y Resend (correo) en Vercel.
                   </p>
                   <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-indigo-200 shadow-sm cursor-pointer mb-3">
                     <input
@@ -2697,7 +2699,9 @@ export default function AppLayout() {
                   </label>
                   <div className="space-y-3">
                     <div>
-                      <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">Teléfonos del equipo (SMS)</label>
+                      <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">
+                        Teléfonos del equipo ({activeClinic === 'Shenandoah' ? 'SMS' : 'WhatsApp'})
+                      </label>
                       <textarea
                         rows={2}
                         value={dbCompanyConfig.staff_alert_phones || ''}
@@ -2731,10 +2735,11 @@ export default function AppLayout() {
                   <span className="block text-xs font-bold text-emerald-700 mt-1">Primera cita · Programación · Reprogramación · Cancelación · Datos relevantes</span>
                 </button>
                 <details className="mb-6 text-[10px] font-bold text-slate-500">
-                  <summary className="cursor-pointer uppercase text-slate-400 font-black">Configuración técnica (Vercel / Resend / Twilio)</summary>
+                  <summary className="cursor-pointer uppercase text-slate-400 font-black">Configuración técnica (Vercel / Resend / Twilio / WhatsApp)</summary>
                   <p className="mt-2 leading-relaxed pl-2 border-l-2 border-slate-200">
-                    Variables en Vercel: RESEND_API_KEY, RESEND_FROM_GDL, RESEND_FROM_TX, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER.
-                    Remitentes: GDL citas@oxygengdl.com · USA inf@oxyhyperbaric.com
+                    Un solo deploy en Vercel (oxy-agenda.vercel.app). Bases GDL y TX siguen separadas en Supabase.
+                    Correo: RESEND_* · USA SMS: TWILIO_* · México WhatsApp: WHATSAPP_* (cuando Meta esté listo).
+                    oxy-agenda-houston.vercel.app redirige al dominio principal.
                   </p>
                 </details>
 

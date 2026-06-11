@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { buildNotifyContent, toE164Phone } from '../../../lib/appointmentNotify.js';
+import { buildNotifyContent } from '../../../lib/appointmentNotify.js';
 import { getResendApiKey, getResendFromAddress } from '../../../lib/resendConfig.js';
+import { sendPatientTextMessage, textChannelLabel } from '../../../lib/clinicMessaging.js';
 
 export async function POST(request) {
   try {
@@ -29,8 +30,9 @@ export async function POST(request) {
 
     let emailStatus = locale === 'en' ? 'Not requested' : 'No solicitado';
     let smsStatus = locale === 'en' ? 'Not requested' : 'No solicitado';
+    const textChannel = textChannelLabel(clinicName, locale);
 
-    const { subject, emailHtml, smsBody } = buildNotifyContent({
+    const { subject, emailHtml, smsBody, whatsappBodyParams } = buildNotifyContent({
       locale,
       notifyType,
       patientName,
@@ -79,40 +81,31 @@ export async function POST(request) {
     }
 
     if (phone && prefers_sms !== false && (type === 'both' || type === 'sms')) {
-      const twilioSid = process.env.TWILIO_ACCOUNT_SID;
-      const twilioToken = process.env.TWILIO_AUTH_TOKEN;
-      const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
+      const result = await sendPatientTextMessage({
+        clinicName,
+        phone,
+        smsBody,
+        whatsappBodyParams,
+        notifyType,
+        locale,
+      });
 
-      if (!twilioSid || !twilioToken || !twilioPhone) {
-        smsStatus = locale === 'en' ? 'Missing Twilio credentials on server' : 'Faltan credenciales de Twilio en el servidor';
+      if (result.ok) {
+        smsStatus = locale === 'en' ? 'Sent successfully' : 'Enviado correctamente';
+      } else if (result.skipped && result.error === 'not_configured') {
+        smsStatus = locale === 'en'
+          ? 'WhatsApp not configured (email only)'
+          : 'WhatsApp no configurado (solo correo)';
       } else {
-        const toPhone = toE164Phone(phone, clinicName);
-        const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
-        const twilioData = new URLSearchParams({
-          To: toPhone,
-          From: twilioPhone,
-          Body: smsBody,
-        });
-
-        const smsReq = await fetch(twilioUrl, {
-          method: 'POST',
-          headers: {
-            Authorization: `Basic ${Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64')}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: twilioData,
-        });
-
-        if (smsReq.ok) {
-          smsStatus = locale === 'en' ? 'Sent successfully' : 'Enviado correctamente';
-        } else {
-          const errBody = await smsReq.text().catch(() => '');
-          smsStatus = locale === 'en' ? `SMS error: ${errBody.slice(0, 120)}` : `Error SMS: ${errBody.slice(0, 120)}`;
-        }
+        const prefix = locale === 'en' ? `${textChannel} error` : `Error ${textChannel}`;
+        smsStatus = `${prefix}: ${(result.error || 'unknown').slice(0, 120)}`;
       }
     }
 
-    return NextResponse.json({ success: true, report: { email: emailStatus, sms: smsStatus } });
+    return NextResponse.json({
+      success: true,
+      report: { email: emailStatus, sms: smsStatus, textChannel },
+    });
   } catch (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

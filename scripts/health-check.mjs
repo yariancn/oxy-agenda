@@ -30,11 +30,19 @@ const MIN_ROWS = {
   TX: { services: 1, user_roles: 1, company_config: 1, users_staff: 1 },
 };
 
-const NOTIFY_ENV = [
-  'RESEND_API_KEY',
+const TWILIO_ENV = [
   'TWILIO_ACCOUNT_SID',
   'TWILIO_AUTH_TOKEN',
   'TWILIO_PHONE_NUMBER',
+];
+
+const WHATSAPP_ENV = [
+  'WHATSAPP_ACCESS_TOKEN',
+  'WHATSAPP_PHONE_NUMBER_ID',
+  'WHATSAPP_TEMPLATE_BOOKING',
+  'WHATSAPP_TEMPLATE_RESCHEDULE',
+  'WHATSAPP_TEMPLATE_CANCEL',
+  'WHATSAPP_TEMPLATE_STAFF',
 ];
 
 const STATIC_ASSETS = [
@@ -158,19 +166,29 @@ function checkStaticAssets() {
 function checkNotifyEnv() {
   console.log('\n=== Notificaciones (variables de entorno) ===');
 
-  const missing = NOTIFY_ENV.filter((key) => !process.env[key]);
-
-  if (missing.length === 0) {
-    record('pass', 'Resend y Twilio configurados', ok);
-    return;
+  if (process.env.RESEND_API_KEY) {
+    record('pass', 'Resend configurado (correo)', ok);
+  } else {
+    record('warn', 'Falta RESEND_API_KEY — correo no enviará', warn);
   }
 
-  if (missing.length === NOTIFY_ENV.length) {
-    record('warn', 'Sin credenciales: email/SMS no enviarán en producción', warn);
-    return;
+  const missingTwilio = TWILIO_ENV.filter((key) => !process.env[key]);
+  if (missingTwilio.length === 0) {
+    record('pass', 'Twilio configurado (SMS USA)', ok);
+  } else if (missingTwilio.length === TWILIO_ENV.length) {
+    record('warn', 'Twilio sin configurar — SMS USA no enviará', warn);
+  } else {
+    record('warn', `Twilio incompleto: ${missingTwilio.join(', ')}`, warn);
   }
 
-  record('warn', `Faltan: ${missing.join(', ')}`, warn);
+  const missingWhatsApp = WHATSAPP_ENV.filter((key) => !process.env[key]);
+  if (missingWhatsApp.length === 0) {
+    record('pass', 'WhatsApp configurado (México)', ok);
+  } else if (missingWhatsApp.length === WHATSAPP_ENV.length) {
+    record('warn', 'WhatsApp sin configurar — mensajes GDL no enviarán', warn);
+  } else {
+    record('warn', `WhatsApp incompleto: ${missingWhatsApp.join(', ')}`, warn);
+  }
 }
 
 async function checkHttp(baseUrl) {
