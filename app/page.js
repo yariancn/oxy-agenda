@@ -68,6 +68,16 @@ export default function AppLayout() {
   const [loginPin, setLoginPin] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [wrongHostWarning, setWrongHostWarning] = useState(false);
+
+  const canonicalHost = process.env.NEXT_PUBLIC_CANONICAL_HOST || 'oxy-agenda.vercel.app';
+  const buildSha = process.env.NEXT_PUBLIC_BUILD_SHA || 'dev';
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const host = window.location.hostname;
+    setWrongHostWarning(host !== canonicalHost && host !== 'localhost' && !host.endsWith('.local'));
+  }, [canonicalHost]);
 
   // --- ESTADOS PRINCIPALES ---
   const [activeClinic, setActiveClinic] = useState('Guadalajara'); 
@@ -1654,6 +1664,16 @@ export default function AppLayout() {
   return (
     <StaffLocaleProvider clinic={activeClinic}>
     <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden relative">
+
+      {wrongHostWarning && (
+        <div className="fixed top-0 inset-x-0 z-[100000] bg-amber-500 text-amber-950 px-3 py-2 text-center text-[10px] sm:text-xs font-black uppercase shadow-lg">
+          Esta URL no es producción — abre{' '}
+          <a href={`https://${canonicalHost}`} className="underline underline-offset-2">
+            {canonicalHost}
+          </a>
+          {' '}(versión {buildSha})
+        </div>
+      )}
       
       {/* CAPA DE BLOQUEO: INICIAR TURNO Y LLAVE MAESTRA */}
       {!currentUser && (
@@ -3545,7 +3565,10 @@ export default function AppLayout() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" style={{ zIndex: 9999 }}>
           <div className="bg-white rounded-t-2xl sm:rounded-3xl max-w-md w-full max-h-[92dvh] sm:max-h-[85vh] flex flex-col shadow-2xl border overflow-hidden text-slate-900">
             <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-b shrink-0 flex justify-between items-center gap-2">
-               <h3 className="text-base sm:text-xl font-black uppercase text-emerald-600 truncate">{selectedSlot?.status === 'booked' ? 'Editar Cita' : 'Registrar Cita'}</h3>
+               <div className="min-w-0">
+                 <h3 className="text-base sm:text-xl font-black uppercase text-emerald-600 truncate">{selectedSlot?.status === 'booked' ? 'Editar Cita' : 'Registrar Cita'}</h3>
+                 <p className="text-[8px] font-bold uppercase text-slate-400 mt-0.5">v{buildSha}</p>
+               </div>
                <button onClick={() => {setShowNewAppointment(false); setSelectedSlot(null);}} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
             </div>
 

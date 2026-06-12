@@ -6,6 +6,10 @@ const legacyHosts = (process.env.LEGACY_VERCEL_HOSTS || 'oxy-agenda-houston.verc
   .filter(Boolean);
 
 const nextConfig = {
+  env: {
+    NEXT_PUBLIC_CANONICAL_HOST: canonicalHost,
+    NEXT_PUBLIC_BUILD_SHA: (process.env.VERCEL_GIT_COMMIT_SHA || 'dev').slice(0, 7),
+  },
   async redirects() {
     return legacyHosts.map((host) => ({
       source: '/:path*',

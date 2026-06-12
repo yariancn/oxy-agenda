@@ -12,6 +12,7 @@ export async function GET(request) {
 
   return NextResponse.json({
     host: request.headers.get('host'),
+    buildSha: (process.env.VERCEL_GIT_COMMIT_SHA || 'dev').slice(0, 7),
     resendConfigured: resend,
     twilioConfigured: isTwilioConfigured(),
     twilioPartial: {
