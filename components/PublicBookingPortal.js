@@ -188,6 +188,7 @@ export default function PublicBookingPortal({
             instructions: resolveSessionInstructions(formData.notes, dbConfig || {}, locale),
             instructionsLabel: getSessionInstructionsLabel(dbConfig || {}, locale),
             address: dbConfig?.address || '',
+            mapsUrl: dbConfig?.maps_url || '',
             clinicPhone: dbConfig?.phone || '',
             ticketMessage: dbConfig?.ticket_message || '',
             locale,

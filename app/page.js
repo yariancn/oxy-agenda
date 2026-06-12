@@ -125,6 +125,7 @@ export default function AppLayout() {
     id: null, 
     name: 'OXYGENGDL', 
     address: '', 
+    maps_url: '',
     phone: '', 
     ticket_message: 'Gracias por su preferencia', 
     start_time: '07:00', 
@@ -265,6 +266,7 @@ export default function AppLayout() {
       instructions: previewInstructions,
       instructionsLabel: getSessionInstructionsLabel(dbCompanyConfig, locale),
       address: dbCompanyConfig.address || (locale === 'en' ? '123 Medical Center Dr, Houston TX' : 'Av. Patria 123, Guadalajara'),
+      mapsUrl: dbCompanyConfig.maps_url || '',
       clinicPhone: dbCompanyConfig.phone || (locale === 'en' ? '2815550100' : '3312345678'),
       ticketMessage: dbCompanyConfig.ticket_message,
       emailTemplates: pickEmailTemplates(),
@@ -277,6 +279,7 @@ export default function AppLayout() {
   const buildCompanyConfigPayload = () => ({
     name: formatClinicField(dbCompanyConfig.name),
     address: formatClinicField(dbCompanyConfig.address),
+    maps_url: String(dbCompanyConfig.maps_url || '').trim(),
     phone: formatClinicPhone(dbCompanyConfig.phone),
     ticket_message: formatClinicField(dbCompanyConfig.ticket_message),
     start_time: normalizeTimeInput(dbCompanyConfig.start_time) || '07:00',
@@ -636,6 +639,7 @@ export default function AppLayout() {
           ...resC.data,
           name: formatClinicField(resC.data.name),
           address: formatClinicField(resC.data.address),
+          maps_url: String(resC.data.maps_url || '').trim(),
           phone: formatClinicPhone(resC.data.phone),
           ticket_message: formatClinicField(resC.data.ticket_message),
           notify_session_label: resC.data.notify_session_label || defaultNotifySettings(clinicLocale).notify_session_label,
@@ -990,6 +994,7 @@ export default function AppLayout() {
         instructions: resolveSessionInstructions(slot.notes, dbCompanyConfig, locale),
         instructionsLabel: getSessionInstructionsLabel(dbCompanyConfig, locale),
         address: dbCompanyConfig.address,
+        mapsUrl: dbCompanyConfig.maps_url,
         clinicPhone: dbCompanyConfig.phone,
         ticketMessage: dbCompanyConfig.ticket_message,
         locale,
@@ -2718,6 +2723,11 @@ export default function AppLayout() {
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Dirección Clínica</label>
                     <input type="text" value={dbCompanyConfig.address} onChange={e => setDbCompanyConfig({...dbCompanyConfig, address: formatClinicField(e.target.value)})} className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Link Google Maps (opcional)</label>
+                    <input type="url" value={dbCompanyConfig.maps_url || ''} onChange={e => setDbCompanyConfig({...dbCompanyConfig, maps_url: e.target.value.trim()})} placeholder="https://maps.google.com/..." className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white text-sm" />
+                    <p className="text-[9px] font-bold text-slate-400 mt-1">Si lo dejas vacío, se genera automáticamente desde la dirección. Se usa en correos y SMS.</p>
                   </div>
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Teléfono Público</label>

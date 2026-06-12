@@ -7,6 +7,7 @@ ALTER TABLE company_config
   ADD COLUMN IF NOT EXISTS clinic text,
   ADD COLUMN IF NOT EXISTS name text,
   ADD COLUMN IF NOT EXISTS address text,
+  ADD COLUMN IF NOT EXISTS maps_url text,
   ADD COLUMN IF NOT EXISTS phone text,
   ADD COLUMN IF NOT EXISTS ticket_message text,
   ADD COLUMN IF NOT EXISTS start_time text DEFAULT '07:00',
