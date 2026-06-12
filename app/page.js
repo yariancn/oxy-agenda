@@ -251,7 +251,8 @@ export default function AppLayout() {
     const dateStr = sampleDate.toISOString().split('T')[0];
     const sampleService = dbServices.find((s) => s.is_active)?.name
       || (locale === 'en' ? 'Hyperbaric Chamber' : 'Cámara Hiperbárica');
-    const previewInstructions = resolveSessionInstructions('', dbCompanyConfig);
+    const previewInstructions = resolveSessionInstructions('', dbCompanyConfig, locale);
+    const previewTimes = resolveSessionTimes({ duration: 60, buffer: 30 });
     const preview = buildNotifyContent({
       locale,
       notifyType: emailTemplateTab,
@@ -267,6 +268,8 @@ export default function AppLayout() {
       clinicPhone: dbCompanyConfig.phone || (locale === 'en' ? '2815550100' : '3312345678'),
       ticketMessage: dbCompanyConfig.ticket_message,
       emailTemplates: pickEmailTemplates(),
+      durationMins: previewTimes.duration,
+      bufferMins: previewTimes.buffer,
     });
     setEmailPreview(preview);
   };
@@ -657,7 +660,7 @@ export default function AppLayout() {
           name: activeClinic === 'Shenandoah' ? 'REGENOXY LLC' : 'OXYGENGDL', 
           address: '', 
           phone: '', 
-          ticket_message: 'Gracias por su preferencia', 
+          ticket_message: activeClinic === 'Shenandoah' ? 'Thank you for choosing us' : 'Gracias por su preferencia', 
           start_time: '07:00', 
           end_time: '20:00', 
           interval_mins: 30,
@@ -984,12 +987,14 @@ export default function AppLayout() {
         equipment: slot.equipment,
         clinicName: activeClinic,
         clinicDisplayName: dbCompanyConfig.name,
-        instructions: resolveSessionInstructions(slot.notes, dbCompanyConfig),
+        instructions: resolveSessionInstructions(slot.notes, dbCompanyConfig, locale),
         instructionsLabel: getSessionInstructionsLabel(dbCompanyConfig, locale),
         address: dbCompanyConfig.address,
         clinicPhone: dbCompanyConfig.phone,
         ticketMessage: dbCompanyConfig.ticket_message,
         locale,
+        durationMins: resolveSessionTimes(slot).duration,
+        bufferMins: resolveSessionTimes(slot).buffer,
         prefers_email: prefersEmail,
         prefers_sms: prefersSms,
         notifyEnabled: true,

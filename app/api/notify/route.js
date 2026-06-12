@@ -26,6 +26,8 @@ export async function POST(request) {
       notifyType = 'booking',
       emailTemplates = {},
       instructionsLabel = '',
+      durationMins = 60,
+      bufferMins = 0,
     } = body;
 
     let emailStatus = locale === 'en' ? 'Not requested' : 'No solicitado';
@@ -47,6 +49,8 @@ export async function POST(request) {
       ticketMessage,
       emailTemplates,
       instructionsLabel,
+      durationMins,
+      bufferMins,
     });
 
     if (email && prefers_email !== false && (type === 'both' || type === 'email')) {
