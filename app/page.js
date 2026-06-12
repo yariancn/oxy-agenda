@@ -3572,7 +3572,7 @@ export default function AppLayout() {
                <button onClick={() => {setShowNewAppointment(false); setSelectedSlot(null);}} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
             </div>
 
-            <div className="shrink-0 px-4 sm:px-8 py-3 border-b-2 border-indigo-300 bg-indigo-50/90 space-y-3">
+            <div className="shrink-0 px-4 sm:px-8 py-3 border-b bg-white space-y-2">
               <div className="min-w-0">
                 <label className="text-[10px] font-black uppercase text-slate-500">Paciente</label>
                 <PatientSearchInput
@@ -3612,9 +3612,14 @@ export default function AppLayout() {
                   }}
                 />
               </div>
-
+              {!selectedSlot?.patient?.trim() && (
+                <p className="text-[10px] font-bold uppercase text-slate-500">{L.p.appt.pickPatientHint}</p>
+              )}
+            </div>
+            
+            <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-3 sm:space-y-4 min-h-0">
               {selectedSlot?.patient?.trim() ? (
-                <div className="rounded-xl border-2 border-indigo-500 bg-white p-3 space-y-3 shadow-sm">
+                <div className="rounded-xl border-2 border-indigo-500 bg-indigo-50/90 p-3 space-y-3 shadow-sm">
                   <p className="text-[10px] font-black uppercase text-indigo-900">{L.p.appt.notifyPrefsTitle}</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
@@ -3627,22 +3632,17 @@ export default function AppLayout() {
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <label className="flex items-center gap-2 rounded-lg border-2 border-indigo-300 bg-indigo-50 px-3 py-2 text-[10px] font-black uppercase text-indigo-900">
+                    <label className="flex items-center gap-2 rounded-lg border-2 border-indigo-300 bg-white px-3 py-2 text-[10px] font-black uppercase text-indigo-900">
                       <input type="checkbox" checked={selectedSlot?.prefers_sms !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_sms: e.target.checked})} className="w-4 h-4 shrink-0" />
                       {L.modals.patient.receiveSms}
                     </label>
-                    <label className="flex items-center gap-2 rounded-lg border-2 border-indigo-300 bg-indigo-50 px-3 py-2 text-[10px] font-black uppercase text-indigo-900">
+                    <label className="flex items-center gap-2 rounded-lg border-2 border-indigo-300 bg-white px-3 py-2 text-[10px] font-black uppercase text-indigo-900">
                       <input type="checkbox" checked={selectedSlot?.prefers_email !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_email: e.target.checked})} className="w-4 h-4 shrink-0" />
                       {L.modals.patient.receiveEmail}
                     </label>
                   </div>
                 </div>
-              ) : (
-                <p className="text-[10px] font-bold uppercase text-slate-500">{L.p.appt.pickPatientHint}</p>
-              )}
-            </div>
-            
-            <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-3 sm:space-y-4 min-h-0">
+              ) : null}
               {selectedSlot?.patient && !isNewPatientInline && (
                 <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl shadow-inner">
                   <label className="text-[9px] font-black uppercase text-amber-800 flex items-center gap-1">⚠️ Notas Generales del Expediente</label>
