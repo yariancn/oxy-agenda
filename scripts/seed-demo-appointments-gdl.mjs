@@ -11,8 +11,14 @@
  *   npm run seed-demo:gdl:clear        # borrar todo DEMO
  */
 
-import { supabaseGdl } from '../lib/supabase.js';
+import { createClient } from '@supabase/supabase-js';
 import { SESSION_PRESETS } from '../lib/sessionPresets.js';
+
+const supabaseGdl = createClient(
+  process.env.SUPABASE_GDL_URL || process.env.NEXT_PUBLIC_SUPABASE_GDL_URL,
+  process.env.SUPABASE_GDL_SERVICE_ROLE_KEY,
+  { auth: { persistSession: false } },
+);
 
 const DEMO_PREFIX = '[DEMO]';
 const DEMO_NOTE = 'seed-demo-gdl';

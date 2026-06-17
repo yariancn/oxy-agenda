@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { dispatchStaffBookingAlert } from '../../../lib/staffBookingAlert.js';
-import { supabaseGdl, supabaseShenandoah } from '../../../lib/supabase.js';
+import { getSupabaseAdmin } from '../../../lib/supabaseAdmin.js';
 
 async function loadStaffRoster(clinicName) {
-  const supabase = clinicName === 'Shenandoah' ? supabaseShenandoah : supabaseGdl;
+  const supabase = getSupabaseAdmin(clinicName);
   const { data, error } = await supabase
     .from('users_staff')
     .select('name, email, phone, notify_on_booking, is_active')

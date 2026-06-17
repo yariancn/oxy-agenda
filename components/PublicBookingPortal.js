@@ -1,12 +1,10 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { submitPublicBooking } from '../lib/publicBooking';
 import { buildDaySlots, countAvailableSlots } from '../lib/publicBookingSlots';
 import { PUBLIC_SESSION } from '../lib/sessionPresets';
 import { PUBLIC_BOOKING_COPY, PUBLIC_SLOT_STATUS } from '../lib/i18n';
 import {
-  fetchPromoters,
   getPromoFromUrl,
   normalizePromoCode,
   resolvePromoter,
@@ -25,7 +23,6 @@ import {
 import { notifyStaffNewBooking } from '../lib/staffBookingAlert';
 
 export default function PublicBookingPortal({
-  supabase,
   clinicName,
   portalTag,
   locale = 'es',
@@ -71,27 +68,23 @@ export default function PublicBookingPortal({
     const load = async () => {
       setIsLoading(true);
       try {
-        const [resSrv, resApp, resBlock, resConf, promoters] = await Promise.all([
-          supabase.from('services').select('*').eq('is_active', true),
-          supabase
-            .from('appointments')
-            .select('equipment, full_date, time, duration, buffer, check_in_status')
-            .neq('check_in_status', 'Cancelado'),
-          supabase.from('blocked_slots').select('*'),
-          supabase.from('company_config').select('*').eq('clinic', clinicName).maybeSingle(),
-          fetchPromoters(supabase, clinicName),
-        ]);
-        if (resSrv.data) setDbServices(resSrv.data.sort((a, b) => a.name.length - b.name.length));
-        if (resApp.data) setDbAppointments(resApp.data);
-        if (resBlock.data) setDbBlockedSlots(resBlock.data);
-        setDbConfig(
-          resConf.data || {
-            start_time: '08:00',
-            end_time: '20:00',
-            interval_mins: 30,
-            booking_limit_hours: 2,
-          },
-        );
+        const res = await fetch(`/api/public/portal?clinic=${encodeURIComponent(clinicName)}`);
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(payload.error || 'Load failed');
+
+        setDbServices((payload.services || []).sort((a, b) => a.name.length - b.name.length));
+        setDbAppointments(payload.appointments || []);
+        setDbBlockedSlots(payload.blockedSlots || []);
+        setDbConfig(payload.companyConfig || {
+          start_time: '08:00',
+          end_time: '20:00',
+          interval_mins: 30,
+          booking_limit_hours: 2,
+        });
+        const promoters = (payload.promoters || []).map((row) => ({
+          code: normalizePromoCode(row.code),
+          name: String(row.name || '').trim(),
+        }));
         setPromoterList(promoters);
         const promo = getPromoFromUrl();
         if (promo) {
@@ -105,7 +98,7 @@ export default function PublicBookingPortal({
       }
     };
     load();
-  }, [supabase, clinicName]);
+  }, [clinicName]);
 
   const dateOptions = useMemo(() => {
     const dates = [];
@@ -147,25 +140,29 @@ export default function PublicBookingPortal({
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      const result = await submitPublicBooking({
-        supabase,
-        clinicName,
-        portalTag,
-        locale,
-        formData: {
-          ...formData,
-          promoterCode: normalizePromoCode(formData.promoterCode),
-        },
-        selectedService,
-        selectedDate,
-        selectedTime,
+      const response = await fetch('/api/public/portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clinicName,
+          portalTag,
+          locale,
+          formData: {
+            ...formData,
+            promoterCode: normalizePromoCode(formData.promoterCode),
+          },
+          selectedService,
+          selectedDate,
+          selectedTime,
+        }),
       });
-      if (result.error) {
-        if (result.error.message === 'PHONE_LENGTH') {
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (result.error === 'PHONE_LENGTH') {
           alert(t.phoneError);
           return;
         }
-        throw result.error;
+        throw new Error(result.error || t.genericError);
       }
 
       const notifyType = resolveAppointmentNotifyType({

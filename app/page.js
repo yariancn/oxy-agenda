@@ -1,12 +1,11 @@
 "use client";
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { supabaseShenandoah, supabaseGdl } from '../lib/supabase';
+import { createStaffDb } from '../lib/staffDbClient';
 import { SESSION_PRESETS, getPresetFromTimes } from '../lib/sessionPresets';
 import {
   canAccessClinic,
   getAllowedClinics,
   getStaffProfileForClinic,
-  resolveStaffLogin,
 } from '../lib/clinicAccess';
 import { ensurePatient, digitsOnly } from '../lib/ensurePatient';
 import {
@@ -319,7 +318,7 @@ export default function AppLayout() {
     return () => mq.removeEventListener('change', update);
   }, []);
 
-  const activeSupabase = activeClinic === 'Shenandoah' ? supabaseShenandoah : supabaseGdl;
+  const activeSupabase = useMemo(() => createStaffDb(activeClinic), [activeClinic]);
 
   const allowedClinics = getAllowedClinics(currentUser);
   const activeStaffProfile = getStaffProfileForClinic(currentUser, activeClinic) || currentUser;
@@ -564,9 +563,9 @@ export default function AppLayout() {
 
   // --- SINCRONIZACIÓN CON PAGINACIÓN INTELIGENTE ---
   const fetchAllData = async () => {
-    if (!activeSupabase) { 
-      setDbStatus('sin_llaves'); 
-      return; 
+    if (!currentUser) {
+      setDbStatus('sin_sesion');
+      return;
     }
 
     try {
@@ -690,9 +689,25 @@ export default function AppLayout() {
     }
   };
 
-  useEffect(() => { 
-    fetchAllData(); 
-  }, [activeClinic]);
+  useEffect(() => {
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.user) {
+          setCurrentUser(data.user);
+          if (data.user.allowedClinics?.length) {
+            setActiveClinic((prev) => (
+              data.user.allowedClinics.includes(prev) ? prev : data.user.allowedClinics[0]
+            ));
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (currentUser) fetchAllData();
+  }, [activeClinic, currentUser]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -707,8 +722,14 @@ export default function AppLayout() {
     if (isLoggingIn) return;
     setIsLoggingIn(true);
     try {
-      const result = await resolveStaffLogin(loginPin, supabaseGdl, supabaseShenandoah);
-      if (!result.user) {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: loginPin }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.user) {
         alert(staffAlert(locale, 'pinInvalid'));
         setLoginPin('');
         return;
@@ -732,12 +753,18 @@ export default function AppLayout() {
     setActiveClinic(clinic);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {
+      // ignore
+    }
     setCurrentUser(null);
     setLoginPin('');
     setActiveTab('Agenda');
     setIsReportsUnlocked(false);
     setActiveClinic('Guadalajara');
+    setDbStatus('sin_sesion');
   };
 
   const handleFinancialUnlock = () => {
@@ -4103,7 +4130,7 @@ export default function AppLayout() {
             currentUserLevel={currentUserLevel}
             onClose={() => setShowPatientProfile(false)} 
             onSave={async (ud) => {
-              const activeSupabase = activeClinic === 'Shenandoah' ? supabaseShenandoah : supabaseGdl;
+              const activeSupabase = createStaffDb(activeClinic);
               const patientDbId = ud.id || selectedSlot.patientId;
               if (patientDbId) {
                 let p = { 

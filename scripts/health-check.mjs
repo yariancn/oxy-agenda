@@ -3,10 +3,26 @@
 import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { supabaseGdl, supabaseShenandoah } from '../lib/supabase.js';
+import { createClient } from '@supabase/supabase-js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
+
+function adminClient(clinicId) {
+  if (clinicId === 'TX') {
+    const url = process.env.SUPABASE_TX_URL || process.env.NEXT_PUBLIC_SUPABASE_TX_URL;
+    const key = process.env.SUPABASE_TX_SERVICE_ROLE_KEY;
+    return createClient(url, key, { auth: { persistSession: false } });
+  }
+  const url = process.env.SUPABASE_GDL_URL || process.env.NEXT_PUBLIC_SUPABASE_GDL_URL;
+  const key = process.env.SUPABASE_GDL_SERVICE_ROLE_KEY;
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+const CLINICS = [
+  { id: 'GDL', label: 'Guadalajara (MXN)', client: adminClient('GDL') },
+  { id: 'TX', label: 'Shenandoah (USD)', client: adminClient('TX') },
+];
 
 const TABLES = [
   'services',
@@ -18,11 +34,6 @@ const TABLES = [
   'user_roles',
   'protocols',
   'audit_logs',
-];
-
-const CLINICS = [
-  { id: 'GDL', label: 'Guadalajara (MXN)', client: supabaseGdl },
-  { id: 'TX', label: 'Shenandoah (USD)', client: supabaseShenandoah },
 ];
 
 const MIN_ROWS = {
