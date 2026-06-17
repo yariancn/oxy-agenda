@@ -29,7 +29,7 @@ export default function InstallGuide() {
   const pathname = usePathname();
   const staffOnly = isStaffInstallPath(pathname);
   const [open, setOpen] = useState(false);
-  const [ctx, setCtx] = useState(readContext);
+  const [ctx, setCtx] = useState(null);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [installing, setInstalling] = useState(false);
   const [copied, setCopied] = useState(false);

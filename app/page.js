@@ -147,6 +147,7 @@ export default function AppLayout() {
   const [searchQuery, setSearchQuery] = useState('');
   const [dbStatus, setDbStatus] = useState('cargando');
   const [dbErrorMessage, setDbErrorMessage] = useState('');
+  const fetchGenRef = useRef(0);
 
   // --- FORMULARIOS GLOBALES ---
   const [newSrv, setNewSrv] = useState({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });
@@ -568,8 +569,20 @@ export default function AppLayout() {
       return;
     }
 
+    const fetchGen = ++fetchGenRef.current;
+    const clinicDb = createStaffDb(activeClinic);
+
+    const assertDbResult = (label, result) => {
+      if (result?.error) {
+        const message = result.error.message || String(result.error);
+        throw new Error(`${label}: ${message}`);
+      }
+      return result;
+    };
+
     try {
       setDbStatus('cargando');
+      setDbErrorMessage('');
 
       // Motor de Paginación para evadir el límite de 1000 de Supabase
       const fetchPaginated = async (table) => {
@@ -577,8 +590,11 @@ export default function AppLayout() {
         let from = 0;
         const step = 1000;
         while (true) {
-          const { data, error } = await activeSupabase.from(table).select('*').range(from, from + step - 1);
-          if (error) throw error;
+          const result = assertDbResult(
+            table,
+            await clinicDb.from(table).select('*').range(from, from + step - 1),
+          );
+          const data = result.data;
           if (!data || data.length === 0) break;
           allData = [...allData, ...data];
           if (data.length < step) break;
@@ -590,14 +606,23 @@ export default function AppLayout() {
       const [patientsData, appointmentsData, resS, resU, resB, resC, resProt, resRoles, resPromo] = await Promise.all([
         fetchPaginated('patients'),
         fetchPaginated('appointments'),
-        activeSupabase.from('services').select('*'),
-        activeSupabase.from('users_staff').select('*'),
-        activeSupabase.from('blocked_slots').select('*'),
-        activeSupabase.from('company_config').select('*').eq('clinic', activeClinic).maybeSingle(),
-        activeSupabase.from('protocols').select('*'),
-        activeSupabase.from('user_roles').select('*'),
-        activeSupabase.from('promoters').select('id, code, name, is_active, created_at').order('code'),
+        clinicDb.from('services').select('*'),
+        clinicDb.from('users_staff').select('*'),
+        clinicDb.from('blocked_slots').select('*'),
+        clinicDb.from('company_config').select('*').eq('clinic', activeClinic).maybeSingle(),
+        clinicDb.from('protocols').select('*'),
+        clinicDb.from('user_roles').select('*'),
+        clinicDb.from('promoters').select('id, code, name, is_active, created_at').order('code'),
       ]);
+
+      if (fetchGen !== fetchGenRef.current) return;
+
+      assertDbResult('services', resS);
+      assertDbResult('users_staff', resU);
+      assertDbResult('blocked_slots', resB);
+      assertDbResult('company_config', resC);
+      assertDbResult('protocols', resProt);
+      assertDbResult('user_roles', resRoles);
 
       const safePatients = (patientsData || []).map(p => ({
         id: p.id,
@@ -676,18 +701,32 @@ export default function AppLayout() {
           ...defaultNotifySettings(clinicLocale),
           ...emptyEmailTemplateState(clinicLocale),
         };
-        await activeSupabase.from('company_config').insert([defaultCfg]);
+        await clinicDb.from('company_config').insert([defaultCfg]);
         setDbCompanyConfig(defaultCfg);
       }
 
+      if (fetchGen !== fetchGenRef.current) return;
+
       setDbAppointments(appointmentsData || []);
       setDbStatus('listo');
+      setDbErrorMessage('');
     } catch (err) {
+      if (fetchGen !== fetchGenRef.current) return;
       console.error(err);
-      setDbErrorMessage(err.message);
+      const raw = err?.message || String(err);
+      setDbErrorMessage(raw);
       setDbStatus('error');
     }
   };
+
+  const dbErrorHint = useMemo(() => {
+    if (!dbErrorMessage) return L.dbErrorHint;
+    if (/unauthorized|sesión|session/i.test(dbErrorMessage)) return L.dbErrorUnauthorized;
+    if (/missing supabase|staff_session_secret|database request failed/i.test(dbErrorMessage)) {
+      return L.dbErrorServer;
+    }
+    return L.dbErrorHint;
+  }, [dbErrorMessage, L]);
 
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include' })
@@ -730,7 +769,8 @@ export default function AppLayout() {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.user) {
-        alert(staffAlert(locale, 'pinInvalid'));
+        const detail = result.error ? `\n\n${result.error}` : '';
+        alert(`${staffAlert(locale, 'pinInvalid')}${detail}`);
         setLoginPin('');
         return;
       }
@@ -1711,6 +1751,31 @@ export default function AppLayout() {
           {' '}(versión {buildSha})
         </div>
       )}
+
+      {currentUser && dbStatus === 'cargando' && (
+        <div className={`fixed inset-x-0 z-[99998] bg-blue-600 text-white px-4 py-2 text-center text-[10px] sm:text-xs font-black uppercase shadow-lg ${wrongHostWarning ? 'top-9' : 'top-0'}`}>
+          {L.dbLoading}
+        </div>
+      )}
+
+      {currentUser && dbStatus === 'error' && (
+        <div className={`fixed inset-x-0 z-[99998] bg-red-600 text-white px-3 py-3 shadow-lg ${wrongHostWarning ? 'top-9' : 'top-0'}`}>
+          <div className="max-w-3xl mx-auto text-center">
+            <p className="text-[11px] sm:text-xs font-black uppercase">{L.dbErrorTitle}</p>
+            <p className="text-[10px] sm:text-[11px] font-semibold mt-1 leading-snug opacity-95">{dbErrorHint}</p>
+            {dbErrorMessage && (
+              <p className="text-[9px] font-mono mt-1 opacity-80 break-all">{dbErrorMessage}</p>
+            )}
+            <button
+              type="button"
+              onClick={() => fetchAllData()}
+              className="mt-2 bg-white text-red-700 text-[10px] font-black uppercase px-4 py-1.5 rounded-lg hover:bg-red-50 transition"
+            >
+              {L.dbErrorRetry}
+            </button>
+          </div>
+        </div>
+      )}
       
       {/* CAPA DE BLOQUEO: INICIAR TURNO Y LLAVE MAESTRA */}
       {!currentUser && (
@@ -2136,6 +2201,11 @@ export default function AppLayout() {
                    </div>
                  ))}
                  {filteredPatients.length === 0 && <div className="col-span-full py-20 text-center"><p className="text-slate-400 font-black uppercase text-lg">{L.noPatients}</p></div>}
+              </div>
+            )}
+            {dbStatus !== 'listo' && (
+              <div className="py-20 text-center">
+                <p className="text-slate-400 font-black uppercase text-sm">{dbStatus === 'error' ? L.dbErrorTitle : L.dbLoading}</p>
               </div>
             )}
           </div>
