@@ -1,10 +1,16 @@
 import { NextResponse } from 'next/server';
 import { getResendApiKey } from '../../../../lib/resendConfig.js';
 import { isTwilioConfigured, isWhatsAppConfigured, getTwilioMessagingServiceSid } from '../../../../lib/clinicMessaging.js';
-import { getWhatsAppConfig, getWhatsAppTemplateName } from '../../../../lib/whatsappMessaging.js';
+import {
+  getWhatsAppConfig,
+  getWhatsAppTemplateName,
+  probeWhatsAppHealth,
+} from '../../../../lib/whatsappMessaging.js';
 
 /** Diagnóstico: confirma qué credenciales ve el servidor (sin exponer valores). */
 export async function GET(request) {
+  const { searchParams } = new URL(request.url);
+  const liveProbe = searchParams.get('probe') === '1';
   const twilioSid = Boolean(process.env.TWILIO_ACCOUNT_SID);
   const twilioToken = Boolean(process.env.TWILIO_AUTH_TOKEN);
   const twilioPhone = Boolean(process.env.TWILIO_PHONE_NUMBER);
@@ -20,7 +26,7 @@ export async function GET(request) {
     staff: Boolean(process.env.WHATSAPP_TEMPLATE_STAFF),
   };
 
-  return NextResponse.json({
+  const payload = {
     host: request.headers.get('host'),
     buildSha: (process.env.VERCEL_GIT_COMMIT_SHA || 'dev').slice(0, 7),
     resendConfigured: resend,
@@ -39,5 +45,11 @@ export async function GET(request) {
       templates: whatsappTemplates,
       templatesComplete: Object.values(whatsappTemplates).every(Boolean),
     },
-  });
+  };
+
+  if (liveProbe && isWhatsAppConfigured()) {
+    payload.whatsappLive = await probeWhatsAppHealth();
+  }
+
+  return NextResponse.json(payload);
 }
