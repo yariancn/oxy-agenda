@@ -48,7 +48,14 @@ export async function GET(request) {
   };
 
   if (liveProbe && isWhatsAppConfigured()) {
-    payload.whatsappLive = await probeWhatsAppHealth();
+    try {
+      payload.whatsappLive = await probeWhatsAppHealth();
+    } catch (error) {
+      payload.whatsappLive = {
+        ok: false,
+        error: error.message || 'WhatsApp probe failed',
+      };
+    }
   }
 
   return NextResponse.json(payload);
