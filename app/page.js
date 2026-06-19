@@ -1450,7 +1450,10 @@ export default function AppLayout() {
         is_extended_block: isExtendedSession(moveConfirmation.app),
       });
       
-      if (error) alert(a('moveError', error.message));
+      if (error) {
+        if (error.message === 'SLOT_UNAVAILABLE') alert(a('overlapLong'));
+        else alert(a('moveError', error.message));
+      }
       else {
         await logAudit(moveConfirmation.app.id, moveConfirmation.app.patient, 'REUBICACIÓN', `De ${moveConfirmation.app.full_date} ${moveConfirmation.app.time} (${moveConfirmation.app.equipment}) a ${moveConfirmation.newFullDate} ${moveConfirmation.newTime} (${moveConfirmation.newEquipment})`);
         await notifyPatientFromSlot({
@@ -2998,7 +3001,8 @@ export default function AppLayout() {
                 </div>
 
                 <h3 className="font-black text-slate-800 uppercase text-sm mb-2 pb-2 border-b mt-6">{L.p.admin.calendarFeedTitle}</h3>
-                <p className="text-[10px] font-bold text-slate-500 mb-3 leading-relaxed">{L.p.admin.calendarFeedHint}</p>
+                <p className="text-[10px] font-bold text-slate-500 mb-2 leading-relaxed">{L.p.admin.calendarFeedHint}</p>
+                <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 leading-relaxed">{L.p.admin.calendarFeedLiveNote}</p>
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-sm">
                   <label className="flex items-start gap-3 cursor-pointer">
                     <input
@@ -3066,6 +3070,7 @@ export default function AppLayout() {
                             <p>1. {L.p.admin.calendarFeedStep1}</p>
                             <p>2. {L.p.admin.calendarFeedStep2}</p>
                             <p>3. {L.p.admin.calendarFeedStep3}</p>
+                            <p>4. {L.p.admin.calendarFeedStep4}</p>
                           </div>
                         </>
                       ) : (
@@ -4208,7 +4213,10 @@ export default function AppLayout() {
                     is_extended_block: isExtendedSession(selectedSlot),
                   };
                   const { data: na, error } = await insertStaffAppointment(activeSupabase, payload);
-                  if (error) return alert(a('genericError', error.message));
+                  if (error) {
+                    if (error.message === 'SLOT_UNAVAILABLE') return alert(a('overlapLong'));
+                    return alert(a('genericError', error.message));
+                  }
                   if (na && na[0]) {
                     const flags = [
                       selectedSlot.outside_normal_hours ? L.p.appt.badgeOutsideHours : '',

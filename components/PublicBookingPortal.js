@@ -162,6 +162,10 @@ export default function PublicBookingPortal({
           alert(t.phoneError);
           return;
         }
+        if (result.error === 'SLOT_UNAVAILABLE') {
+          alert(t.slotUnavailable);
+          return;
+        }
         throw new Error(result.error || t.genericError);
       }
 

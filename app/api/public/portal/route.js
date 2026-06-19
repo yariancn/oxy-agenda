@@ -96,7 +96,11 @@ export async function POST(request) {
     });
 
     if (result.error) {
-      const message = result.error.message === 'PHONE_LENGTH' ? 'PHONE_LENGTH' : result.error.message;
+      const message = result.error.message === 'PHONE_LENGTH'
+        ? 'PHONE_LENGTH'
+        : result.error.message === 'SLOT_UNAVAILABLE'
+          ? 'SLOT_UNAVAILABLE'
+          : result.error.message;
       return NextResponse.json({ error: message }, { status: 400 });
     }
 

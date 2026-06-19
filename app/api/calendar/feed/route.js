@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import {
   buildAvailabilitySlotsForRange,
   buildFeedIcsContent,
+  computeFeedRevision,
   feedDateWindow,
   filterAppointmentsForPromoter,
 } from '../../../../lib/calendarFeed.js';
@@ -119,6 +120,25 @@ export async function GET(request) {
       ? `${config.name || clinic} — ${promoterCode}`
       : (config.name || clinic);
 
+    const revision = computeFeedRevision({
+      appointments: promoterCode ? scopedAppointments : allAppointments,
+      blockedSlots: blockedSlots || [],
+      services: services || [],
+      promoterCode,
+      availabilityCount: availabilitySlots.length,
+    });
+    const etag = `"${revision}"`;
+    const ifNoneMatch = request.headers.get('if-none-match');
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          'Cache-Control': 'no-cache, must-revalidate',
+        },
+      });
+    }
+
     const ics = buildFeedIcsContent({
       clinicName: clinic,
       clinicDisplayName: feedLabel,
@@ -137,7 +157,9 @@ export async function GET(request) {
       headers: {
         'Content-Type': 'text/calendar; charset=utf-8',
         'Content-Disposition': `inline; filename="${filename}"`,
-        'Cache-Control': 'public, max-age=300',
+        'Cache-Control': 'no-cache, must-revalidate',
+        ETag: etag,
+        'Last-Modified': new Date().toUTCString(),
       },
     });
   } catch (error) {
