@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createStaffDb } from '../lib/staffDbClient';
 import { SESSION_PRESETS, getPresetFromTimes } from '../lib/sessionPresets';
 import {
@@ -43,6 +43,7 @@ import {
   WEEK_STICKY_HEADER_PX,
 } from '../lib/calendarDisplay';
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
+import { formatClinicDateIso, getClinicNow } from '../lib/clinicClock';
 import {
   buildCalendarFeedUrl,
   buildWebcalFeedUrl,
@@ -104,6 +105,8 @@ export default function AppLayout() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const prefsHydratedRef = useRef(false);
   const skipAutoZoomRef = useRef(false);
+  const calendarScrollRef = useRef(null);
+  const pendingScrollToNowRef = useRef(false);
   
   // --- RELOJ MULTIHUSO HORARIO ---
   const [clinicNow, setClinicNow] = useState({ mins: 0, dateStr: '' });
@@ -354,19 +357,23 @@ export default function AppLayout() {
   // Actualizador de Reloj por Clínica
   useEffect(() => {
     const updateTime = () => {
-      const tz = activeClinic === 'Shenandoah' ? 'America/Chicago' : 'America/Mexico_City';
-      const now = new Date();
-      const localStr = now.toLocaleString("en-US", { timeZone: tz });
-      const d = new Date(localStr);
-      setClinicNow({
-        mins: d.getHours() * 60 + d.getMinutes(),
-        dateStr: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-      });
+      const now = getClinicNow(activeClinic);
+      setClinicNow({ mins: now.mins, dateStr: now.dateStr });
     };
     updateTime();
     const interval = setInterval(updateTime, 60000);
     return () => clearInterval(interval);
   }, [activeClinic]);
+
+  useEffect(() => {
+    if (!currentUser || activeTab !== 'Agenda') return;
+    const mobile = window.matchMedia('(max-width: 1023px)').matches;
+    if (!mobile) return;
+    const now = getClinicNow(activeClinic);
+    setViewMode('Día');
+    setCurrentDate(now.date);
+    pendingScrollToNowRef.current = true;
+  }, [currentUser, activeTab, activeClinic]);
 
   // Bloqueo automático SOLO para la pestaña de Ventas
   useEffect(() => {
@@ -862,12 +869,12 @@ export default function AppLayout() {
   };
 
   // --- LÓGICA DE TIEMPOS Y CALENDARIO ---
-  const currentDateISO = new Date(currentDate).toISOString().split('T')[0];
-  const currentFullDate = currentDateISO; 
+  const currentDateISO = formatClinicDateIso(currentDate, activeClinic);
+  const currentFullDate = currentDateISO;
 
   const weekDays = useMemo(
-    () => buildCalendarWeek(locale, currentDate),
-    [locale, currentDate],
+    () => buildCalendarWeek(locale, currentDate, activeClinic),
+    [locale, currentDate, activeClinic],
   );
 
   const currentDayInfo = weekDays.find(d => d.fullDate === currentDateISO) || weekDays[0];
@@ -1033,11 +1040,38 @@ export default function AppLayout() {
     };
   }, [dbAppointments, viewMode, currentFullDate, weekDays, clinicNow.dateStr]);
 
+  const scrollCalendarToNow = useCallback((behavior = 'auto') => {
+    const el = calendarScrollRef.current;
+    if (!el || !clinicNow.dateStr) return;
+
+    const topPx = (clinicNow.mins - calendarStartMins) * PIXELS_PER_MINUTE;
+    const verticalOffset = Math.max(0, topPx - el.clientHeight * 0.2);
+    el.scrollTo({ top: verticalOffset, behavior });
+
+    if (viewMode === 'Semana') {
+      const todayCol = el.querySelector(`[data-cal-day="${clinicNow.dateStr}"]`);
+      todayCol?.scrollIntoView({ inline: 'center', block: 'nearest', behavior });
+    }
+  }, [clinicNow.dateStr, clinicNow.mins, calendarStartMins, viewMode]);
+
+  useEffect(() => {
+    if (!pendingScrollToNowRef.current) return;
+    if (activeTab !== 'Agenda' || dbStatus !== 'ok' || !clinicNow.dateStr) return;
+    const timer = window.setTimeout(() => {
+      scrollCalendarToNow('auto');
+      pendingScrollToNowRef.current = false;
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, dbStatus, clinicNow.dateStr, scrollCalendarToNow, viewMode, currentDateISO, CALENDAR_HEIGHT]);
+
   useEffect(() => {
     prefsHydratedRef.current = false;
     skipAutoZoomRef.current = true;
     const prefs = loadCalendarPrefs(activeClinic);
-    if (prefs?.viewMode === 'Día' || prefs?.viewMode === 'Semana') setViewMode(prefs.viewMode);
+    const mobile = window.matchMedia('(max-width: 1023px)').matches;
+    if (!mobile && (prefs?.viewMode === 'Día' || prefs?.viewMode === 'Semana')) {
+      setViewMode(prefs.viewMode);
+    }
     if (prefs?.equipmentFilter) setEquipmentFilter(prefs.equipmentFilter);
     if (typeof prefs?.zoomScale === 'number') setZoomScale(prefs.zoomScale);
     if (prefs?.zoomManual) setZoomManual(true);
@@ -1246,7 +1280,10 @@ export default function AppLayout() {
       const key = e.key;
       if (key === 'h' || key === 'H') {
         e.preventDefault();
-        setCurrentDate(new Date());
+        const now = getClinicNow(activeClinic);
+        setCurrentDate(now.date);
+        pendingScrollToNowRef.current = true;
+        scrollCalendarToNow('smooth');
       } else if (key === 'd' || key === 'D') {
         e.preventDefault();
         setZoomManual(false);
@@ -1262,7 +1299,7 @@ export default function AppLayout() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [currentUser, activeTab, dbServices, currentFullDate, currentDayInfo]);
+  }, [currentUser, activeTab, dbServices, currentFullDate, currentDayInfo, activeClinic, scrollCalendarToNow]);
 
   const appointmentTimeOptions = useMemo(() => {
     const srv = getServiceForSlot(selectedSlot);
@@ -2127,7 +2164,19 @@ export default function AppLayout() {
                   </div>
                   <button onClick={() => navigateDate(1)} className="p-1.5 lg:p-2 hover:bg-white rounded-lg transition text-slate-600 text-sm">▶</button>
                 </div>
-                <button onClick={() => setCurrentDate(new Date())} className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 hover:text-blue-600 transition border px-2 py-1 rounded shrink-0">{L.today}</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = getClinicNow(activeClinic);
+                    setCurrentDate(now.date);
+                    if (isMobileViewport) setViewMode('Día');
+                    pendingScrollToNowRef.current = true;
+                    window.setTimeout(() => scrollCalendarToNow('smooth'), 80);
+                  }}
+                  className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 hover:text-blue-600 transition border px-2 py-1 rounded shrink-0"
+                >
+                  {L.today}
+                </button>
                 <div className="lg:hidden flex-1 min-w-0 text-[9px] font-bold text-slate-500 truncate">
                   {L.agendaSummaryToday}: {agendaSummary.today} · {L.agendaSummaryView}: {agendaSummary.view}
                 </div>
@@ -2197,7 +2246,7 @@ export default function AppLayout() {
             )}
 
             {/* --- CONTENEDOR DEL CALENDARIO: SCROLL UNIFICADO (CIRUGÍA CSS) --- */}
-            <div className="flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0">
+            <div ref={calendarScrollRef} className="flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0">
               <div className="flex min-w-max">
                 
                 <div className="w-16 md:w-20 shrink-0 border-r border-slate-200 bg-slate-50 sticky left-0 z-50">
@@ -2273,7 +2322,7 @@ export default function AppLayout() {
                       {weekDays.map((dayInfo) => {
                         const dayOpen = getDaySchedule(dbCompanyConfig, dayInfo.fullDate).open;
                         return (
-                        <div key={dayInfo.fullDate} className={`flex-1 shrink-0 border-r-2 border-slate-300 ${!dayOpen ? 'opacity-60' : ''}`} style={{ minWidth: `${displayedEquipments.length * currentColWidth}px` }}>
+                        <div key={dayInfo.fullDate} data-cal-day={dayInfo.fullDate} className={`flex-1 shrink-0 border-r-2 border-slate-300 ${!dayOpen ? 'opacity-60' : ''}`} style={{ minWidth: `${displayedEquipments.length * currentColWidth}px` }}>
                           <div className={`sticky top-0 z-40 border-b border-slate-200 ${dayOpen ? 'bg-slate-50' : 'bg-slate-200'}`}>
                             <div className="h-8 flex flex-col items-center justify-center">
                               <span className="text-[9px] font-black text-slate-800 uppercase leading-none">{dayInfo.name}</span>
