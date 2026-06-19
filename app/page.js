@@ -326,6 +326,7 @@ export default function AppLayout() {
       id: dbCompanyConfig.id,
       clinic: activeClinic,
       payload: buildCompanyConfigPayload(),
+      locale,
     });
     if (error) throw new Error(error.message);
     alert(warning || L.p.admin.configSaved);
