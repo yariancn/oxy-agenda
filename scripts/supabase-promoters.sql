@@ -6,6 +6,7 @@ create table if not exists promoters (
   code text not null unique,
   name text not null,
   notes text not null default '',
+  calendar_feed_token text,
   is_active boolean not null default true,
   created_at timestamptz not null default now()
 );

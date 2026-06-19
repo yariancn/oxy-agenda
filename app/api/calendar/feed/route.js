@@ -1,8 +1,27 @@
 import { NextResponse } from 'next/server';
-import { buildFeedIcsContent, feedDateWindow } from '../../../../lib/calendarFeed.js';
+import {
+  buildAvailabilitySlotsForRange,
+  buildFeedIcsContent,
+  feedDateWindow,
+  filterAppointmentsForPromoter,
+} from '../../../../lib/calendarFeed.js';
+import { normalizePromoCode } from '../../../../lib/promoters.js';
+import { timezoneForClinic } from '../../../../lib/calendarLinks.js';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
 
 const PUBLIC_CLINICS = new Set(['Guadalajara', 'Shenandoah']);
+
+const CONFIG_FIELDS = [
+  'calendar_feed_enabled',
+  'calendar_feed_token',
+  'name',
+  'address',
+  'maps_url',
+  'start_time',
+  'end_time',
+  'interval_mins',
+  'booking_limit_hours',
+].join(', ');
 
 export async function GET(request) {
   try {
@@ -17,45 +36,107 @@ export async function GET(request) {
     const supabase = getSupabaseAdmin(clinic);
     const { data: config, error: configError } = await supabase
       .from('company_config')
-      .select('calendar_feed_enabled, calendar_feed_token, name, address, maps_url')
+      .select(CONFIG_FIELDS)
       .eq('clinic', clinic)
       .maybeSingle();
 
-    if (
-      configError
-      || !config?.calendar_feed_enabled
-      || !config?.calendar_feed_token
-      || config.calendar_feed_token !== token
-    ) {
+    if (configError || !config?.calendar_feed_enabled) {
       return new NextResponse('Not found', { status: 404 });
     }
 
+    let promoterCode = '';
+    const clinicToken = String(config.calendar_feed_token || '').trim();
+    if (clinicToken && clinicToken === token) {
+      promoterCode = '';
+    } else {
+      const { data: promoter, error: promoterError } = await supabase
+        .from('promoters')
+        .select('code, calendar_feed_token, is_active')
+        .eq('calendar_feed_token', token)
+        .maybeSingle();
+
+      if (
+        promoterError
+        || !promoter?.is_active
+        || !promoter?.calendar_feed_token
+        || promoter.calendar_feed_token !== token
+      ) {
+        return new NextResponse('Not found', { status: 404 });
+      }
+      promoterCode = normalizePromoCode(promoter.code);
+    }
+
     const { from, to } = feedDateWindow();
-    const { data: appointments, error: appsError } = await supabase
-      .from('appointments')
-      .select('id, patient, phone, equipment, full_date, time, duration, buffer, check_in_status, notes')
-      .gte('full_date', from)
-      .lte('full_date', to)
-      .neq('check_in_status', 'Cancelado')
-      .order('full_date', { ascending: true });
+    const [
+      { data: appointments, error: appsError },
+      { data: services, error: servicesError },
+      { data: blockedSlots, error: blockedError },
+    ] = await Promise.all([
+      supabase
+        .from('appointments')
+        .select('id, patient, phone, equipment, full_date, time, duration, buffer, check_in_status, notes, promoter_code')
+        .gte('full_date', from)
+        .lte('full_date', to)
+        .neq('check_in_status', 'Cancelado')
+        .order('full_date', { ascending: true }),
+      supabase
+        .from('services')
+        .select('name, duration, buffer, start_time, end_time, is_active'),
+      supabase
+        .from('blocked_slots')
+        .select('*'),
+    ]);
 
     if (appsError) {
       return NextResponse.json({ error: appsError.message }, { status: 500 });
     }
+    if (servicesError) {
+      return NextResponse.json({ error: servicesError.message }, { status: 500 });
+    }
+    if (blockedError) {
+      return NextResponse.json({ error: blockedError.message }, { status: 500 });
+    }
+
+    const allAppointments = appointments || [];
+    const scopedAppointments = promoterCode
+      ? filterAppointmentsForPromoter(allAppointments, promoterCode)
+      : allAppointments;
+
+    const timezone = timezoneForClinic(clinic);
+    const availabilitySlots = promoterCode
+      ? buildAvailabilitySlotsForRange({
+        companyConfig: config,
+        services: services || [],
+        appointments: allAppointments,
+        blockedSlots: blockedSlots || [],
+        timezone,
+        fromDate: from,
+        toDate: to,
+      })
+      : [];
+
+    const feedLabel = promoterCode
+      ? `${config.name || clinic} — ${promoterCode}`
+      : (config.name || clinic);
 
     const ics = buildFeedIcsContent({
       clinicName: clinic,
-      clinicDisplayName: config.name,
+      clinicDisplayName: feedLabel,
       address: config.address,
       mapsUrl: config.maps_url,
-      appointments: appointments || [],
+      appointments: scopedAppointments,
+      availabilitySlots,
     });
+
+    const filename = promoterCode
+      ? `oxy-${clinic.toLowerCase()}-${promoterCode.toLowerCase()}.ics`
+      : `oxy-${clinic.toLowerCase()}-agenda.ics`;
 
     return new NextResponse(ics, {
       status: 200,
       headers: {
         'Content-Type': 'text/calendar; charset=utf-8',
-        'Content-Disposition': `inline; filename="oxy-${clinic.toLowerCase()}-agenda.ics"`,
+        'Content-Disposition': `inline; filename="${filename}"`,
         'Cache-Control': 'public, max-age=300',
       },
     });

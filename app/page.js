@@ -615,9 +615,9 @@ export default function AppLayout() {
       const fetchPromotersWithFallback = async () => {
         let res = await clinicDb
           .from('promoters')
-          .select('id, code, name, notes, is_active, created_at')
+          .select('id, code, name, notes, calendar_feed_token, is_active, created_at')
           .order('code');
-        if (res.error && /notes|column|schema cache/i.test(res.error.message || '')) {
+        if (res.error && /notes|calendar_feed_token|column|schema cache/i.test(res.error.message || '')) {
           res = await clinicDb
             .from('promoters')
             .select('id, code, name, is_active, created_at')
@@ -914,8 +914,57 @@ export default function AppLayout() {
       await navigator.clipboard.writeText(value);
       alert(L.p.admin.calendarFeedCopied);
     } catch {
-      window.prompt(L.p.admin.calendarFeedUrl, value);
+      window.prompt(L.p.admin.calendarFeedClinicUrl, value);
     }
+  };
+
+  const buildPromoterCalendarFeedUrl = (promoter) => {
+    const token = String(promoter?.calendar_feed_token || '').trim();
+    if (!dbCompanyConfig.calendar_feed_enabled || !token) return '';
+    return buildCalendarFeedUrl({
+      clinic: activeClinic,
+      token,
+      baseUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+    });
+  };
+
+  const copyPromoterCalendarFeed = async (promoter) => {
+    if (!dbCompanyConfig.calendar_feed_enabled) {
+      alert(L.p.admin.promoterCalendarDisabled);
+      return;
+    }
+    const url = buildPromoterCalendarFeedUrl(promoter);
+    if (!url) {
+      alert(L.p.admin.promoterCalendarTokenMissing);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      alert(L.p.admin.promoterCalendarCopied);
+    } catch {
+      window.prompt(L.p.admin.promoterCalendarLink, url);
+    }
+  };
+
+  const regeneratePromoterCalendarToken = async (promoter) => {
+    const hasToken = Boolean(String(promoter?.calendar_feed_token || '').trim());
+    if (hasToken && !window.confirm(L.p.admin.promoterCalendarRegenerateConfirm)) return;
+    const clinicDb = createStaffDb(activeClinic);
+    const nextToken = generateCalendarFeedToken();
+    let res = await clinicDb
+      .from('promoters')
+      .update({ calendar_feed_token: nextToken })
+      .eq('id', promoter.id)
+      .select('*');
+    if (res.error && /calendar_feed_token|column|schema cache/i.test(res.error.message || '')) {
+      alert(L.p.admin.promoterTableMissing);
+      return;
+    }
+    if (res.error) {
+      alert(`${L.p.admin.promoterSaveError}: ${res.error.message}`);
+      return;
+    }
+    fetchAllData();
   };
 
   const showWeekFilterHint = (
@@ -1765,6 +1814,11 @@ export default function AppLayout() {
       is_active: newPromoter.is_active !== false,
       notes: String(newPromoter.notes || '').trim(),
     };
+    if (!isEditingPromoter || !newPromoter.id) {
+      payload.calendar_feed_token = generateCalendarFeedToken();
+    } else if (!String(newPromoter.calendar_feed_token || '').trim()) {
+      payload.calendar_feed_token = generateCalendarFeedToken();
+    }
     const clinicDb = createStaffDb(activeClinic);
     const savePayload = async (row) => {
       if (isEditingPromoter && newPromoter.id) {
@@ -1774,11 +1828,11 @@ export default function AppLayout() {
     };
 
     let res = await savePayload(payload);
-    if (res.error && /notes|column|schema cache/i.test(res.error.message || '')) {
-      const { notes, ...withoutNotes } = payload;
-      res = await savePayload(withoutNotes);
-      if (!res.error) {
-        alert(L.p.admin.promoterNotesColumnMissing);
+    if (res.error && /notes|calendar_feed_token|column|schema cache/i.test(res.error.message || '')) {
+      const { notes, calendar_feed_token, ...coreRow } = payload;
+      res = await savePayload(coreRow);
+      if (!res.error && (notes !== undefined || calendar_feed_token !== undefined)) {
+        alert(L.p.admin.promoterOptionalColumnsMissing);
       }
     }
     if (res.error) {
@@ -2970,7 +3024,7 @@ export default function AppLayout() {
                       {calendarFeedUrl ? (
                         <>
                           <div>
-                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{L.p.admin.calendarFeedUrl}</label>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{L.p.admin.calendarFeedClinicUrl}</label>
                             <input
                               type="text"
                               readOnly
@@ -3387,6 +3441,7 @@ export default function AppLayout() {
                             <th className="px-4 py-3">{L.p.admin.promoterName}</th>
                             <th className="px-4 py-3">{L.p.admin.promoterNotes}</th>
                             <th className="px-4 py-3">{L.p.admin.promoterLink}</th>
+                            <th className="px-4 py-3">{L.p.admin.promoterCalendarLink}</th>
                             <th className="px-4 py-3 text-right">{L.p.common.edit}</th>
                           </tr>
                         </thead>
@@ -3406,6 +3461,39 @@ export default function AppLayout() {
                                 >
                                   {L.p.admin.promoterCopy}
                                 </button>
+                              </td>
+                              <td className="px-4 py-3">
+                                {dbCompanyConfig.calendar_feed_enabled ? (
+                                  <div className="flex flex-col gap-1 items-start">
+                                    <button
+                                      type="button"
+                                      onClick={() => copyPromoterCalendarFeed(pr)}
+                                      disabled={!pr.calendar_feed_token}
+                                      className="text-[9px] font-black uppercase text-emerald-700 hover:text-emerald-900 bg-emerald-50 px-2 py-1 rounded border border-emerald-100 disabled:opacity-40"
+                                    >
+                                      {L.p.admin.promoterCalendarCopy}
+                                    </button>
+                                    {pr.calendar_feed_token ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => regeneratePromoterCalendarToken(pr)}
+                                        className="text-[9px] font-black uppercase text-amber-700 hover:text-amber-900 bg-amber-50 px-2 py-1 rounded border border-amber-100"
+                                      >
+                                        {L.p.admin.promoterCalendarRegenerate}
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => regeneratePromoterCalendarToken(pr)}
+                                        className="text-[9px] font-black uppercase text-slate-600 hover:text-slate-800 bg-slate-50 px-2 py-1 rounded border border-slate-200"
+                                      >
+                                        {L.p.admin.promoterCalendarGenerate}
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-[9px] font-bold text-slate-400 uppercase">—</span>
+                                )}
                               </td>
                               <td className="px-4 py-3">
                                 <div className="flex justify-end gap-1 flex-wrap">
@@ -3443,7 +3531,7 @@ export default function AppLayout() {
                           ))}
                           {(!dbPromoters || dbPromoters.length === 0) && (
                             <tr>
-                              <td colSpan="4" className="px-4 py-10 text-center text-slate-400 font-bold uppercase text-xs">
+                              <td colSpan="6" className="px-4 py-10 text-center text-slate-400 font-bold uppercase text-xs">
                                 {L.p.admin.noPromoters}
                               </td>
                             </tr>
