@@ -6,24 +6,15 @@ import {
   feedDateWindow,
   filterAppointmentsForPromoter,
 } from '../../../../lib/calendarFeed.js';
+import {
+  loadCompanyConfigForFeed,
+  resolvePromoterFeedToken,
+} from '../../../../lib/calendarFeedAuth.js';
 import { normalizePromoCode } from '../../../../lib/promoters.js';
 import { timezoneForClinic } from '../../../../lib/calendarLinks.js';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
 
 const PUBLIC_CLINICS = new Set(['Guadalajara', 'Shenandoah']);
-
-const CONFIG_FIELDS = [
-  'calendar_feed_enabled',
-  'calendar_feed_token',
-  'name',
-  'address',
-  'maps_url',
-  'start_time',
-  'end_time',
-  'interval_mins',
-  'booking_limit_hours',
-  'weekly_schedule',
-].join(', ');
 
 export async function GET(request) {
   try {
@@ -36,13 +27,13 @@ export async function GET(request) {
     }
 
     const supabase = getSupabaseAdmin(clinic);
-    const { data: config, error: configError } = await supabase
-      .from('company_config')
-      .select(CONFIG_FIELDS)
-      .eq('clinic', clinic)
-      .maybeSingle();
+    const { data: config, error: configError } = await loadCompanyConfigForFeed(supabase, clinic);
 
-    if (configError || !config?.calendar_feed_enabled) {
+    if (configError || !config) {
+      return new NextResponse('Not found', { status: 404 });
+    }
+
+    if (config.calendar_feed_enabled !== true) {
       return new NextResponse('Not found', { status: 404 });
     }
 
@@ -51,14 +42,13 @@ export async function GET(request) {
     if (clinicToken && clinicToken === token) {
       promoterCode = '';
     } else {
-      const { data: promoter, error: promoterError } = await supabase
-        .from('promoters')
-        .select('code, calendar_feed_token, is_active')
-        .eq('calendar_feed_token', token)
-        .maybeSingle();
-
+      const promoterResult = await resolvePromoterFeedToken(supabase, token);
+      if (promoterResult.columnMissing) {
+        return new NextResponse('Not found', { status: 404 });
+      }
+      const promoter = promoterResult.data;
       if (
-        promoterError
+        promoterResult.error
         || !promoter?.is_active
         || !promoter?.calendar_feed_token
         || promoter.calendar_feed_token !== token

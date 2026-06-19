@@ -959,6 +959,20 @@ export default function AppLayout() {
       alert(L.p.admin.calendarFeedSaveFirst);
       return;
     }
+    if (!dbCompanyConfig.id) {
+      alert(L.p.admin.promoterCalendarSaveConfigFirst);
+      return;
+    }
+    try {
+      const probe = await fetch(calendarFeedUrl, { method: 'GET', cache: 'no-store' });
+      if (!probe.ok) {
+        alert(L.p.admin.promoterCalendarFeedBroken);
+        return;
+      }
+    } catch {
+      alert(L.p.admin.promoterCalendarFeedBroken);
+      return;
+    }
     const value = webcal ? buildWebcalFeedUrl(calendarFeedUrl) : calendarFeedUrl;
     try {
       await navigator.clipboard.writeText(value);
@@ -983,9 +997,23 @@ export default function AppLayout() {
       alert(L.p.admin.promoterCalendarDisabled);
       return;
     }
+    if (!dbCompanyConfig.id || !String(dbCompanyConfig.calendar_feed_token || '').trim()) {
+      alert(L.p.admin.promoterCalendarSaveConfigFirst);
+      return;
+    }
     const url = buildPromoterCalendarFeedUrl(promoter);
     if (!url) {
       alert(L.p.admin.promoterCalendarTokenMissing);
+      return;
+    }
+    try {
+      const probe = await fetch(url, { method: 'GET', cache: 'no-store' });
+      if (!probe.ok) {
+        alert(L.p.admin.promoterCalendarFeedBroken);
+        return;
+      }
+    } catch {
+      alert(L.p.admin.promoterCalendarFeedBroken);
       return;
     }
     try {
@@ -1930,8 +1958,12 @@ export default function AppLayout() {
     if (res.error && /notes|calendar_feed_token|column|schema cache/i.test(res.error.message || '')) {
       const { notes, calendar_feed_token, ...coreRow } = payload;
       res = await savePayload(coreRow);
-      if (!res.error && (notes !== undefined || calendar_feed_token !== undefined)) {
-        alert(L.p.admin.promoterOptionalColumnsMissing);
+      if (!res.error && calendar_feed_token !== undefined) {
+        alert(L.p.admin.promoterCalendarFeedBroken);
+        return;
+      }
+      if (!res.error && notes !== undefined) {
+        alert(L.p.admin.promoterNotesColumnMissing);
       }
     }
     if (res.error) {
