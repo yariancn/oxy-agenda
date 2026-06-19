@@ -45,6 +45,7 @@ export default function PublicBookingPortal({
     lada: branding.defaultLada,
     notes: '',
     promoterCode: '',
+    smsConsent: false,
   });
   const [promoterList, setPromoterList] = useState([]);
   const [promoFromLink, setPromoFromLink] = useState(false);
@@ -212,7 +213,7 @@ export default function PublicBookingPortal({
             notifyType,
             emailTemplates: dbConfig || {},
             sendEmail: dbConfig?.notify_channel_email !== false,
-            sendSms: dbConfig?.notify_channel_sms !== false,
+            sendSms: dbConfig?.notify_channel_sms !== false && (locale !== 'en' || formData.smsConsent === true),
           });
           if (notifyHadFailure(notifyData.report)) {
             console.warn('Booking notify partial failure', notifyData.report);
@@ -522,6 +523,28 @@ export default function PublicBookingPortal({
                     className="w-full p-4 border-2 border-amber-200 rounded-xl font-medium text-slate-800 outline-none focus:border-amber-500 bg-white resize-y min-h-[100px]"
                   />
                 </section>
+
+                {locale === 'en' && (
+                  <section className="rounded-2xl border-2 border-slate-200 bg-white p-4 space-y-3">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.smsConsent === true}
+                        onChange={(e) => setFormData({ ...formData, smsConsent: e.target.checked })}
+                        className="w-4 h-4 mt-1 shrink-0"
+                      />
+                      <span className="text-[11px] font-semibold text-slate-700 leading-relaxed">
+                        {t.smsConsentLabel}
+                      </span>
+                    </label>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase pl-7">{t.smsConsentHint}</p>
+                    <p className="text-[10px] font-semibold text-slate-500 pl-7">
+                      <a href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{t.privacyLink}</a>
+                      {' · '}
+                      <a href="/legal/sms" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{t.smsTermsLink}</a>
+                    </p>
+                  </section>
+                )}
 
                 <button
                   type="submit"
