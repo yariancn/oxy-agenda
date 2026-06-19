@@ -1703,13 +1703,21 @@ export default function AppLayout() {
     if (duplicate) return alert(L.p.admin.promoterDuplicate);
 
     const payload = { code, name, is_active: newPromoter.is_active !== false };
+    const clinicDb = createStaffDb(activeClinic);
     let res;
     if (isEditingPromoter && newPromoter.id) {
-      res = await activeSupabase.from('promoters').update(payload).eq('id', newPromoter.id);
+      res = await clinicDb.from('promoters').update(payload).eq('id', newPromoter.id).select('*');
     } else {
-      res = await activeSupabase.from('promoters').insert([payload]);
+      res = await clinicDb.from('promoters').insert([payload]).select('*');
     }
-    if (res.error) return alert(`${L.p.admin.promoterSaveError}: ${res.error.message}`);
+    if (res.error) {
+      if (res.error.sessionExpired) {
+        alert(`${L.p.admin.promoterSaveError}: ${L.dbErrorUnauthorized}`);
+        await handleLogout();
+        return;
+      }
+      return alert(`${L.p.admin.promoterSaveError}: ${res.error.message}`);
+    }
 
     await logAudit(
       null,
