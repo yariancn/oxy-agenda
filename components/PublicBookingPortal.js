@@ -22,6 +22,7 @@ import {
   resolveSessionInstructions,
 } from '../lib/notifySettings';
 import { notifyStaffNewBooking } from '../lib/staffBookingAlert';
+import { getLegalLinks } from '../lib/legalLinks';
 
 export default function PublicBookingPortal({
   clinicName,
@@ -30,6 +31,7 @@ export default function PublicBookingPortal({
   branding,
 }) {
   const t = PUBLIC_BOOKING_COPY[locale] || PUBLIC_BOOKING_COPY.es;
+  const legalLinks = getLegalLinks(clinicName);
 
   useEffect(() => {
     document.documentElement.lang = locale === 'en' ? 'en' : 'es';
@@ -539,11 +541,21 @@ export default function PublicBookingPortal({
                     </label>
                     <p className="text-[10px] font-bold text-slate-400 uppercase pl-7">{t.smsConsentHint}</p>
                     <p className="text-[10px] font-semibold text-slate-500 pl-7">
-                      <a href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{t.privacyLink}</a>
+                      <a href={legalLinks.privacy} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{t.privacyLink}</a>
                       {' · '}
-                      <a href="/legal/sms" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{t.smsTermsLink}</a>
+                      <a href={legalLinks.terms} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{t.termsLink}</a>
+                      {' · '}
+                      <a href={legalLinks.sms} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{t.smsTermsLink}</a>
                     </p>
                   </section>
+                )}
+
+                {locale === 'es' && (
+                  <p className="text-[10px] font-semibold text-slate-500 text-center">
+                    <a href={legalLinks.privacy} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline">{t.privacyLink}</a>
+                    {' · '}
+                    <a href={legalLinks.terms} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline">{t.termsLink}</a>
+                  </p>
                 )}
 
                 <button
