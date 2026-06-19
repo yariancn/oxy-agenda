@@ -24,6 +24,14 @@ import { StaffLocaleProvider } from '../components/StaffLocaleContext';
 import StaffBookingOverrides from '../components/StaffBookingOverrides';
 import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
 import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
+import {
+  buildDefaultWeeklySchedule,
+  getClinicCalendarGridBounds,
+  getDaySchedule,
+  getWeekdayLabels,
+  normalizeWeeklySchedule,
+  WEEKDAY_KEYS,
+} from '../lib/clinicWeeklySchedule';
 import { insertStaffAppointment, updateStaffAppointment } from '../lib/staffAppointmentSave';
 import { saveCompanyConfigRow } from '../lib/companyConfigSave';
 import { formatClinicField, formatClinicPhone } from '../lib/clinicText';
@@ -135,6 +143,7 @@ export default function AppLayout() {
     start_time: '07:00', 
     end_time: '20:00', 
     interval_mins: 30,
+    weekly_schedule: buildDefaultWeeklySchedule({ start_time: '07:00', end_time: '20:00' }),
     booking_limit_hours: 2,
     cancel_limit_hours: 24,
     master_pin: '000000',
@@ -292,6 +301,10 @@ export default function AppLayout() {
     start_time: normalizeTimeInput(dbCompanyConfig.start_time) || '07:00',
     end_time: normalizeTimeInput(dbCompanyConfig.end_time) || '20:00',
     interval_mins: dbCompanyConfig.interval_mins,
+    weekly_schedule: normalizeWeeklySchedule(dbCompanyConfig.weekly_schedule, {
+      start_time: normalizeTimeInput(dbCompanyConfig.start_time) || '07:00',
+      end_time: normalizeTimeInput(dbCompanyConfig.end_time) || '20:00',
+    }),
     booking_limit_hours: dbCompanyConfig.booking_limit_hours,
     cancel_limit_hours: dbCompanyConfig.cancel_limit_hours,
     master_pin: dbCompanyConfig.master_pin,
@@ -703,6 +716,10 @@ export default function AppLayout() {
           staff_alert_emails: resC.data.staff_alert_emails || '',
           start_time: normalizeTimeInput(resC.data.start_time) || '07:00',
           end_time: normalizeTimeInput(resC.data.end_time) || '20:00',
+          weekly_schedule: normalizeWeeklySchedule(resC.data.weekly_schedule, {
+            start_time: normalizeTimeInput(resC.data.start_time) || '07:00',
+            end_time: normalizeTimeInput(resC.data.end_time) || '20:00',
+          }),
           calendar_feed_enabled: resC.data.calendar_feed_enabled === true,
           calendar_feed_token: String(resC.data.calendar_feed_token || '').trim(),
         });
@@ -717,6 +734,7 @@ export default function AppLayout() {
           start_time: '07:00', 
           end_time: '20:00', 
           interval_mins: 30,
+          weekly_schedule: buildDefaultWeeklySchedule({ start_time: '07:00', end_time: '20:00' }),
           booking_limit_hours: 2,
           cancel_limit_hours: 24,
           master_pin: '000000',
@@ -875,10 +893,35 @@ export default function AppLayout() {
 
   const PIXELS_PER_MINUTE = 1.5;
   const CALENDAR_PAD_MINS = 30;
-  const startMins = getMinutes(normalizeTimeInput(dbCompanyConfig.start_time) || '07:00');
-  const endMins = getMinutes(normalizeTimeInput(dbCompanyConfig.end_time) || '20:00');
+  const clinicGridBounds = useMemo(
+    () => getClinicCalendarGridBounds(dbCompanyConfig),
+    [dbCompanyConfig],
+  );
+  const startMins = clinicGridBounds.startMins;
+  const endMins = clinicGridBounds.endMins;
   const calendarStartMins = startMins - CALENDAR_PAD_MINS;
   const intervalMins = Number(dbCompanyConfig.interval_mins) || 30;
+  const weekdayLabels = useMemo(() => getWeekdayLabels(locale), [locale]);
+
+  const updateWeeklyDay = (key, patch) => {
+    setDbCompanyConfig((prev) => {
+      const defaults = {
+        start_time: normalizeTimeInput(prev.start_time) || '07:00',
+        end_time: normalizeTimeInput(prev.end_time) || '20:00',
+      };
+      const schedule = normalizeWeeklySchedule(prev.weekly_schedule, defaults);
+      return {
+        ...prev,
+        weekly_schedule: {
+          ...schedule,
+          [key]: {
+            ...schedule[key],
+            ...patch,
+          },
+        },
+      };
+    });
+  };
 
   const CALENDAR_HEIGHT = (endMins - calendarStartMins) * PIXELS_PER_MINUTE;
   const currentColWidth = (160 * zoomScale) / 100;
@@ -1227,6 +1270,7 @@ export default function AppLayout() {
     return buildStaffAppointmentTimeOptions({
       service: srv,
       companyConfig: dbCompanyConfig,
+      isoDate: selectedSlot?.full_date || selectedSlot?.fullDate || currentDateISO,
       duration,
       buffer,
       outsideNormalHours: !!selectedSlot?.outside_normal_hours,
@@ -1238,6 +1282,9 @@ export default function AppLayout() {
     selectedSlot?.extended_session,
     selectedSlot?.duration,
     selectedSlot?.buffer,
+    selectedSlot?.full_date,
+    selectedSlot?.fullDate,
+    currentDateISO,
     dbServices,
     dbCompanyConfig,
   ]);
@@ -1680,15 +1727,27 @@ export default function AppLayout() {
   };
 
   const renderBackgroundSlots = (equipment, day, fullDate) => {
+    const daySchedule = getDaySchedule(dbCompanyConfig, fullDate);
+    if (!daySchedule.open) {
+      return (
+        <div className="absolute inset-0 z-10 bg-slate-200/90 flex items-center justify-center pointer-events-none" style={{ backgroundImage: 'repeating-linear-gradient(135deg, transparent, transparent 12px, rgba(0,0,0,0.04) 12px, rgba(0,0,0,0.04) 24px)' }}>
+          <span className="text-[10px] font-black uppercase text-slate-500 bg-white/90 px-2 py-1 rounded border border-slate-300">
+            {L.p.admin.weeklyClosedDay}
+          </span>
+        </div>
+      );
+    }
+
     const srv = dbServices.find(s => s.name === equipment) || { duration: 60, buffer: 30, id: null };
     const duration = Number(srv.duration) || 60;
     const buffer = Number(srv.buffer ?? 30);
     const blockMins = duration + buffer;
-    const { startMins: svcStart, endMins: svcEnd } = getServiceScheduleBounds(srv, dbCompanyConfig);
+    const { startMins: svcStart, endMins: svcEnd } = getServiceScheduleBounds(srv, dbCompanyConfig, fullDate);
 
     const slotTimes = buildAvailabilitySlotTimes({
       service: srv,
       companyConfig: dbCompanyConfig,
+      isoDate: fullDate,
       duration,
       buffer,
       stepByBlock: true,
@@ -2211,12 +2270,16 @@ export default function AppLayout() {
                     </div>
                   ) : (
                     <div className="flex min-w-full">
-                      {weekDays.map((dayInfo) => (
-                        <div key={dayInfo.fullDate} className="flex-1 shrink-0 border-r-2 border-slate-300" style={{ minWidth: `${displayedEquipments.length * currentColWidth}px` }}>
-                          <div className="sticky top-0 z-40 bg-slate-50 border-b border-slate-200">
+                      {weekDays.map((dayInfo) => {
+                        const dayOpen = getDaySchedule(dbCompanyConfig, dayInfo.fullDate).open;
+                        return (
+                        <div key={dayInfo.fullDate} className={`flex-1 shrink-0 border-r-2 border-slate-300 ${!dayOpen ? 'opacity-60' : ''}`} style={{ minWidth: `${displayedEquipments.length * currentColWidth}px` }}>
+                          <div className={`sticky top-0 z-40 border-b border-slate-200 ${dayOpen ? 'bg-slate-50' : 'bg-slate-200'}`}>
                             <div className="h-8 flex flex-col items-center justify-center">
                               <span className="text-[9px] font-black text-slate-800 uppercase leading-none">{dayInfo.name}</span>
-                              <span className="text-[10px] font-bold text-blue-600 leading-none">{dayInfo.date}</span>
+                              <span className={`text-[10px] font-bold leading-none ${dayOpen ? 'text-blue-600' : 'text-slate-500'}`}>
+                                {dayInfo.date}{!dayOpen ? ` · ${L.p.admin.weeklyClosedShort}` : ''}
+                              </span>
                             </div>
                             <div className="flex border-t border-slate-200 h-7">
                               {displayedEquipments.map((eqName) => {
@@ -2280,7 +2343,7 @@ export default function AppLayout() {
                             )})}
                           </div>
                         </div>
-                      ))}
+                      );})}
                     </div>
                   )}
                 </div>
@@ -2983,11 +3046,11 @@ export default function AppLayout() {
                     <input type="number" value={dbCompanyConfig.cancel_limit_hours} onChange={e => setDbCompanyConfig({...dbCompanyConfig, cancel_limit_hours: Number(e.target.value)})} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" />
                   </div>
                   <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Apertura</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">{L.p.admin.weeklyDefaultOpen}</label>
                     <input type="time" value={normalizeTimeInput(dbCompanyConfig.start_time) || '07:00'} onChange={e => setDbCompanyConfig({...dbCompanyConfig, start_time: e.target.value})} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" />
                   </div>
                   <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Cierre</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">{L.p.admin.weeklyDefaultClose}</label>
                     <input type="time" value={normalizeTimeInput(dbCompanyConfig.end_time) || '20:00'} onChange={e => setDbCompanyConfig({...dbCompanyConfig, end_time: e.target.value})} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" />
                   </div>
                   <div className="col-span-1 sm:col-span-2">
@@ -2998,6 +3061,63 @@ export default function AppLayout() {
                       <option value={60}>60 minutos</option>
                     </select>
                   </div>
+                </div>
+
+                <h3 className="font-black text-slate-800 uppercase text-sm mb-2 pb-2 border-b mt-2">{L.p.admin.weeklyScheduleTitle}</h3>
+                <p className="text-[10px] font-bold text-slate-500 mb-3 leading-relaxed">{L.p.admin.weeklyScheduleHint}</p>
+                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm mb-6">
+                  <div className="hidden sm:grid grid-cols-[1fr_auto_auto_9rem_9rem] gap-2 px-4 py-2 bg-slate-50 border-b border-slate-100 text-[9px] font-black text-slate-400 uppercase">
+                    <span>{L.p.admin.weeklyDayCol}</span>
+                    <span className="text-center">{L.p.admin.weeklyOpenCol}</span>
+                    <span className="text-center">{L.p.admin.weeklyCustomCol}</span>
+                    <span>{L.p.admin.weeklyStartCol}</span>
+                    <span>{L.p.admin.weeklyEndCol}</span>
+                  </div>
+                  {WEEKDAY_KEYS.map((key) => {
+                    const schedule = normalizeWeeklySchedule(dbCompanyConfig.weekly_schedule, {
+                      start_time: normalizeTimeInput(dbCompanyConfig.start_time) || '07:00',
+                      end_time: normalizeTimeInput(dbCompanyConfig.end_time) || '20:00',
+                    });
+                    const day = schedule[key];
+                    return (
+                      <div key={key} className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_9rem_9rem] gap-2 sm:gap-3 items-center px-4 py-3 border-b border-slate-100 last:border-b-0">
+                        <span className="text-xs font-black text-slate-800 uppercase">{weekdayLabels[key]}</span>
+                        <label className="flex items-center justify-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={day.open !== false}
+                            onChange={(e) => updateWeeklyDay(key, { open: e.target.checked })}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-[10px] font-bold text-slate-600 uppercase sm:hidden">{L.p.admin.weeklyOpenCol}</span>
+                        </label>
+                        <label className={`flex items-center justify-center gap-2 cursor-pointer ${!day.open ? 'opacity-40 pointer-events-none' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={day.custom_hours === true}
+                            onChange={(e) => updateWeeklyDay(key, { custom_hours: e.target.checked })}
+                            className="w-4 h-4"
+                            disabled={!day.open}
+                          />
+                          <span className="text-[10px] font-bold text-slate-600 uppercase sm:hidden">{L.p.admin.weeklyCustomCol}</span>
+                        </label>
+                        <input
+                          type="time"
+                          disabled={!day.open || !day.custom_hours}
+                          value={normalizeTimeInput(day.start_time) || normalizeTimeInput(dbCompanyConfig.start_time) || '07:00'}
+                          onChange={(e) => updateWeeklyDay(key, { start_time: e.target.value, custom_hours: true })}
+                          className="w-full p-2 border rounded-lg font-bold text-sm text-slate-900 bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                        />
+                        <input
+                          type="time"
+                          disabled={!day.open || !day.custom_hours}
+                          value={normalizeTimeInput(day.end_time) || normalizeTimeInput(dbCompanyConfig.end_time) || '20:00'}
+                          onChange={(e) => updateWeeklyDay(key, { end_time: e.target.value, custom_hours: true })}
+                          className="w-full p-2 border rounded-lg font-bold text-sm text-slate-900 bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <h3 className="font-black text-slate-800 uppercase text-sm mb-2 pb-2 border-b mt-6">{L.p.admin.calendarFeedTitle}</h3>

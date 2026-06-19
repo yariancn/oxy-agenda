@@ -22,6 +22,7 @@ const CONFIG_FIELDS = [
   'end_time',
   'interval_mins',
   'booking_limit_hours',
+  'weekly_schedule',
 ].join(', ');
 
 export async function GET(request) {

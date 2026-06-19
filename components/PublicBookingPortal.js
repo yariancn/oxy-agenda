@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { buildDaySlots, countAvailableSlots } from '../lib/publicBookingSlots';
+import { isClinicOpenOnDate } from '../lib/clinicWeeklySchedule';
 import { PUBLIC_SESSION } from '../lib/sessionPresets';
 import { PUBLIC_BOOKING_COPY, PUBLIC_SLOT_STATUS } from '../lib/i18n';
 import {
@@ -114,10 +115,22 @@ export default function PublicBookingPortal({
         day: '2-digit',
         month: 'short',
       });
-      dates.push({ fullDate, label });
+      const closed = dbConfig ? !isClinicOpenOnDate(dbConfig, fullDate) : false;
+      dates.push({
+        fullDate,
+        label: closed
+          ? `${label} (${locale === 'en' ? 'Closed' : 'Cerrado'})`
+          : label,
+        closed,
+      });
     }
     return dates;
-  }, [branding.timezone, locale]);
+  }, [branding.timezone, locale, dbConfig]);
+
+  const selectedDayClosed = useMemo(
+    () => (dbConfig ? !isClinicOpenOnDate(dbConfig, selectedDate) : false),
+    [dbConfig, selectedDate],
+  );
 
   const daySlots = useMemo(() => {
     if (!selectedService) return [];
@@ -414,7 +427,7 @@ export default function PublicBookingPortal({
                     </div>
 
                     {availableCount === 0 && (
-                      <p className="text-center text-slate-500 font-bold text-sm py-2">{t.noSlotsDay}</p>
+                      <p className="text-center text-slate-500 font-bold text-sm py-2">{selectedDayClosed ? t.dayClosed : t.noSlotsDay}</p>
                     )}
                   </>
                 )}
