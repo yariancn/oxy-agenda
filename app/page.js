@@ -35,7 +35,12 @@ import {
   WEEK_STICKY_HEADER_PX,
 } from '../lib/calendarDisplay';
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
-import { buildPromoterBookingUrl, normalizePromoCode } from '../lib/promoters';
+import {
+  buildCalendarFeedUrl,
+  buildWebcalFeedUrl,
+  generateCalendarFeedToken,
+} from '../lib/calendarFeed';
+import { buildPromoterBookingUrl, normalizePromoCode, resolvePromoterContext } from '../lib/promoters';
 import {
   buildNotifyContent,
   formatBookingNotifyFeedback,
@@ -136,6 +141,8 @@ export default function AppLayout() {
     financial_pin: '123456',
     notify_on_booking: true,
     reminder_hours: 24,
+    calendar_feed_enabled: false,
+    calendar_feed_token: '',
     ...defaultNotifySettings('es'),
     ...emptyEmailTemplateState('es'),
   });
@@ -158,7 +165,7 @@ export default function AppLayout() {
 
   const [dbPromoters, setDbPromoters] = useState([]);
   const [promotersLoadError, setPromotersLoadError] = useState('');
-  const [newPromoter, setNewPromoter] = useState({ id: null, code: '', name: '', is_active: true });
+  const [newPromoter, setNewPromoter] = useState({ id: null, code: '', name: '', notes: '', is_active: true });
   const [isEditingPromoter, setIsEditingPromoter] = useState(false);
 
   const [newRole, setNewRole] = useState({ id: null, name: '', level: 3 });
@@ -291,6 +298,8 @@ export default function AppLayout() {
     financial_pin: dbCompanyConfig.financial_pin,
     notify_on_booking: dbCompanyConfig.notify_on_booking,
     reminder_hours: dbCompanyConfig.reminder_hours,
+    calendar_feed_enabled: dbCompanyConfig.calendar_feed_enabled === true,
+    calendar_feed_token: String(dbCompanyConfig.calendar_feed_token || '').trim(),
     ...pickEmailTemplates(),
     ...pickNotifySettings(),
     ...pickStaffAlertSettings(),
@@ -603,6 +612,20 @@ export default function AppLayout() {
         return allData;
       };
 
+      const fetchPromotersWithFallback = async () => {
+        let res = await clinicDb
+          .from('promoters')
+          .select('id, code, name, notes, is_active, created_at')
+          .order('code');
+        if (res.error && /notes|column|schema cache/i.test(res.error.message || '')) {
+          res = await clinicDb
+            .from('promoters')
+            .select('id, code, name, is_active, created_at')
+            .order('code');
+        }
+        return res;
+      };
+
       const [patientsData, appointmentsData, resS, resU, resB, resC, resProt, resRoles, resPromo] = await Promise.all([
         fetchPaginated('patients'),
         fetchPaginated('appointments'),
@@ -612,7 +635,7 @@ export default function AppLayout() {
         clinicDb.from('company_config').select('*').eq('clinic', activeClinic).maybeSingle(),
         clinicDb.from('protocols').select('*'),
         clinicDb.from('user_roles').select('*'),
-        clinicDb.from('promoters').select('id, code, name, is_active, created_at').order('code'),
+        fetchPromotersWithFallback(),
       ]);
 
       if (fetchGen !== fetchGenRef.current) return;
@@ -680,6 +703,8 @@ export default function AppLayout() {
           staff_alert_emails: resC.data.staff_alert_emails || '',
           start_time: normalizeTimeInput(resC.data.start_time) || '07:00',
           end_time: normalizeTimeInput(resC.data.end_time) || '20:00',
+          calendar_feed_enabled: resC.data.calendar_feed_enabled === true,
+          calendar_feed_token: String(resC.data.calendar_feed_token || '').trim(),
         });
       } else {
         const clinicLocale = localeForClinic(activeClinic);
@@ -870,6 +895,29 @@ export default function AppLayout() {
   const activeClinicLabel = activeClinic === 'Guadalajara' ? L.clinicGdl : L.clinicTx;
   const activeClinicShort = activeClinic === 'Guadalajara' ? 'GDL' : 'TX';
 
+  const calendarFeedUrl = useMemo(() => {
+    if (!dbCompanyConfig.calendar_feed_enabled || !dbCompanyConfig.calendar_feed_token) return '';
+    return buildCalendarFeedUrl({
+      clinic: activeClinic,
+      token: dbCompanyConfig.calendar_feed_token,
+      baseUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+    });
+  }, [activeClinic, dbCompanyConfig.calendar_feed_enabled, dbCompanyConfig.calendar_feed_token]);
+
+  const copyCalendarFeedUrl = async (webcal = false) => {
+    if (!calendarFeedUrl) {
+      alert(L.p.admin.calendarFeedSaveFirst);
+      return;
+    }
+    const value = webcal ? buildWebcalFeedUrl(calendarFeedUrl) : calendarFeedUrl;
+    try {
+      await navigator.clipboard.writeText(value);
+      alert(L.p.admin.calendarFeedCopied);
+    } catch {
+      window.prompt(L.p.admin.calendarFeedUrl, value);
+    }
+  };
+
   const showWeekFilterHint = (
     activeTab === 'Agenda'
     && viewMode === 'Semana'
@@ -967,6 +1015,15 @@ export default function AppLayout() {
     setSelectedSlot({ ...createEmptyAppointmentDraft(), ...draft });
     setShowNewAppointment(true);
   };
+
+  const selectedPromoterContext = useMemo(() => {
+    if (!selectedSlot) return null;
+    return resolvePromoterContext({
+      promoterCode: selectedSlot.promoter_code,
+      notes: selectedSlot.notes,
+      promoterList: dbPromoters,
+    });
+  }, [selectedSlot, dbPromoters]);
 
   const openAppointmentDetails = (app) => {
     const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(app.patient));
@@ -1702,13 +1759,27 @@ export default function AppLayout() {
     );
     if (duplicate) return alert(L.p.admin.promoterDuplicate);
 
-    const payload = { code, name, is_active: newPromoter.is_active !== false };
+    const payload = {
+      code,
+      name,
+      is_active: newPromoter.is_active !== false,
+      notes: String(newPromoter.notes || '').trim(),
+    };
     const clinicDb = createStaffDb(activeClinic);
-    let res;
-    if (isEditingPromoter && newPromoter.id) {
-      res = await clinicDb.from('promoters').update(payload).eq('id', newPromoter.id).select('*');
-    } else {
-      res = await clinicDb.from('promoters').insert([payload]).select('*');
+    const savePayload = async (row) => {
+      if (isEditingPromoter && newPromoter.id) {
+        return clinicDb.from('promoters').update(row).eq('id', newPromoter.id).select('*');
+      }
+      return clinicDb.from('promoters').insert([row]).select('*');
+    };
+
+    let res = await savePayload(payload);
+    if (res.error && /notes|column|schema cache/i.test(res.error.message || '')) {
+      const { notes, ...withoutNotes } = payload;
+      res = await savePayload(withoutNotes);
+      if (!res.error) {
+        alert(L.p.admin.promoterNotesColumnMissing);
+      }
     }
     if (res.error) {
       if (res.error.sessionExpired) {
@@ -1726,7 +1797,7 @@ export default function AppLayout() {
       `Código ${code} · ${activeClinic}`,
     );
     setIsEditingPromoter(false);
-    setNewPromoter({ id: null, code: '', name: '', is_active: true });
+    setNewPromoter({ id: null, code: '', name: '', notes: '', is_active: true });
     fetchAllData();
   };
 
@@ -2872,6 +2943,84 @@ export default function AppLayout() {
                   </div>
                 </div>
 
+                <h3 className="font-black text-slate-800 uppercase text-sm mb-2 pb-2 border-b mt-6">{L.p.admin.calendarFeedTitle}</h3>
+                <p className="text-[10px] font-bold text-slate-500 mb-3 leading-relaxed">{L.p.admin.calendarFeedHint}</p>
+                <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-sm">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={dbCompanyConfig.calendar_feed_enabled === true}
+                      onChange={(e) => {
+                        const enabled = e.target.checked;
+                        setDbCompanyConfig((prev) => ({
+                          ...prev,
+                          calendar_feed_enabled: enabled,
+                          calendar_feed_token: enabled && !prev.calendar_feed_token
+                            ? generateCalendarFeedToken()
+                            : prev.calendar_feed_token,
+                        }));
+                      }}
+                      className="w-4 h-4 mt-0.5"
+                    />
+                    <span className="text-xs font-black uppercase text-slate-700">{L.p.admin.calendarFeedEnable}</span>
+                  </label>
+
+                  {dbCompanyConfig.calendar_feed_enabled && (
+                    <div className="space-y-3 pt-2 border-t border-slate-100">
+                      {calendarFeedUrl ? (
+                        <>
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{L.p.admin.calendarFeedUrl}</label>
+                            <input
+                              type="text"
+                              readOnly
+                              value={calendarFeedUrl}
+                              className="w-full p-2.5 border rounded-lg font-mono text-[10px] text-slate-700 bg-slate-50"
+                            />
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => copyCalendarFeedUrl(false)}
+                              className="bg-emerald-600 text-white text-[10px] font-black uppercase px-3 py-2 rounded-lg hover:bg-emerald-700"
+                            >
+                              {L.p.admin.calendarFeedCopy}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => copyCalendarFeedUrl(true)}
+                              className="bg-slate-700 text-white text-[10px] font-black uppercase px-3 py-2 rounded-lg hover:bg-slate-800"
+                            >
+                              {L.p.admin.calendarFeedCopyWebcal}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!window.confirm(L.p.admin.calendarFeedRegenerateConfirm)) return;
+                                setDbCompanyConfig((prev) => ({
+                                  ...prev,
+                                  calendar_feed_token: generateCalendarFeedToken(),
+                                }));
+                              }}
+                              className="bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-black uppercase px-3 py-2 rounded-lg hover:bg-amber-200"
+                            >
+                              {L.p.admin.calendarFeedRegenerate}
+                            </button>
+                          </div>
+                          <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-[10px] font-bold text-blue-900 space-y-1">
+                            <p className="font-black uppercase">{L.p.admin.calendarFeedStepsTitle}</p>
+                            <p>1. {L.p.admin.calendarFeedStep1}</p>
+                            <p>2. {L.p.admin.calendarFeedStep2}</p>
+                            <p>3. {L.p.admin.calendarFeedStep3}</p>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-[10px] font-bold text-amber-700 uppercase">{L.p.admin.calendarFeedSaveFirst}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* CONFIGURACIÓN DE NOTIFICACIONES */}
                 <h3 className="font-black text-slate-800 uppercase text-sm mb-4 pb-2 border-b mt-6">Motor de Notificaciones (Email y SMS)</h3>
                 <p className="text-[10px] font-bold text-slate-500 mb-3 leading-relaxed">
@@ -3180,6 +3329,17 @@ export default function AppLayout() {
                           className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none focus:border-blue-500 text-slate-900 bg-white"
                         />
                       </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.admin.promoterNotes}</label>
+                        <p className="text-[9px] font-bold text-slate-400 mb-1">{L.p.admin.promoterNotesHint}</p>
+                        <textarea
+                          value={newPromoter.notes || ''}
+                          onChange={(e) => setNewPromoter({ ...newPromoter, notes: e.target.value })}
+                          placeholder={L.p.admin.promoterNotesPh}
+                          rows={3}
+                          className="w-full p-3 rounded-xl border border-slate-300 font-medium text-sm outline-none focus:border-blue-500 text-slate-900 bg-white resize-y min-h-[72px]"
+                        />
+                      </div>
                       <label className="flex items-center gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 cursor-pointer">
                         <input
                           type="checkbox"
@@ -3198,7 +3358,7 @@ export default function AppLayout() {
                         {isEditingPromoter && (
                           <button
                             type="button"
-                            onClick={() => { setIsEditingPromoter(false); setNewPromoter({ id: null, code: '', name: '', is_active: true }); }}
+                            onClick={() => { setIsEditingPromoter(false); setNewPromoter({ id: null, code: '', name: '', notes: '', is_active: true }); }}
                             className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200"
                           >
                             {L.p.common.cancel}
@@ -3225,6 +3385,7 @@ export default function AppLayout() {
                           <tr>
                             <th className="px-4 py-3">{L.p.admin.promoterCode}</th>
                             <th className="px-4 py-3">{L.p.admin.promoterName}</th>
+                            <th className="px-4 py-3">{L.p.admin.promoterNotes}</th>
                             <th className="px-4 py-3">{L.p.admin.promoterLink}</th>
                             <th className="px-4 py-3 text-right">{L.p.common.edit}</th>
                           </tr>
@@ -3234,6 +3395,9 @@ export default function AppLayout() {
                             <tr key={pr.id} className={`hover:bg-slate-50/80 ${!pr.is_active ? 'opacity-50' : ''}`}>
                               <td className="px-4 py-3 font-black text-slate-800 text-xs tracking-wider">{pr.code}</td>
                               <td className="px-4 py-3 font-bold text-slate-700 text-xs">{pr.name}</td>
+                              <td className="px-4 py-3 text-xs text-slate-600 max-w-[12rem]">
+                                <span className="line-clamp-2 whitespace-pre-wrap">{pr.notes || '—'}</span>
+                              </td>
                               <td className="px-4 py-3">
                                 <button
                                   type="button"
@@ -3247,7 +3411,7 @@ export default function AppLayout() {
                                 <div className="flex justify-end gap-1 flex-wrap">
                                   <button
                                     type="button"
-                                    onClick={() => { setNewPromoter(pr); setIsEditingPromoter(true); }}
+                                    onClick={() => { setNewPromoter({ ...pr, notes: pr.notes || '' }); setIsEditingPromoter(true); }}
                                     className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-[9px] font-black uppercase hover:bg-blue-100 border border-blue-100"
                                   >
                                     {L.p.common.edit}
@@ -3430,6 +3594,25 @@ export default function AppLayout() {
               <div className="bg-white border border-slate-300 rounded-xl p-4 shadow-sm flex flex-col relative overflow-hidden">
                 <span className="font-black text-slate-800 text-lg uppercase pr-6">{selectedSlot.is_new_patient ? '⭐ ' : ''}{selectedSlot.patient}</span>
                 <span className="text-[10px] text-blue-600 font-black uppercase tracking-widest">{selectedSlot.protocol}</span>
+
+                {selectedPromoterContext && (
+                  <div className="mt-3 bg-violet-50 border border-violet-200 p-3 rounded-xl">
+                    <p className="text-[10px] font-black uppercase text-violet-800">{L.p.appt.promoterSection}</p>
+                    <p className="text-xs font-bold text-violet-900 mt-1">
+                      {selectedPromoterContext.name
+                        ? `${selectedPromoterContext.name} (${selectedPromoterContext.code})`
+                        : selectedPromoterContext.code}
+                    </p>
+                    {selectedPromoterContext.notes ? (
+                      <p className="text-xs text-violet-800 mt-2 whitespace-pre-wrap leading-relaxed">{selectedPromoterContext.notes}</p>
+                    ) : (
+                      <p className="text-[9px] font-bold text-violet-500 mt-1 uppercase">{L.p.appt.promoterNoNotes}</p>
+                    )}
+                    {!selectedPromoterContext.recognized && (
+                      <p className="text-[9px] font-bold text-amber-700 mt-1 uppercase">{L.p.appt.promoterUnregistered}</p>
+                    )}
+                  </div>
+                )}
 
                 <div className="mt-3 bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-3">
                   <label className="text-[10px] font-black uppercase text-slate-500">{L.p.appt.contactSection}</label>
