@@ -9,8 +9,8 @@ export default function BookingUS() {
       portalTag="TX"
       locale="en"
       branding={{
-        title: 'Regenoxy Texas',
-        subtitle: 'Shenandoah online booking',
+        title: 'OxyHyperbaric',
+        subtitle: 'REGENOXY LLC · Shenandoah online booking',
         accent: 'blue',
         timezone: 'America/Chicago',
         defaultLada: '+1',
