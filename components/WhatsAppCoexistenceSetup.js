@@ -217,6 +217,39 @@ export default function WhatsAppCoexistenceSetup() {
         {busy ? 'Abriendo Meta…' : 'Iniciar coexistencia en Meta'}
       </button>
 
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-950 space-y-2">
+        <p className="font-black uppercase">Si Meta dice «JSSDK desactivado» o «dominio no incluido»</p>
+        <p>
+          App <strong>1664079171536415</strong> →{' '}
+          <a
+            href="https://developers.facebook.com/apps/1664079171536415/settings/basic/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            Configuración básica
+          </a>
+          : Dominios de la app = <code className="bg-white px-1 rounded">oxy-agenda.vercel.app</code>
+        </p>
+        <p>
+          <a
+            href="https://developers.facebook.com/apps/1664079171536415/fb-login/settings/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            Inicio de sesión con Facebook → Configuración
+          </a>
+          : «Inicio de sesión con SDK JavaScript» = <strong>Sí</strong>
+        </p>
+        <p>
+          URI de redirección OAuth válidos (una por línea):<br />
+          <code className="bg-white px-1 rounded">https://oxy-agenda.vercel.app/</code><br />
+          <code className="bg-white px-1 rounded">https://oxy-agenda.vercel.app/setup/whatsapp</code>
+        </p>
+        <p>Guarda cambios en Meta, espera 1–2 min y vuelve a pulsar el botón.</p>
+      </div>
+
       <div className="rounded-xl border border-slate-200 bg-white p-4 text-[11px] text-slate-600 space-y-1">
         <p><strong>App ID activo:</strong> {appId}</p>
         <p><strong>Configuration ID:</strong> {configId || '(falta)'}</p>
