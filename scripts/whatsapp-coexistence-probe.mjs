@@ -12,7 +12,7 @@
 const token = process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
 const wabaId = process.env.WABA_ID || '289637057572952';
 const phoneId = process.env.PHONE_ID || process.env.WHATSAPP_PHONE_NUMBER_ID || '345291328658965';
-const appId = process.env.META_APP_ID || '1654079171536415';
+const appId = process.env.META_APP_ID || '1664079171536415';
 const apiVersion = process.env.WHATSAPP_API_VERSION || 'v21.0';
 
 if (!token) {

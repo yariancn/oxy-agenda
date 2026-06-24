@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-const DEFAULT_APP_ID = '1654079171536415';
+const DEFAULT_APP_ID = '1664079171536415';
 
 /** NEXT_PUBLIC_* must be numeric IDs in Vercel — not the variable name. */
 function resolveMetaId(raw, fallback, label) {
@@ -192,7 +192,7 @@ export default function WhatsAppCoexistenceSetup() {
           ))}
           <p>
             En Vercel pon el <strong>número</strong>, no el nombre de la variable. Ejemplo:{' '}
-            <code className="bg-white px-1 rounded">1654079171536415</code> y tu Configuration ID de Meta.
+            <code className="bg-white px-1 rounded">1664079171536415</code> y tu Configuration ID de Meta.
           </p>
         </div>
       )}
