@@ -591,6 +591,27 @@ export default function PublicBookingPortal({
           </div>
         </div>
       </main>
+
+      {locale === 'en' && (
+        <footer className="border-t border-slate-200 bg-white px-4 py-6 text-center text-[10px] font-semibold text-slate-500 leading-relaxed max-w-2xl mx-auto w-full">
+          <p className="font-black uppercase text-slate-700 tracking-wide">
+            REGENOXY LLC d/b/a OxyHyperbaric · Shenandoah, TX
+          </p>
+          <p className="mt-2">
+            Optional SMS opt-in: unchecked box on the booking form (step 3) for appointment confirmations only.
+            Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help.
+          </p>
+          <p className="mt-2">
+            <a href="https://oxyhyperbaric.com/" className="text-blue-600 underline">oxyhyperbaric.com</a>
+            {' · '}
+            <a href={legalLinks.privacy} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{t.privacyLink}</a>
+            {' · '}
+            <a href={legalLinks.terms} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{t.termsLink}</a>
+            {' · '}
+            <a href={legalLinks.sms} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{t.smsTermsLink}</a>
+          </p>
+        </footer>
+      )}
     </div>
   );
 }
