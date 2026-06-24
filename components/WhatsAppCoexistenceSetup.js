@@ -4,6 +4,19 @@ import { useCallback, useEffect, useState } from 'react';
 
 const DEFAULT_APP_ID = '1654079171536415';
 
+/** NEXT_PUBLIC_* must be numeric IDs in Vercel — not the variable name. */
+function resolveMetaId(raw, fallback, label) {
+  const value = String(raw || '').trim();
+  if (/^\d{10,20}$/.test(value)) return { value, warning: null };
+  if (value) {
+    return {
+      value: fallback,
+      warning: `${label} inválido en Vercel ("${value.slice(0, 40)}"). Usando ${fallback}. Corrige y redeploy.`,
+    };
+  }
+  return { value: fallback, warning: null };
+}
+
 function loadFacebookSdk() {
   return new Promise((resolve, reject) => {
     if (window.FB) {
@@ -27,13 +40,24 @@ function loadFacebookSdk() {
 }
 
 export default function WhatsAppCoexistenceSetup() {
-  const appId = process.env.NEXT_PUBLIC_META_APP_ID?.trim() || DEFAULT_APP_ID;
-  const configId = process.env.NEXT_PUBLIC_WHATSAPP_EMBEDDED_CONFIG_ID?.trim() || '';
+  const appResolved = resolveMetaId(
+    process.env.NEXT_PUBLIC_META_APP_ID,
+    DEFAULT_APP_ID,
+    'NEXT_PUBLIC_META_APP_ID',
+  );
+  const configResolved = resolveMetaId(
+    process.env.NEXT_PUBLIC_WHATSAPP_EMBEDDED_CONFIG_ID,
+    '',
+    'NEXT_PUBLIC_WHATSAPP_EMBEDDED_CONFIG_ID',
+  );
+  const appId = appResolved.value;
+  const configId = configResolved.value;
   const apiVersion = process.env.NEXT_PUBLIC_META_GRAPH_VERSION?.trim() || 'v21.0';
 
   const [sdkReady, setSdkReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState([]);
+  const envWarnings = [appResolved.warning, configResolved.warning].filter(Boolean);
 
   const appendLog = useCallback((message) => {
     setLog((prev) => [...prev, `${new Date().toLocaleTimeString('es-MX')} — ${message}`]);
@@ -108,9 +132,16 @@ export default function WhatsAppCoexistenceSetup() {
 
     setBusy(true);
     appendLog('Abriendo Embedded Signup (coexistencia)…');
+    appendLog('Si no aparece ventana de Meta: Safari → permite ventanas emergentes para oxy-agenda.vercel.app');
+
+    const timeout = window.setTimeout(() => {
+      setBusy(false);
+      appendLog('Tiempo agotado. ¿Popup bloqueado? Prueba Chrome o permite popups.');
+    }, 45000);
 
     window.FB.login(
       (response) => {
+        window.clearTimeout(timeout);
         setBusy(false);
         if (response.authResponse?.code) {
           appendLog('Código OAuth recibido (intercambio opcional en servidor).');
@@ -118,6 +149,9 @@ export default function WhatsAppCoexistenceSetup() {
           appendLog('No autorizado — revisa permisos de la app en Meta.');
         } else {
           appendLog(`Login status: ${response.status || 'unknown'}`);
+          if (!response.status || response.status === 'unknown') {
+            appendLog('Sin respuesta de Meta — revisa App ID, Configuration ID y dominios OAuth en developers.');
+          }
         }
       },
       {
@@ -150,6 +184,19 @@ export default function WhatsAppCoexistenceSetup() {
         <li>Elige conectar cuenta existente y sigue QR/código en el teléfono.</li>
       </ol>
 
+      {envWarnings.length > 0 && (
+        <div className="rounded-xl border-2 border-red-300 bg-red-50 p-4 text-xs text-red-900 space-y-2">
+          <p className="font-black uppercase">Variables mal configuradas en Vercel</p>
+          {envWarnings.map((w) => (
+            <p key={w}>{w}</p>
+          ))}
+          <p>
+            En Vercel pon el <strong>número</strong>, no el nombre de la variable. Ejemplo:{' '}
+            <code className="bg-white px-1 rounded">1654079171536415</code> y tu Configuration ID de Meta.
+          </p>
+        </div>
+      )}
+
       {!configId && (
         <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4 text-xs text-amber-900">
           <p className="font-black uppercase mb-2">Falta Configuration ID</p>
@@ -169,6 +216,11 @@ export default function WhatsAppCoexistenceSetup() {
       >
         {busy ? 'Abriendo Meta…' : 'Iniciar coexistencia en Meta'}
       </button>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4 text-[11px] text-slate-600 space-y-1">
+        <p><strong>App ID activo:</strong> {appId}</p>
+        <p><strong>Configuration ID:</strong> {configId || '(falta)'}</p>
+      </div>
 
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
         <p className="text-[10px] font-black uppercase text-slate-500 mb-2">Registro</p>
