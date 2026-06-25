@@ -55,6 +55,12 @@ import { buildPosTicketHtml } from '../lib/posTicket';
 import { printThermalHtml } from '../lib/printReceipt';
 import { formatSaleAuditDetail, formatSaleCancelAuditDetail } from '../lib/saleAudit';
 import {
+  applyPurchaseSessions,
+  consumeSessionFromWallet,
+  hasPaidSessionBalance,
+  reversePurchaseSessions,
+} from '../lib/sessionWallet';
+import {
   buildNotifyContent,
   formatBookingNotifyFeedback,
   notifyHadFailure,
@@ -688,7 +694,8 @@ export default function AppLayout() {
         prefers_sms: p.prefers_sms !== false,
         wallets: p.wallets || {},
         packageHistory: p.package_history || [],
-        historicoSesiones: p.historico_sesiones || 0
+        historicoSesiones: p.historico_sesiones || 0,
+        adeudo: Number(p.adeudo) || 0,
       }));
 
       setDbPatients(safePatients.sort((a, b) => a.patient.localeCompare(b.patient)));
@@ -1204,6 +1211,7 @@ export default function AppLayout() {
       protocol: patInfo?.protocol || app.protocol,
       wallets: patInfo?.wallets || {},
       historicoSesiones: patInfo?.historicoSesiones || 0,
+      adeudo: patInfo?.adeudo || 0,
       packageHistory: patInfo?.packageHistory || [],
       patientNotes: patInfo ? patInfo.notes : '',
       sessionPreset: getPresetFromTimes(app.duration, app.buffer).id,
@@ -1467,16 +1475,21 @@ export default function AppLayout() {
       if (!p) return alert(a('patientNotFound'));
 
       const eqName = tx.equipment || tx.serviceName;
-      const currentWallets = { ...p.wallets };
-      const newBalance = Math.max(0, (currentWallets[eqName] || 0) - tx.sessions);
-      currentWallets[eqName] = newBalance;
-
+      const reversed = reversePurchaseSessions(p.wallets, p.adeudo, tx);
       const newHistory = (p.packageHistory || []).filter(t => String(t.id) !== String(tx.id));
 
-      await activeSupabase.from('patients').update({
-         wallets: currentWallets,
+      let res = await activeSupabase.from('patients').update({
+         wallets: reversed.wallets,
+         adeudo: reversed.adeudo,
          package_history: newHistory
       }).eq('id', p.id);
+
+      if (res.error && /column|adeudo/i.test(res.error.message || '')) {
+        await activeSupabase.from('patients').update({
+          wallets: reversed.wallets,
+          package_history: newHistory,
+        }).eq('id', p.id);
+      }
 
       await logAudit(null, patientName, 'REVERSIÓN DE VENTA', formatSaleCancelAuditDetail(tx, currencyStr));
       alert(a('saleCancelled'));
@@ -1630,29 +1643,26 @@ export default function AppLayout() {
         if (p) {
           const eq = equipment || app.equipment;
           const currentWallets = { ...(p.wallets || {}) };
-          let deducted = false;
+          let nextAdeudo = Number(p.adeudo) || 0;
+          const consumed = consumeSessionFromWallet(currentWallets, eq);
+          let deducted = consumed.deducted;
+          if (!deducted) nextAdeudo += 1;
 
-          if (currentWallets[eq] && currentWallets[eq] > 0) {
-            currentWallets[eq] -= 1;
-            deducted = true;
-          } else {
-            const fallbackEq = Object.keys(currentWallets).find(key =>
-              (key.toLowerCase().includes('cámara') || key.toLowerCase().includes('camara')) && currentWallets[key] > 0
-            );
-            if (fallbackEq) {
-              currentWallets[fallbackEq] -= 1;
-              deducted = true;
-            }
-          }
-
-          await activeSupabase.from('patients').update({
-            wallets: currentWallets,
+          let patUpdate = await activeSupabase.from('patients').update({
+            wallets: consumed.wallets,
+            adeudo: nextAdeudo,
             historico_sesiones: (p.historicoSesiones || 0) + 1
           }).eq('id', p.id);
+          if (patUpdate.error && /column|adeudo/i.test(patUpdate.error.message || '')) {
+            await activeSupabase.from('patients').update({
+              wallets: consumed.wallets,
+              historico_sesiones: (p.historicoSesiones || 0) + 1,
+            }).eq('id', p.id);
+          }
 
           await logAudit(id, patientName, 'NO ASISTIÓ', deducted
             ? `No asistió. Se descontó 1 sesión pagada de cartera (${eq}).`
-            : `No asistió. Sin sesiones pagadas en cartera para descontar.`);
+            : `No asistió. Sin saldo pagado: adeudo +1 (total adeudo: ${nextAdeudo}).`);
         }
 
         await activeSupabase.from('appointments').update({ check_in_status: 'No Asistió' }).eq('id', id);
@@ -1689,32 +1699,28 @@ export default function AppLayout() {
     if (!p) return { deducted: false, detail: 'Paciente no encontrado en expediente.' };
 
     const eq = equipment;
-    const currentWallets = { ...(p.wallets || {}) };
-    let deducted = false;
+    const consumed = consumeSessionFromWallet(p.wallets || {}, eq);
+    let nextAdeudo = Number(p.adeudo) || 0;
+    let deducted = consumed.deducted;
+    if (!deducted) nextAdeudo += 1;
 
-    if (currentWallets[eq] && currentWallets[eq] > 0) {
-      currentWallets[eq] -= 1;
-      deducted = true;
-    } else {
-      const fallbackEq = Object.keys(currentWallets).find(key =>
-        (key.toLowerCase().includes('cámara') || key.toLowerCase().includes('camara')) && currentWallets[key] > 0
-      );
-      if (fallbackEq) {
-        currentWallets[fallbackEq] -= 1;
-        deducted = true;
-      }
-    }
-
-    await activeSupabase.from('patients').update({
-      wallets: currentWallets,
-      historico_sesiones: (p.historicoSesiones || 0) + (deducted ? 1 : 0),
+    let patRes = await activeSupabase.from('patients').update({
+      wallets: consumed.wallets,
+      adeudo: nextAdeudo,
+      historico_sesiones: (p.historicoSesiones || 0) + 1,
     }).eq('id', p.id);
+    if (patRes.error && /column|adeudo/i.test(patRes.error.message || '')) {
+      await activeSupabase.from('patients').update({
+        wallets: consumed.wallets,
+        historico_sesiones: (p.historicoSesiones || 0) + 1,
+      }).eq('id', p.id);
+    }
 
     return {
       deducted,
       detail: deducted
         ? `Se descontó 1 sesión pagada de cartera (${eq}).`
-        : 'Sin sesiones pagadas en cartera para descontar.',
+        : `Sin saldo pagado: se registró adeudo +1 (total adeudo: ${nextAdeudo}).`,
     };
   };
 
@@ -4176,6 +4182,17 @@ export default function AppLayout() {
                       {selectedSlot.wallets?.[selectedSlot.equipment] || 0}
                     </span>
                   </div>
+                  {(selectedSlot.adeudo || 0) > 0 && (
+                    <div className="p-3 rounded-lg flex justify-between items-center bg-orange-500 text-white shadow-sm border border-orange-600">
+                      <span className="text-xs font-black uppercase">{L.p.appt.adeudoLabel}</span>
+                      <span className="text-lg font-black">{selectedSlot.adeudo}</span>
+                    </div>
+                  )}
+                  {!hasPaidSessionBalance(selectedSlot.wallets, selectedSlot.equipment) && (selectedSlot.adeudo || 0) === 0 && selectedSlot.check_in_status !== 'Finalizado' && (
+                    <p className="text-[9px] font-bold text-amber-700 uppercase bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                      ⚠️ Sin saldo pagado — al sellar bitácora se registrará adeudo
+                    </p>
+                  )}
               </div>
 
               <div className="pt-4 pb-2 border-t text-slate-900">
@@ -4828,7 +4845,8 @@ export default function AppLayout() {
                   prefers_sms: ud.prefers_sms,
                   wallets: ud.wallets, 
                   package_history: ud.packageHistory, 
-                  historico_sesiones: ud.historicoSesiones 
+                  historico_sesiones: ud.historicoSesiones,
+                  adeudo: ud.adeudo ?? 0,
                 };
                 let res = await activeSupabase.from('patients').update(p).eq('id', patientDbId);
 
@@ -4844,8 +4862,9 @@ export default function AppLayout() {
                     prefers_sms: ud.prefers_sms,
                     wallets: ud.wallets, 
                     package_history: ud.packageHistory, 
-                    historico_sesiones: ud.historicoSesiones 
+                    historico_sesiones: ud.historicoSesiones,
                   }).eq('id', patientDbId);
+                  await activeSupabase.from('patients').update({ adeudo: ud.adeudo ?? 0 }).eq('id', patientDbId);
                 }
               } else if (digitsOnly(ud.phone).slice(-10).length === 10) {
                 await ensurePatient(activeSupabase, {
@@ -4871,18 +4890,35 @@ export default function AppLayout() {
             selectedSlot={selectedSlot} 
             onClose={() => setShowBitacora(false)} 
             onSeal={async (sd, vt) => {
-              const eq = selectedSlot.equipment; 
-              let currentWallets = { ... (selectedSlot.wallets || {}) }; 
-              if (currentWallets[eq] && currentWallets[eq] > 0) { 
-                 currentWallets[eq] -= 1; 
-              } else {
-                 const fallbackEq = Object.keys(currentWallets).find(key => (key.toLowerCase().includes('cámara') || key.toLowerCase().includes('camara')) && currentWallets[key] > 0);
-                 if (fallbackEq) currentWallets[fallbackEq] -= 1;
+              const eq = selectedSlot.equipment;
+              const currentAdeudo = Number(selectedSlot.adeudo) || 0;
+              if (!hasPaidSessionBalance(selectedSlot.wallets, eq)) {
+                if (!window.confirm(a('bitacoraNoBalanceConfirm', currentAdeudo + 1))) return;
               }
-              await activeSupabase.from('patients').update({ wallets: currentWallets, historico_sesiones: (selectedSlot.historicoSesiones || 0) + 1 }).eq('id', selectedSlot.patientId || selectedSlot.id);
+
+              const consumed = consumeSessionFromWallet(selectedSlot.wallets || {}, eq);
+              let nextAdeudo = currentAdeudo;
+              if (!consumed.deducted) nextAdeudo += 1;
+
+              const patientPayload = {
+                wallets: consumed.wallets,
+                adeudo: nextAdeudo,
+                historico_sesiones: (selectedSlot.historicoSesiones || 0) + 1,
+              };
+              let patRes = await activeSupabase.from('patients').update(patientPayload).eq('id', selectedSlot.patientId);
+              if (patRes.error && /column|adeudo/i.test(patRes.error.message || '')) {
+                const { adeudo, ...fallbackPayload } = patientPayload;
+                patRes = await activeSupabase.from('patients').update(fallbackPayload).eq('id', selectedSlot.patientId);
+              }
+
               await activeSupabase.from('appointments').update({ check_in_status: 'Finalizado', attendant: selectedSlot.attendant, signature: sd }).eq('id', selectedSlot.id);
               
               let auditStr = `Bitácora sellada y firmada por ${selectedSlot.attendant}.`;
+              if (!consumed.deducted) {
+                auditStr += ` Sin saldo pagado: adeudo +1 (total adeudo: ${nextAdeudo}).`;
+              } else {
+                auditStr += ` Se descontó 1 sesión de cartera (${consumed.walletKey || eq}).`;
+              }
               if (selectedSlot.protocol === 'Médico' && vt) {
                  auditStr += ` Signos: PA ${vt.pa}, Temp ${vt.temp}, HR ${vt.hr}.`;
               }

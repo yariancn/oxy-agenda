@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { useStaffLocale } from './StaffLocaleContext';
 import { buildPosTicketHtml } from '../lib/posTicket';
 import { printThermalHtml } from '../lib/printReceipt';
+import { applyPurchaseSessions, reversePurchaseSessions } from '../lib/sessionWallet';
 
 export default function PatientProfileModal({
   initialData,
@@ -34,16 +35,19 @@ export default function PatientProfileModal({
     wallets: initialData.wallets || {},
     packageHistory: initialData.packageHistory || [],
     historicoSesiones: initialData.historicoSesiones || 0,
+    adeudo: Number(initialData.adeudo) || 0,
   });
 
   const [posService, setPosService] = useState('');
   const [posQty, setPosQty] = useState(1);
+  const [posUnitPrice, setPosUnitPrice] = useState('');
   const [posPrice, setPosPrice] = useState('');
   const [posPaymentMethod, setPosPaymentMethod] = useState(locale === 'en' ? 'Credit Card' : 'Tarjeta de Crédito');
   const [posNotes, setPosNotes] = useState('');
   const [receipt, setReceipt] = useState(null);
   const [charging, setCharging] = useState(false);
   const [printResult, setPrintResult] = useState(null);
+  const [lastPurchaseNote, setLastPurchaseNote] = useState('');
 
   const paymentOptions = locale === 'en'
     ? [
@@ -89,15 +93,34 @@ export default function PatientProfileModal({
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
+  const syncPosTotal = (qty, unit) => {
+    const q = Number(qty) || 0;
+    const u = parseFloat(unit) || 0;
+    if (q > 0 && u > 0) setPosPrice(String(Math.round(u * q * 100) / 100));
+  };
+
   const handleServiceSelect = (serviceName) => {
     setPosService(serviceName);
     if (servicios?.length) {
       const srv = servicios.find((s) => s.name === serviceName);
       if (srv) {
+        const unit = String(srv.price || '');
         setPosQty(1);
-        setPosPrice(srv.price || '');
+        setPosUnitPrice(unit);
+        setPosPrice(unit);
       }
     }
+  };
+
+  const handleQtyChange = (rawQty) => {
+    const qty = parseInt(rawQty, 10) || 0;
+    setPosQty(qty);
+    syncPosTotal(qty, posUnitPrice);
+  };
+
+  const handleUnitPriceChange = (rawUnit) => {
+    setPosUnitPrice(rawUnit);
+    syncPosTotal(posQty, rawUnit);
   };
 
   const handlePurchase = async () => {
@@ -118,7 +141,7 @@ export default function PatientProfileModal({
 
     const total = parseFloat(posPrice) || 0;
     const sessions = posQty;
-    const unitPrice = sessions > 0 ? total / sessions : total;
+    const unitPrice = sessions > 0 ? total / sessions : (parseFloat(posUnitPrice) || 0);
 
     setCharging(true);
     let ticketNumber = null;
@@ -155,13 +178,21 @@ export default function PatientProfileModal({
       email: formData.email,
       dob: formData.dob,
       protocol: formData.protocol,
+      debtCleared: 0,
+      addedToWallet: 0,
     };
 
     setFormData((prev) => {
-      const currentBalance = prev.wallets[baseService] || 0;
+      const applied = applyPurchaseSessions(prev.wallets, prev.adeudo, baseService, posQty);
+      newTransaction.debtCleared = applied.debtCleared;
+      newTransaction.addedToWallet = applied.addedToWallet;
+      if (applied.debtCleared > 0 || applied.addedToWallet > 0) {
+        setLastPurchaseNote(t.purchaseDebtCleared(applied.debtCleared, applied.addedToWallet));
+      }
       return {
         ...prev,
-        wallets: { ...prev.wallets, [baseService]: currentBalance + posQty },
+        wallets: applied.wallets,
+        adeudo: applied.adeudo,
         packageHistory: [newTransaction, ...(prev.packageHistory || [])],
       };
     });
@@ -173,6 +204,7 @@ export default function PatientProfileModal({
 
     setPosService('');
     setPosQty(1);
+    setPosUnitPrice('');
     setPosPrice('');
     setPosNotes('');
     setPosPaymentMethod(paymentOptions[0].value);
@@ -186,12 +218,11 @@ export default function PatientProfileModal({
     onCancelSale?.(txToCancel, formData.patient);
 
     setFormData((prev) => {
-      const eqName = txToCancel.equipment || txToCancel.serviceName;
-      const currentBalance = prev.wallets[eqName] || 0;
-      const newBalance = Math.max(0, currentBalance - txToCancel.sessions);
+      const reversed = reversePurchaseSessions(prev.wallets, prev.adeudo, txToCancel);
       return {
         ...prev,
-        wallets: { ...prev.wallets, [eqName]: newBalance },
+        wallets: reversed.wallets,
+        adeudo: reversed.adeudo,
         packageHistory: prev.packageHistory.filter((tx) => tx.id !== txToCancel.id),
       };
     });
@@ -273,6 +304,12 @@ export default function PatientProfileModal({
 
           <div className={`p-4 rounded-xl border ${formData.is_blocked ? 'bg-slate-200 opacity-60' : 'bg-slate-50'}`}>
             <h4 className="text-[10px] font-black text-slate-500 uppercase mb-3">{t.walletTitle}</h4>
+            {(formData.adeudo || 0) > 0 && (
+              <div className="flex justify-between bg-orange-100 border-2 border-orange-400 p-2 rounded-lg text-[10px] font-black mb-2 text-orange-900">
+                <span>{t.adeudoTitle}</span>
+                <span>{t.adeudoSessions(formData.adeudo)}</span>
+              </div>
+            )}
             <div className="flex justify-between bg-white p-2 rounded border text-[10px] font-black mb-2">
               <span>{t.sessionsTaken}</span>
               <span>{formData.historicoSesiones || 0}</span>
@@ -325,12 +362,45 @@ export default function PatientProfileModal({
               <option value="">{t.selectService}</option>
               {servicios?.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
             </select>
-            <div className="grid grid-cols-3 gap-2 mb-3">
-              <input type="number" min={1} value={posQty} onChange={(e) => setPosQty(parseInt(e.target.value, 10) || 0)} className="p-2 text-center font-black border rounded" placeholder={t.sessions} />
-              <input type="number" value={posPrice} onChange={(e) => setPosPrice(e.target.value)} className="p-2 font-black border rounded" placeholder={t.charge} />
-              <select value={posPaymentMethod} onChange={(e) => setPosPaymentMethod(e.target.value)} className="p-2 text-[10px] font-bold uppercase border rounded">
-                {paymentOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              <div>
+                <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.sessions}</label>
+                <input type="number" min={1} value={posQty} onChange={(e) => handleQtyChange(e.target.value)} className="w-full p-2 text-center font-black border rounded" />
+              </div>
+              <div>
+                <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.unitPrice}</label>
+                <input type="number" step="0.01" value={posUnitPrice} onChange={(e) => handleUnitPriceChange(e.target.value)} className="w-full p-2 font-black border rounded" />
+              </div>
+              <div>
+                <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.method}</label>
+                <select value={posPaymentMethod} onChange={(e) => setPosPaymentMethod(e.target.value)} className="w-full p-2 text-[10px] font-bold uppercase border rounded">
+                  {paymentOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="mb-3">
+              <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.charge}</label>
+              <input
+                type="number"
+                step="0.01"
+                value={posPrice}
+                onChange={(e) => setPosPrice(e.target.value)}
+                className="w-full p-2.5 font-black border-2 border-blue-400 rounded-lg bg-white text-blue-900 text-sm"
+              />
+              {posQty > 0 && posUnitPrice && posPrice && (
+                <p className="text-[9px] font-bold text-blue-800 mt-1 uppercase">
+                  {t.posTotalPreview(posQty, parseFloat(posUnitPrice).toFixed(2), parseFloat(posPrice).toFixed(2), currency)}
+                </p>
+              )}
+              {(formData.adeudo || 0) > 0 && (
+                <p className="text-[9px] font-bold text-orange-700 mt-1 normal-case">
+                  {t.adeudoSessions(formData.adeudo)} — {locale === 'en' ? 'payment clears debt first' : 'el cobro liquida adeudo primero'}
+                </p>
+              )}
+              {lastPurchaseNote && (
+                <p className="text-[9px] font-bold text-emerald-700 mt-1 normal-case">{lastPurchaseNote}</p>
+              )}
+              <p className="text-[8px] font-bold text-blue-600/80 mt-1 normal-case leading-snug">{t.walletHint}</p>
             </div>
             <textarea
               value={posNotes}
