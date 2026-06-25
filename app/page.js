@@ -42,6 +42,7 @@ import {
   isCompactColumn,
   WEEK_STICKY_HEADER_PX,
 } from '../lib/calendarDisplay';
+import { getWeekScrollLeftForToday } from '../lib/calendarScroll';
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
 import { formatClinicDateIso, getClinicNow } from '../lib/clinicClock';
 import {
@@ -1104,12 +1105,9 @@ export default function AppLayout() {
 
     let horizontalOffset = el.scrollLeft;
     if (viewMode === 'Semana') {
-      const todayCol = el.querySelector(`[data-cal-day="${clinicNow.dateStr}"]`);
-      if (!todayCol) return false;
-      const timeCol = el.querySelector('.sticky.left-0');
-      const timeColWidth = timeCol?.offsetWidth || 80;
-      const weekRow = todayCol.parentElement;
-      horizontalOffset = Math.max(0, (weekRow?.offsetLeft || 0) + todayCol.offsetLeft - timeColWidth);
+      const weekLeft = getWeekScrollLeftForToday(el, clinicNow.dateStr);
+      if (weekLeft === null) return false;
+      horizontalOffset = weekLeft;
     }
 
     el.scrollTo({ top: verticalOffset, left: horizontalOffset, behavior });
@@ -1127,19 +1125,32 @@ export default function AppLayout() {
 
     const tryScroll = () => {
       attempts += 1;
-      const scrolled = scrollCalendarToNow(attempts > 1 ? 'auto' : 'auto');
+      const el = calendarScrollRef.current;
       const hasTodayCol = viewMode === 'Día' || Boolean(
-        calendarScrollRef.current?.querySelector(`[data-cal-day="${clinicNow.dateStr}"]`),
+        el?.querySelector(`[data-cal-day="${clinicNow.dateStr}"]`),
       );
+      if (!hasTodayCol) {
+        if (attempts < maxAttempts) timerId = window.setTimeout(tryScroll, 150);
+        else pendingScrollToNowRef.current = false;
+        return;
+      }
 
-      if ((scrolled && hasTodayCol) || attempts >= maxAttempts) {
+      const topPx = (clinicNow.mins - calendarStartMins) * PIXELS_PER_MINUTE;
+      const targetTop = Math.max(0, topPx - (el?.clientHeight || 0) * 0.15);
+      const targetLeft = viewMode === 'Semana' ? getWeekScrollLeftForToday(el, clinicNow.dateStr) : null;
+
+      const scrolled = scrollCalendarToNow('auto');
+      const topOk = !el || Math.abs(el.scrollTop - targetTop) < 8;
+      const leftOk = viewMode === 'Día' || targetLeft === null || Math.abs(el.scrollLeft - targetLeft) < 8;
+
+      if ((scrolled && topOk && leftOk) || attempts >= maxAttempts) {
         pendingScrollToNowRef.current = false;
         return;
       }
-      timerId = window.setTimeout(tryScroll, 120);
+      timerId = window.setTimeout(tryScroll, 150);
     };
 
-    timerId = window.setTimeout(tryScroll, 100);
+    timerId = window.setTimeout(tryScroll, 200);
     return () => { if (timerId) window.clearTimeout(timerId); };
   }, [
     activeTab,
@@ -1161,14 +1172,25 @@ export default function AppLayout() {
     if (!mobile && (prefs?.viewMode === 'Día' || prefs?.viewMode === 'Semana')) {
       setViewMode(prefs.viewMode);
     }
-    if (prefs?.equipmentFilter) setEquipmentFilter(prefs.equipmentFilter);
+    if (prefs?.equipmentFilter) {
+      setEquipmentFilter(prefs.equipmentFilter);
+    }
     if (typeof prefs?.zoomScale === 'number') setZoomScale(prefs.zoomScale);
     if (prefs?.zoomManual) setZoomManual(true);
     if (prefs?.weekFilterHintDismissed) setWeekFilterHintDismissed(true);
     prefsHydratedRef.current = true;
+    if (activeTab === 'Agenda') pendingScrollToNowRef.current = true;
     const t = setTimeout(() => { skipAutoZoomRef.current = false; }, 0);
     return () => clearTimeout(t);
-  }, [activeClinic]);
+  }, [activeClinic, activeTab]);
+
+  useEffect(() => {
+    if (dynamicColumns.length === 0) return;
+    if (equipmentFilter !== 'Todos' && !dynamicColumns.includes(equipmentFilter)) {
+      setEquipmentFilter('Todos');
+      setZoomManual(false);
+    }
+  }, [dynamicColumns, equipmentFilter]);
 
   useEffect(() => {
     if (!prefsHydratedRef.current || displayedEquipments.length === 0 || skipAutoZoomRef.current) return;
@@ -1178,7 +1200,8 @@ export default function AppLayout() {
       equipmentCount: displayedEquipments.length,
       isMobile: isMobileViewport,
     }));
-  }, [viewMode, equipmentFilter, displayedEquipments.length, isMobileViewport, zoomManual]);
+    if (activeTab === 'Agenda') pendingScrollToNowRef.current = true;
+  }, [viewMode, equipmentFilter, displayedEquipments.length, isMobileViewport, zoomManual, activeTab]);
 
   useEffect(() => {
     if (!prefsHydratedRef.current) return;
@@ -2305,13 +2328,27 @@ export default function AppLayout() {
                   <span className="text-[8px] lg:text-[9px] font-black text-slate-400 uppercase hidden sm:inline">{L.zoom}</span>
                   <input type="range" min="20" max="300" value={zoomScale} onChange={(e) => { setZoomScale(Number(e.target.value)); setZoomManual(true); }} className="w-14 sm:w-20 lg:w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
                 </div>
-                <select value={equipmentFilter} onChange={e => { setEquipmentFilter(e.target.value); setZoomManual(false); }} className="bg-white border border-slate-300 text-slate-700 font-bold text-[10px] lg:text-xs rounded-md px-1.5 lg:px-2 py-1 outline-none uppercase max-w-[5.5rem] sm:max-w-none truncate">
+                <select
+                  value={equipmentFilter}
+                  onChange={(e) => { setEquipmentFilter(e.target.value); setZoomManual(false); }}
+                  className="bg-white border border-slate-300 text-slate-700 font-bold text-[10px] lg:text-xs rounded-md px-2 py-1 outline-none uppercase min-w-[5.5rem] max-w-[10rem]"
+                  aria-label={L.allEquipment}
+                >
                   <option value="Todos">{L.allEquipment}</option>
                   {dynamicColumns.map(e => <option key={e} value={e}>{e}</option>)}
                 </select>
+                {equipmentFilter !== 'Todos' && (
+                  <button
+                    type="button"
+                    onClick={() => { setEquipmentFilter('Todos'); setZoomManual(false); }}
+                    className="shrink-0 text-[9px] font-black uppercase bg-blue-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-blue-700 shadow-sm"
+                  >
+                    {L.showAllEquipment}
+                  </button>
+                )}
                 <div className="flex items-center bg-slate-200/50 p-0.5 lg:p-1 rounded-lg shrink-0">
-                  <button onClick={() => { setZoomManual(false); setViewMode('Día'); }} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Día' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewDay}</button>
-                  <button onClick={() => { setZoomManual(false); setViewMode('Semana'); }} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Semana' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewWeekShort}</button>
+                  <button onClick={() => { setZoomManual(false); setViewMode('Día'); pendingScrollToNowRef.current = true; }} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Día' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewDay}</button>
+                  <button onClick={() => { setZoomManual(false); setViewMode('Semana'); pendingScrollToNowRef.current = true; }} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Semana' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewWeekShort}</button>
                 </div>
                 <button
                   type="button"
@@ -2348,8 +2385,8 @@ export default function AppLayout() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setWeekFilterHintDismissed(true)}
-                    className="text-[9px] font-black uppercase text-blue-700 px-2 py-1.5"
+                    onClick={() => { setEquipmentFilter('Todos'); setZoomManual(false); setWeekFilterHintDismissed(true); }}
+                    className="text-[9px] font-black uppercase text-blue-700 px-2 py-1.5 border border-blue-300 rounded-lg hover:bg-blue-100"
                   >
                     {L.weekFilterDismiss}
                   </button>
@@ -2361,7 +2398,7 @@ export default function AppLayout() {
             <div ref={calendarScrollRef} className="flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0 scroll-pb-16" style={{ scrollPaddingBottom: '4rem' }}>
               <div className="flex min-w-max pb-16">
                 
-                <div className="w-16 md:w-20 shrink-0 border-r border-slate-200 bg-slate-50 sticky left-0 z-50">
+                <div className="w-16 md:w-20 shrink-0 border-r border-slate-200 bg-slate-50 sticky left-0 z-50" data-cal-time-col>
                   <div
                     className="border-b border-slate-200 bg-slate-100 flex items-center justify-center sticky top-0 z-[60]"
                     style={{ height: viewMode === 'Semana' ? `${WEEK_STICKY_HEADER_PX}px` : '48px' }}
