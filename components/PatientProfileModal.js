@@ -1,11 +1,24 @@
 "use client";
 import React, { useState } from 'react';
 import { useStaffLocale } from './StaffLocaleContext';
-import { formatClinicField, formatClinicPhone } from '../lib/clinicText';
+import { buildPosTicketHtml } from '../lib/posTicket';
+import { printThermalHtml } from '../lib/printReceipt';
 
-export default function PatientProfileModal({ initialData, onSave, onClose, servicios, companyConfig = {}, currentUserLevel }) {
-  const { locale, a, L } = useStaffLocale();
+export default function PatientProfileModal({
+  initialData,
+  onSave,
+  onClose,
+  servicios,
+  companyConfig = {},
+  currentUserLevel,
+  activeClinic = 'Guadalajara',
+  onAllocateTicketNumber,
+  onLogSale,
+  onCancelSale,
+}) {
+  const { locale, L } = useStaffLocale();
   const t = L.modals.patient;
+  const canCancelSales = currentUserLevel <= 2;
 
   const [formData, setFormData] = useState({
     id: initialData.patientId || initialData.patient_id || null,
@@ -27,7 +40,10 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
   const [posQty, setPosQty] = useState(1);
   const [posPrice, setPosPrice] = useState('');
   const [posPaymentMethod, setPosPaymentMethod] = useState(locale === 'en' ? 'Credit Card' : 'Tarjeta de Crédito');
+  const [posNotes, setPosNotes] = useState('');
   const [receipt, setReceipt] = useState(null);
+  const [charging, setCharging] = useState(false);
+  const [printResult, setPrintResult] = useState(null);
 
   const paymentOptions = locale === 'en'
     ? [
@@ -42,6 +58,32 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
         { value: 'Efectivo', label: t.payCash },
         { value: 'Transferencia', label: t.payTransfer },
       ];
+
+  const currency = activeClinic === 'Shenandoah' ? 'USD' : 'MXN';
+
+  const buildReceiptHtml = (tx) => buildPosTicketHtml({
+    receipt: tx,
+    companyConfig,
+    clinicName: activeClinic,
+    locale,
+    labels: t,
+    origin: typeof window !== 'undefined' ? window.location.origin : '',
+  });
+
+  const runPrint = async (tx) => {
+    setPrintResult('printing');
+    const result = await printThermalHtml(
+      buildReceiptHtml(tx),
+      locale === 'en' ? 'POS receipt' : 'Ticket POS',
+    );
+    setPrintResult(result.ok ? 'ok' : 'error');
+    return result;
+  };
+
+  const dismissReceipt = () => {
+    setReceipt(null);
+    setPrintResult(null);
+  };
 
   const handleChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -58,7 +100,7 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
     }
   };
 
-  const handlePurchase = () => {
+  const handlePurchase = async () => {
     if (formData.is_blocked) {
       alert(t.blockedCharge);
       return;
@@ -74,8 +116,25 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
       if (srv) baseService = srv.equipment;
     }
 
+    const total = parseFloat(posPrice) || 0;
+    const sessions = posQty;
+    const unitPrice = sessions > 0 ? total / sessions : total;
+
+    setCharging(true);
+    let ticketNumber = null;
+    try {
+      if (onAllocateTicketNumber) {
+        ticketNumber = await onAllocateTicketNumber();
+      }
+    } catch {
+      ticketNumber = null;
+    } finally {
+      setCharging(false);
+    }
+
     const newTransaction = {
       id: Date.now(),
+      ticketNumber: ticketNumber || Date.now(),
       date: new Date().toLocaleDateString(locale === 'en' ? 'en-US' : 'es-MX', {
         year: 'numeric',
         month: 'short',
@@ -85,10 +144,17 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
       }),
       serviceName: posService,
       equipment: baseService,
-      sessions: posQty,
-      price: parseFloat(posPrice) || 0,
+      sessions,
+      unitPrice,
+      price: total,
       paymentMethod: posPaymentMethod,
       operator: locale === 'en' ? 'POS' : 'Caja POS',
+      ticketNotes: posNotes.trim(),
+      patient: formData.patient,
+      phone: formData.phone,
+      email: formData.email,
+      dob: formData.dob,
+      protocol: formData.protocol,
     };
 
     setFormData((prev) => {
@@ -100,10 +166,15 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
       };
     });
 
-    setReceipt({ ...newTransaction, patient: formData.patient });
+    onLogSale?.(newTransaction, formData.patient);
+
+    setReceipt(newTransaction);
+    await runPrint(newTransaction);
+
     setPosService('');
     setPosQty(1);
     setPosPrice('');
+    setPosNotes('');
     setPosPaymentMethod(paymentOptions[0].value);
   };
 
@@ -111,6 +182,8 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
     if (!window.confirm(t.cancelPaymentConfirm(txToCancel.price, txToCancel.sessions, txToCancel.serviceName))) {
       return;
     }
+
+    onCancelSale?.(txToCancel, formData.patient);
 
     setFormData((prev) => {
       const eqName = txToCancel.equipment || txToCancel.serviceName;
@@ -122,43 +195,6 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
         packageHistory: prev.packageHistory.filter((tx) => tx.id !== txToCancel.id),
       };
     });
-  };
-
-  const printHTML = (htmlContent, title) => {
-    const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:none';
-    document.body.appendChild(iframe);
-    const doc = iframe.contentWindow.document;
-    doc.open();
-    doc.write(`<html><head><title>${title}</title></head><body style="margin:0;">${htmlContent}</body></html>`);
-    doc.close();
-    iframe.contentWindow.focus();
-    setTimeout(() => {
-      iframe.contentWindow.print();
-      setTimeout(() => document.body.removeChild(iframe), 1000);
-    }, 500);
-  };
-
-  const handlePrint = () => {
-    const clinicName = formatClinicField(companyConfig.name) || 'OXYHYPERBARIC';
-    const clinicAddress = formatClinicField(companyConfig.address);
-    const clinicPhone = formatClinicPhone(companyConfig.phone);
-    const thanks = formatClinicField(companyConfig.ticket_message) || t.receiptThanks;
-    const printContent = `
-      <div style="width:48mm;font-family:monospace;font-size:11px;text-transform:uppercase;">
-        <h2 style="text-align:center;font-size:16px;margin:0 0 8px;">${clinicName}</h2>
-        ${clinicAddress ? `<p style="text-align:center;margin:0 0 4px;font-size:10px;">${clinicAddress}</p>` : ''}
-        ${clinicPhone ? `<p style="text-align:center;margin:0 0 8px;font-size:10px;">Tel: ${clinicPhone}</p>` : ''}
-        <p>${t.receiptDate} ${receipt.date}</p>
-        <p>${t.receiptTicket} #${receipt.id.toString().slice(-6)}</p>
-        <p><strong>${t.receiptClient}</strong> ${String(receipt.patient || '').toUpperCase()}</p>
-        <p>${String(receipt.serviceName || '').toUpperCase()} · ${t.receiptSessions} ${receipt.sessions}</p>
-        <p><strong>${t.receiptTotal}</strong> $${receipt.price.toFixed(2)}</p>
-        <p>${t.receiptPaidWith} ${receipt.paymentMethod}</p>
-        <p>${t.receiptServedBy} ${receipt.operator}</p>
-        <p style="text-align:center;font-style:italic;margin-top:8px;">${thanks}</p>
-      </div>`;
-    printHTML(printContent, locale === 'en' ? 'POS receipt' : 'Ticket POS');
   };
 
   return (
@@ -182,6 +218,10 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.email}</label>
               <input disabled={formData.is_blocked && currentUserLevel > 1} type="email" value={formData.email} onChange={(e) => handleChange('email', e.target.value)} placeholder="correo@ejemplo.com" className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold outline-none disabled:opacity-50" />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.receiptDob}</label>
+              <input disabled={formData.is_blocked && currentUserLevel > 1} type="date" value={formData.dob || ''} onChange={(e) => handleChange('dob', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold outline-none disabled:opacity-50" />
             </div>
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.clinicalProtocol}</label>
@@ -252,16 +292,25 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
               <span className="text-[10px] font-black text-slate-500 uppercase block mb-2">{t.paymentHistory}</span>
               {formData.packageHistory?.length ? (
                 formData.packageHistory.map((tx) => (
-                  <div key={tx.id} className="bg-white p-2 rounded border flex justify-between items-center mb-1">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase">{tx.serviceName} ({tx.sessions} {t.sessionsShort})</p>
-                      <p className="text-[8px] text-slate-400 uppercase">{tx.date} · ${tx.price}</p>
+                  <div key={tx.id} className="bg-white p-2 rounded border mb-1">
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold uppercase">
+                          #{tx.ticketNumber || tx.ticket_number || String(tx.id).slice(-6)} · {tx.serviceName} ({tx.sessions} {t.sessionsShort})
+                        </p>
+                        <p className="text-[8px] text-slate-400 uppercase">{tx.date} · ${tx.price}</p>
+                      </div>
+                      <div className="flex flex-col gap-1 shrink-0">
+                        <button type="button" onClick={() => runPrint(tx)} className="text-[9px] font-black text-slate-700 uppercase px-2 py-1 border border-slate-200 rounded bg-slate-50">
+                          {t.receiptReprint}
+                        </button>
+                        {canCancelSales && (
+                          <button type="button" onClick={() => handleCancelTransaction(tx)} className="text-[9px] font-black text-red-600 uppercase px-2 py-1 border border-red-200 rounded">
+                            {t.revert}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    {currentUserLevel === 1 && (
-                      <button type="button" onClick={() => handleCancelTransaction(tx)} className="text-[9px] font-black text-red-600 uppercase px-2 py-1 border border-red-200 rounded">
-                        {t.revert}
-                      </button>
-                    )}
                   </div>
                 ))
               ) : (
@@ -283,8 +332,15 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
                 {paymentOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
-            <button type="button" onClick={handlePurchase} className="w-full bg-blue-600 text-white text-xs font-black uppercase py-3 rounded-lg">
-              {t.chargeTicket}
+            <textarea
+              value={posNotes}
+              onChange={(e) => setPosNotes(e.target.value)}
+              placeholder={t.receiptNotesPlaceholder}
+              className="w-full p-2 border border-blue-200 rounded-lg text-xs font-bold bg-white text-blue-900 mb-3"
+              rows={2}
+            />
+            <button type="button" disabled={charging} onClick={handlePurchase} className="w-full bg-blue-600 text-white text-xs font-black uppercase py-3 rounded-lg disabled:opacity-60">
+              {charging ? '...' : t.chargeTicket}
             </button>
           </div>
         </div>
@@ -297,23 +353,36 @@ export default function PatientProfileModal({ initialData, onSave, onClose, serv
 
       {receipt && (
         <div className="fixed inset-0 bg-slate-900/80 flex items-center justify-center p-4 z-[200]">
-          <div className="bg-slate-100 rounded-xl max-w-sm w-full p-4">
-            <div className="bg-white p-6 font-mono text-sm mb-4 uppercase">
-              <h2 className="font-bold text-lg text-center">{formatClinicField(companyConfig.name) || 'OXYHYPERBARIC'}</h2>
-              {companyConfig.address && (
-                <p className="text-[10px] text-center text-slate-600">{formatClinicField(companyConfig.address)}</p>
-              )}
-              {companyConfig.phone && (
-                <p className="text-[10px] text-center text-slate-600 mb-2">Tel: {formatClinicPhone(companyConfig.phone)}</p>
-              )}
-              <p className="text-xs normal-case">{t.receiptDate} {receipt.date}</p>
-              <p className="text-xs font-bold">{t.receiptClient} {receipt.patient}</p>
-              <p className="text-xs">{receipt.serviceName}</p>
-              <p className="font-bold mt-2">{t.receiptTotal} ${receipt.price.toFixed(2)}</p>
+          <div className="bg-slate-100 rounded-xl max-w-sm w-full p-4 max-h-[90vh] overflow-y-auto">
+            {printResult === 'error' && (
+              <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 mb-4">
+                <p className="text-xs font-black text-red-800 uppercase mb-2">⚠️ {locale === 'en' ? 'Print error' : 'Error de impresión'}</p>
+                <p className="text-[11px] font-bold text-red-700 leading-relaxed normal-case">{t.receiptPrintError}</p>
+              </div>
+            )}
+            {printResult === 'printing' && (
+              <p className="text-center text-[10px] font-black text-slate-500 mb-3 uppercase">{t.receiptPrinting}</p>
+            )}
+            {printResult === 'ok' && (
+              <p className="text-center text-[10px] font-black text-emerald-700 mb-3 uppercase">{t.receiptPrintSent}</p>
+            )}
+            <div className="bg-white p-4 font-mono text-sm mb-4 uppercase overflow-x-auto" dangerouslySetInnerHTML={{ __html: buildReceiptHtml(receipt) }} />
+            <div className="text-center text-[10px] font-bold text-slate-500 mb-3 normal-case">
+              {receipt.sessions} {t.sessionsShort} · {t.receiptSubtotal} ${((receipt.unitPrice || 0) * receipt.sessions).toFixed(2)} {currency} · {t.receiptTotal} ${receipt.price.toFixed(2)} {currency}
             </div>
-            <div className="flex gap-3">
-              <button type="button" onClick={() => setReceipt(null)} className="flex-1 bg-slate-300 font-black py-3 rounded uppercase text-xs">{t.close}</button>
-              <button type="button" onClick={handlePrint} className="flex-1 bg-slate-900 text-white font-black py-3 rounded uppercase text-xs">{t.printTicket}</button>
+            <p className="text-[9px] text-slate-400 text-center mb-3 normal-case leading-relaxed">{t.receiptBtHint}</p>
+            <div className="flex flex-col gap-2">
+              {printResult === 'error' ? (
+                <>
+                  <button type="button" onClick={() => runPrint(receipt)} className="w-full bg-slate-900 text-white font-black py-3 rounded uppercase text-xs">{t.receiptReprint}</button>
+                  <button type="button" onClick={dismissReceipt} className="w-full bg-emerald-600 text-white font-black py-3 rounded uppercase text-xs">{t.receiptPrintAccept}</button>
+                </>
+              ) : (
+                <div className="flex gap-3">
+                  <button type="button" onClick={dismissReceipt} className="flex-1 bg-slate-300 font-black py-3 rounded uppercase text-xs">{t.close}</button>
+                  <button type="button" onClick={() => runPrint(receipt)} className="flex-1 bg-slate-900 text-white font-black py-3 rounded uppercase text-xs">{t.receiptReprint}</button>
+                </div>
+              )}
             </div>
           </div>
         </div>

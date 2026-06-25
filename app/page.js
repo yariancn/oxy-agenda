@@ -50,6 +50,10 @@ import {
   generateCalendarFeedToken,
 } from '../lib/calendarFeed';
 import { buildPromoterBookingUrl, normalizePromoCode, resolvePromoterContext } from '../lib/promoters';
+import { resolveNextTicketNumber } from '../lib/ticketNumber';
+import { buildPosTicketHtml } from '../lib/posTicket';
+import { printThermalHtml } from '../lib/printReceipt';
+import { formatSaleAuditDetail, formatSaleCancelAuditDetail } from '../lib/saleAudit';
 import {
   buildNotifyContent,
   formatBookingNotifyFeedback,
@@ -107,6 +111,7 @@ export default function AppLayout() {
   const skipAutoZoomRef = useRef(false);
   const calendarScrollRef = useRef(null);
   const pendingScrollToNowRef = useRef(false);
+  const agendaScrollBootRef = useRef(null);
   
   // --- RELOJ MULTIHUSO HORARIO ---
   const [clinicNow, setClinicNow] = useState({ mins: 0, dateStr: '' });
@@ -155,6 +160,7 @@ export default function AppLayout() {
     reminder_hours: 24,
     calendar_feed_enabled: false,
     calendar_feed_token: '',
+    ticket_counter: 793,
     ...defaultNotifySettings('es'),
     ...emptyEmailTemplateState('es'),
   });
@@ -367,14 +373,16 @@ export default function AppLayout() {
   }, [activeClinic]);
 
   useEffect(() => {
-    if (!currentUser || activeTab !== 'Agenda') return;
+    if (!currentUser || activeTab !== 'Agenda' || dbStatus !== 'ok') return;
+    const bootKey = `${activeClinic}:Agenda`;
+    if (agendaScrollBootRef.current === bootKey) return;
     const mobile = window.matchMedia('(max-width: 1023px)').matches;
-    if (!mobile) return;
     const now = getClinicNow(activeClinic);
-    setViewMode('Día');
+    if (mobile) setViewMode('Día');
     setCurrentDate(now.date);
     pendingScrollToNowRef.current = true;
-  }, [currentUser, activeTab, activeClinic]);
+    agendaScrollBootRef.current = bootKey;
+  }, [currentUser, activeTab, activeClinic, dbStatus]);
 
   // Bloqueo automático SOLO para la pestaña de Ventas
   useEffect(() => {
@@ -730,6 +738,7 @@ export default function AppLayout() {
           }),
           calendar_feed_enabled: resC.data.calendar_feed_enabled === true,
           calendar_feed_token: String(resC.data.calendar_feed_token || '').trim(),
+          ticket_counter: Number(resC.data.ticket_counter) || 793,
         });
       } else {
         const clinicLocale = localeForClinic(activeClinic);
@@ -901,12 +910,14 @@ export default function AppLayout() {
 
   const PIXELS_PER_MINUTE = 1.5;
   const CALENDAR_PAD_MINS = 30;
+  const CALENDAR_END_PAD_MINS = 60;
   const clinicGridBounds = useMemo(
     () => getClinicCalendarGridBounds(dbCompanyConfig),
     [dbCompanyConfig],
   );
   const startMins = clinicGridBounds.startMins;
   const endMins = clinicGridBounds.endMins;
+  const calendarEndMins = endMins + CALENDAR_END_PAD_MINS;
   const calendarStartMins = startMins - CALENDAR_PAD_MINS;
   const intervalMins = Number(dbCompanyConfig.interval_mins) || 30;
   const weekdayLabels = useMemo(() => getWeekdayLabels(locale), [locale]);
@@ -931,7 +942,7 @@ export default function AppLayout() {
     });
   };
 
-  const CALENDAR_HEIGHT = (endMins - calendarStartMins) * PIXELS_PER_MINUTE;
+  const CALENDAR_HEIGHT = (calendarEndMins - calendarStartMins) * PIXELS_PER_MINUTE;
   const currentColWidth = (160 * zoomScale) / 100;
   const isCompact = isCompactColumn(currentColWidth);
 
@@ -1133,7 +1144,7 @@ export default function AppLayout() {
 
   const timeOptions = useMemo(() => {
     const slots = [];
-    for (let m = calendarStartMins; m < endMins; m += intervalMins) {
+    for (let m = calendarStartMins; m < calendarEndMins; m += intervalMins) {
       const h = Math.floor(m / 60); 
       const mins = m % 60; 
       const ampm = h >= 12 ? 'PM' : 'AM'; 
@@ -1141,7 +1152,7 @@ export default function AppLayout() {
       slots.push(`${displayH.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')} ${ampm}`);
     }
     return slots;
-  }, [calendarStartMins, endMins, intervalMins]);
+  }, [calendarStartMins, calendarEndMins, intervalMins]);
 
   const createEmptyAppointmentDraft = () => {
     const firstSrv = dbServices.find(s => s.is_active);
@@ -1163,6 +1174,7 @@ export default function AppLayout() {
       patient: '',
       outside_normal_hours: false,
       extended_session: false,
+      promoter_code: '',
     };
   };
 
@@ -1426,6 +1438,25 @@ export default function AppLayout() {
   });
 
   // --- CANCELACIÓN GLOBAL DE VENTAS DESDE REPORTES ---
+  const reprintSaleTicket = async (tx, patientName) => {
+    const receipt = { ...tx, patient: patientName || tx.patient };
+    const html = buildPosTicketHtml({
+      receipt,
+      companyConfig: dbCompanyConfig,
+      clinicName: activeClinic,
+      locale,
+      labels: L.modals.patient,
+      origin: typeof window !== 'undefined' ? window.location.origin : '',
+    });
+    const result = await printThermalHtml(html, locale === 'en' ? 'POS receipt' : 'Ticket POS');
+    if (!result.ok) {
+      alert(locale === 'en'
+        ? L.modals.patient.receiptPrintError
+        : L.modals.patient.receiptPrintError);
+    }
+    await logAudit(null, patientName || tx.patient, 'REIMPRESIÓN TICKET', formatSaleAuditDetail(tx, currencyStr));
+  };
+
   const handleCancelGlobalTransaction = async (tx, patientId, patientName) => {
     if (!window.confirm(a('cancelSaleConfirm', patientName, tx.price, tx.sessions, tx.serviceName))) {
       return;
@@ -1447,7 +1478,7 @@ export default function AppLayout() {
          package_history: newHistory
       }).eq('id', p.id);
 
-      await logAudit(null, patientName, 'REVERSIÓN DE VENTA', `Se canceló ticket por $${tx.price} y se restaron ${tx.sessions} sesiones de ${eqName}.`);
+      await logAudit(null, patientName, 'REVERSIÓN DE VENTA', formatSaleCancelAuditDetail(tx, currencyStr));
       alert(a('saleCancelled'));
       fetchAllData();
     } catch (e) {
@@ -2279,8 +2310,8 @@ export default function AppLayout() {
             )}
 
             {/* --- CONTENEDOR DEL CALENDARIO: SCROLL UNIFICADO (CIRUGÍA CSS) --- */}
-            <div ref={calendarScrollRef} className="flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0">
-              <div className="flex min-w-max">
+            <div ref={calendarScrollRef} className="flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0 scroll-pb-16" style={{ scrollPaddingBottom: '4rem' }}>
+              <div className="flex min-w-max pb-16">
                 
                 <div className="w-16 md:w-20 shrink-0 border-r border-slate-200 bg-slate-50 sticky left-0 z-50">
                   <div
@@ -2890,14 +2921,17 @@ export default function AppLayout() {
                               <th className="p-4">Paciente</th>
                               <th className="p-4">Paquete Vendido</th>
                               <th className="p-4 text-right">Monto / Método</th>
-                              {currentUserLevel === 1 && <th className="p-4 text-center">Auditoría</th>}
+                              <th className="p-4 text-center">Acciones</th>
                            </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                            {dbPatients.flatMap(p => (p.packageHistory || []).map(tx => ({...tx, patientId: p.id, patientName: p.patient})))
                             .sort((a,b) => b.id - a.id).slice(0, 50).map(tx => (
                               <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
-                                 <td className="p-4 font-bold text-slate-500 text-xs">{tx.date}</td>
+                                 <td className="p-4 font-bold text-slate-500 text-xs">
+                                    <span className="block">#{tx.ticketNumber || tx.ticket_number || String(tx.id).slice(-6)}</span>
+                                    <span className="text-[9px] text-slate-400">{tx.date}</span>
+                                 </td>
                                  <td className="p-4 font-black text-slate-800 text-sm uppercase">{tx.patientName}</td>
                                  <td className="p-4">
                                     <p className="font-bold text-blue-600 text-xs uppercase">{tx.serviceName}</p>
@@ -2907,11 +2941,18 @@ export default function AppLayout() {
                                     <p className="font-black text-emerald-600 text-sm">${tx.price} {currencyStr}</p>
                                     <p className="text-[9px] font-black text-slate-400 uppercase mt-0.5 bg-slate-100 inline-block px-2 py-0.5 rounded">{tx.paymentMethod || 'Tarjeta'}</p>
                                  </td>
-                                 {currentUserLevel === 1 && (
-                                    <td className="p-4 text-center">
-                                       <button onClick={() => handleCancelGlobalTransaction(tx, tx.patientId, tx.patientName)} className="bg-red-50 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-100 transition shadow-sm">Revertir Venta</button>
-                                    </td>
-                                 )}
+                                 <td className="p-4 text-center">
+                                   <div className="flex flex-col gap-1 items-center">
+                                     <button type="button" onClick={() => reprintSaleTicket(tx, tx.patientName)} className="bg-slate-100 border border-slate-300 text-slate-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-slate-200 transition shadow-sm w-full max-w-[8rem]">
+                                       {L.modals.patient.receiptReprint}
+                                     </button>
+                                     {currentUserLevel <= 2 && (
+                                       <button type="button" onClick={() => handleCancelGlobalTransaction(tx, tx.patientId, tx.patientName)} className="bg-red-50 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-100 transition shadow-sm w-full max-w-[8rem]">
+                                         {L.modals.patient.revert}
+                                       </button>
+                                     )}
+                                   </div>
+                                 </td>
                               </tr>
                            ))}
                         </tbody>
@@ -3890,24 +3931,43 @@ export default function AppLayout() {
                 <span className="font-black text-slate-800 text-lg uppercase pr-6">{selectedSlot.is_new_patient ? '⭐ ' : ''}{selectedSlot.patient}</span>
                 <span className="text-[10px] text-blue-600 font-black uppercase tracking-widest">{selectedSlot.protocol}</span>
 
-                {selectedPromoterContext && (
-                  <div className="mt-3 bg-violet-50 border border-violet-200 p-3 rounded-xl">
-                    <p className="text-[10px] font-black uppercase text-violet-800">{L.p.appt.promoterSection}</p>
-                    <p className="text-xs font-bold text-violet-900 mt-1">
-                      {selectedPromoterContext.name
-                        ? `${selectedPromoterContext.name} (${selectedPromoterContext.code})`
-                        : selectedPromoterContext.code}
-                    </p>
-                    {selectedPromoterContext.notes ? (
-                      <p className="text-xs text-violet-800 mt-2 whitespace-pre-wrap leading-relaxed">{selectedPromoterContext.notes}</p>
-                    ) : (
-                      <p className="text-[9px] font-bold text-violet-500 mt-1 uppercase">{L.p.appt.promoterNoNotes}</p>
-                    )}
-                    {!selectedPromoterContext.recognized && (
-                      <p className="text-[9px] font-bold text-amber-700 mt-1 uppercase">{L.p.appt.promoterUnregistered}</p>
-                    )}
-                  </div>
-                )}
+                <div className="mt-3 bg-violet-50 border border-violet-200 p-3 rounded-xl">
+                  <p className="text-[10px] font-black uppercase text-violet-800">{L.p.appt.promoterSection}</p>
+                  <select
+                    value={selectedSlot.promoter_code || ''}
+                    onChange={(e) => setSelectedSlot({ ...selectedSlot, promoter_code: normalizePromoCode(e.target.value) })}
+                    className="w-full mt-2 p-2 border border-violet-200 rounded-lg text-xs font-bold bg-white text-violet-900"
+                  >
+                    <option value="">{L.p.appt.promoterSelect}</option>
+                    {dbPromoters.filter((p) => p.is_active !== false).map((p) => (
+                      <option key={p.id} value={normalizePromoCode(p.code)}>{p.name} ({p.code})</option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={selectedSlot.promoter_code || ''}
+                    onChange={(e) => setSelectedSlot({ ...selectedSlot, promoter_code: normalizePromoCode(e.target.value) })}
+                    placeholder={L.p.appt.promoterCodeManual}
+                    className="w-full mt-2 p-2 border border-violet-200 rounded-lg text-xs font-bold uppercase bg-white text-violet-900"
+                  />
+                  {selectedPromoterContext ? (
+                    <>
+                      <p className="text-xs font-bold text-violet-900 mt-2">
+                        {selectedPromoterContext.name
+                          ? `${selectedPromoterContext.name} (${selectedPromoterContext.code})`
+                          : selectedPromoterContext.code}
+                      </p>
+                      {selectedPromoterContext.notes ? (
+                        <p className="text-xs text-violet-800 mt-2 whitespace-pre-wrap leading-relaxed">{selectedPromoterContext.notes}</p>
+                      ) : (
+                        <p className="text-[9px] font-bold text-violet-500 mt-1 uppercase">{L.p.appt.promoterNoNotes}</p>
+                      )}
+                      {!selectedPromoterContext.recognized && (
+                        <p className="text-[9px] font-bold text-amber-700 mt-1 uppercase">{L.p.appt.promoterUnregistered}</p>
+                      )}
+                    </>
+                  ) : null}
+                </div>
 
                 <div className="mt-3 bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-3">
                   <label className="text-[10px] font-black uppercase text-slate-500">{L.p.appt.contactSection}</label>
@@ -3978,6 +4038,7 @@ export default function AppLayout() {
                           notes: selectedSlot.notes,
                           phone: contactResult.phone || selectedSlot.phone || '',
                           email: contactResult.email || selectedSlot.email || '',
+                          promoter_code: normalizePromoCode(selectedSlot.promoter_code) || null,
                         }).eq('id', selectedSlot.id);
 
                         alert(a('notesSavedOk'));
@@ -4241,6 +4302,46 @@ export default function AppLayout() {
                   </div>
                 </div>
               ) : null}
+              {selectedSlot?.patient?.trim() ? (
+                <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 space-y-2">
+                  <p className="text-[10px] font-black uppercase text-violet-800">{L.p.appt.promoterOptional}</p>
+                  <select
+                    value={dbPromoters.some((p) => normalizePromoCode(p.code) === normalizePromoCode(selectedSlot?.promoter_code)) ? normalizePromoCode(selectedSlot?.promoter_code) : ''}
+                    onChange={(e) => setSelectedSlot({ ...selectedSlot, promoter_code: e.target.value })}
+                    className="w-full p-2 border border-violet-200 rounded-lg text-xs font-bold bg-white text-violet-900"
+                  >
+                    <option value="">{L.p.appt.promoterSelect}</option>
+                    {dbPromoters.filter((p) => p.is_active !== false).map((p) => (
+                      <option key={p.id} value={normalizePromoCode(p.code)}>{p.name} ({p.code})</option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={selectedSlot?.promoter_code || ''}
+                    onChange={(e) => setSelectedSlot({ ...selectedSlot, promoter_code: normalizePromoCode(e.target.value) })}
+                    placeholder={L.p.appt.promoterCodeManual}
+                    className="w-full p-2 border border-violet-200 rounded-lg text-xs font-bold uppercase bg-white text-violet-900"
+                  />
+                  {selectedPromoterContext && (
+                    <div className="rounded-lg border border-violet-300 bg-white p-2">
+                      <p className="text-[9px] font-black uppercase text-violet-700">{L.p.appt.promoterSection}</p>
+                      <p className="text-xs font-bold text-violet-900 mt-1">
+                        {selectedPromoterContext.name
+                          ? `${selectedPromoterContext.name} (${selectedPromoterContext.code})`
+                          : selectedPromoterContext.code}
+                      </p>
+                      {selectedPromoterContext.notes ? (
+                        <p className="text-xs text-violet-800 mt-2 whitespace-pre-wrap leading-relaxed">{selectedPromoterContext.notes}</p>
+                      ) : (
+                        <p className="text-[9px] font-bold text-violet-500 mt-1 uppercase">{L.p.appt.promoterNoNotes}</p>
+                      )}
+                      {!selectedPromoterContext.recognized && (
+                        <p className="text-[9px] font-bold text-amber-700 mt-1 uppercase">{L.p.appt.promoterUnregistered}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : null}
               {selectedSlot?.patient && !isNewPatientInline && (
                 <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl shadow-inner">
                   <label className="text-[9px] font-black uppercase text-amber-800 flex items-center gap-1">⚠️ Notas Generales del Expediente</label>
@@ -4413,6 +4514,7 @@ export default function AppLayout() {
                     notes: selectedSlot.notes || '',
                     outside_normal_hours: !!selectedSlot.outside_normal_hours,
                     is_extended_block: isExtendedSession(selectedSlot),
+                    promoter_code: normalizePromoCode(selectedSlot.promoter_code) || null,
                   };
                   const { data: na, error } = await insertStaffAppointment(activeSupabase, payload);
                   if (error) {
@@ -4686,8 +4788,31 @@ export default function AppLayout() {
             })()}
             servicios={dbServices} 
             companyConfig={dbCompanyConfig}
+            activeClinic={activeClinic}
             currentUserLevel={currentUserLevel}
-            onClose={() => setShowPatientProfile(false)} 
+            onAllocateTicketNumber={async () => {
+              const next = resolveNextTicketNumber({
+                ticketCounter: dbCompanyConfig.ticket_counter,
+                patients: dbPatients,
+              });
+              if (dbCompanyConfig.id) {
+                const { error } = await activeSupabase
+                  .from('company_config')
+                  .update({ ticket_counter: next + 1 })
+                  .eq('id', dbCompanyConfig.id);
+                if (!error) {
+                  setDbCompanyConfig((prev) => ({ ...prev, ticket_counter: next + 1 }));
+                }
+              }
+              return next;
+            }}
+            onClose={() => setShowPatientProfile(false)}
+            onLogSale={(tx, patientName) => {
+              logAudit(null, patientName, 'VENTA POS', formatSaleAuditDetail(tx, currencyStr));
+            }}
+            onCancelSale={(tx, patientName) => {
+              logAudit(null, patientName, 'REVERSIÓN DE VENTA', formatSaleCancelAuditDetail(tx, currencyStr));
+            }}
             onSave={async (ud) => {
               const activeSupabase = createStaffDb(activeClinic);
               const patientDbId = ud.id || selectedSlot.patientId;
