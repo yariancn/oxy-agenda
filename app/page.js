@@ -117,7 +117,8 @@ export default function AppLayout() {
   const skipAutoZoomRef = useRef(false);
   const calendarScrollRef = useRef(null);
   const pendingScrollToNowRef = useRef(false);
-  const agendaScrollBootRef = useRef(null);
+  const prevActiveTabRef = useRef(null);
+  const lastAgendaFocusRef = useRef('');
   
   // --- RELOJ MULTIHUSO HORARIO ---
   const [clinicNow, setClinicNow] = useState({ mins: 0, dateStr: '' });
@@ -379,15 +380,22 @@ export default function AppLayout() {
   }, [activeClinic]);
 
   useEffect(() => {
+    const enteredAgenda = activeTab === 'Agenda' && prevActiveTabRef.current !== 'Agenda';
+    prevActiveTabRef.current = activeTab;
+
     if (!currentUser || activeTab !== 'Agenda' || dbStatus !== 'ok') return;
-    const bootKey = `${activeClinic}:Agenda`;
-    if (agendaScrollBootRef.current === bootKey) return;
+
+    const focusKey = `${activeClinic}:Agenda`;
+    const shouldFocus = enteredAgenda || lastAgendaFocusRef.current !== focusKey;
+    if (!shouldFocus) return;
+
+    lastAgendaFocusRef.current = focusKey;
+
     const mobile = window.matchMedia('(max-width: 1023px)').matches;
     const now = getClinicNow(activeClinic);
     if (mobile) setViewMode('Día');
     setCurrentDate(now.date);
     pendingScrollToNowRef.current = true;
-    agendaScrollBootRef.current = bootKey;
   }, [currentUser, activeTab, activeClinic, dbStatus]);
 
   // Bloqueo automático SOLO para la pestaña de Ventas
@@ -1089,27 +1097,61 @@ export default function AppLayout() {
 
   const scrollCalendarToNow = useCallback((behavior = 'auto') => {
     const el = calendarScrollRef.current;
-    if (!el || !clinicNow.dateStr) return;
+    if (!el || !clinicNow.dateStr) return false;
 
     const topPx = (clinicNow.mins - calendarStartMins) * PIXELS_PER_MINUTE;
-    const verticalOffset = Math.max(0, topPx - el.clientHeight * 0.2);
-    el.scrollTo({ top: verticalOffset, behavior });
+    const verticalOffset = Math.max(0, topPx - el.clientHeight * 0.15);
 
+    let horizontalOffset = el.scrollLeft;
     if (viewMode === 'Semana') {
       const todayCol = el.querySelector(`[data-cal-day="${clinicNow.dateStr}"]`);
-      todayCol?.scrollIntoView({ inline: 'center', block: 'nearest', behavior });
+      if (!todayCol) return false;
+      const timeCol = el.querySelector('.sticky.left-0');
+      const timeColWidth = timeCol?.offsetWidth || 80;
+      const weekRow = todayCol.parentElement;
+      horizontalOffset = Math.max(0, (weekRow?.offsetLeft || 0) + todayCol.offsetLeft - timeColWidth);
     }
+
+    el.scrollTo({ top: verticalOffset, left: horizontalOffset, behavior });
+    return true;
   }, [clinicNow.dateStr, clinicNow.mins, calendarStartMins, viewMode]);
 
   useEffect(() => {
     if (!pendingScrollToNowRef.current) return;
     if (activeTab !== 'Agenda' || dbStatus !== 'ok' || !clinicNow.dateStr) return;
-    const timer = window.setTimeout(() => {
-      scrollCalendarToNow('auto');
-      pendingScrollToNowRef.current = false;
-    }, 120);
-    return () => window.clearTimeout(timer);
-  }, [activeTab, dbStatus, clinicNow.dateStr, scrollCalendarToNow, viewMode, currentDateISO, CALENDAR_HEIGHT]);
+    if (viewMode === 'Semana' && displayedEquipments.length === 0) return;
+
+    let attempts = 0;
+    let timerId = null;
+    const maxAttempts = 15;
+
+    const tryScroll = () => {
+      attempts += 1;
+      const scrolled = scrollCalendarToNow(attempts > 1 ? 'auto' : 'auto');
+      const hasTodayCol = viewMode === 'Día' || Boolean(
+        calendarScrollRef.current?.querySelector(`[data-cal-day="${clinicNow.dateStr}"]`),
+      );
+
+      if ((scrolled && hasTodayCol) || attempts >= maxAttempts) {
+        pendingScrollToNowRef.current = false;
+        return;
+      }
+      timerId = window.setTimeout(tryScroll, 120);
+    };
+
+    timerId = window.setTimeout(tryScroll, 100);
+    return () => { if (timerId) window.clearTimeout(timerId); };
+  }, [
+    activeTab,
+    dbStatus,
+    clinicNow.dateStr,
+    scrollCalendarToNow,
+    viewMode,
+    currentDateISO,
+    CALENDAR_HEIGHT,
+    displayedEquipments.length,
+    zoomScale,
+  ]);
 
   useEffect(() => {
     prefsHydratedRef.current = false;
@@ -2392,8 +2434,8 @@ export default function AppLayout() {
                       {weekDays.map((dayInfo) => {
                         const dayOpen = getDaySchedule(dbCompanyConfig, dayInfo.fullDate).open;
                         return (
-                        <div key={dayInfo.fullDate} data-cal-day={dayInfo.fullDate} className={`flex-1 shrink-0 border-r-2 border-slate-300 ${!dayOpen ? 'opacity-60' : ''}`} style={{ minWidth: `${displayedEquipments.length * currentColWidth}px` }}>
-                          <div className={`sticky top-0 z-40 border-b border-slate-200 ${dayOpen ? 'bg-slate-50' : 'bg-slate-200'}`}>
+                        <div key={dayInfo.fullDate} data-cal-day={dayInfo.fullDate} className={`flex-1 shrink-0 border-r-2 ${dayInfo.fullDate === clinicNow.dateStr ? 'border-blue-500 ring-2 ring-inset ring-blue-400/60' : 'border-slate-300'} ${!dayOpen ? 'opacity-60' : ''}`} style={{ minWidth: `${displayedEquipments.length * currentColWidth}px` }}>
+                          <div className={`sticky top-0 z-40 border-b border-slate-200 ${dayInfo.fullDate === clinicNow.dateStr ? 'bg-blue-50' : dayOpen ? 'bg-slate-50' : 'bg-slate-200'}`}>
                             <div className="h-8 flex flex-col items-center justify-center">
                               <span className="text-[9px] font-black text-slate-800 uppercase leading-none">{dayInfo.name}</span>
                               <span className={`text-[10px] font-bold leading-none ${dayOpen ? 'text-blue-600' : 'text-slate-500'}`}>
