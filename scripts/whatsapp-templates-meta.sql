@@ -1,18 +1,19 @@
 -- Plantillas de WhatsApp para registrar en Meta Business Manager
 -- Categoría: UTILIDAD (utility) | Idioma: Español (MEX) es_MX
 -- Los nombres deben coincidir con las variables WHATSAPP_TEMPLATE_* en Vercel
+-- Número solo API: incluir redirección a recepción +52 33 2166 4083 en el cuerpo
 
--- oxy_cita_confirmada (first + booking)
--- Variables cuerpo: {{1}} nombre, {{2}} clínica, {{3}} fecha, {{4}} hora, {{5}} servicio, {{6}} link mapa (opcional)
+-- programacion (first + booking) — número dedicado API
+-- Variables cuerpo: {{1}} nombre, {{2}} fecha, {{3}} hora, {{4}} servicio
 /*
-Hola {{1}}, confirmamos tu cita en {{2}}.
+Hola {{1}}, confirmamos tu cita en Oxygengdl.
 
-Fecha: {{3}}
-Hora: {{4}}
-Servicio: {{5}}
-Ubicación: {{6}}
+Fecha: {{2}}
+Hora: {{3}}
+Servicio: {{4}}
 
-Si necesitas reprogramar, contáctanos.
+Para dudas o cambios escríbenos al +52 33 2166 4083 (WhatsApp de la clínica).
+Este número solo envía confirmaciones automáticas.
 */
 
 -- oxy_cita_reprogramada

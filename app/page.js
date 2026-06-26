@@ -300,7 +300,7 @@ export default function AppLayout() {
       instructionsLabel: getSessionInstructionsLabel(dbCompanyConfig, locale),
       address: dbCompanyConfig.address || (locale === 'en' ? '123 Medical Center Dr, Houston TX' : 'Av. Patria 123, Guadalajara'),
       mapsUrl: dbCompanyConfig.maps_url || '',
-      clinicPhone: dbCompanyConfig.phone || (locale === 'en' ? '2815550100' : '3312345678'),
+      clinicPhone: dbCompanyConfig.phone || (locale === 'en' ? '2815550100' : '3321664083'),
       ticketMessage: dbCompanyConfig.ticket_message,
       emailTemplates: pickEmailTemplates(),
       durationMins: previewTimes.duration,
@@ -3443,7 +3443,7 @@ export default function AppLayout() {
                   <label className="flex items-center gap-2 bg-violet-50 p-3 rounded-lg border border-violet-200 cursor-pointer">
                     <input type="checkbox" checked={dbCompanyConfig.notify_channel_sms !== false} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_channel_sms: e.target.checked})} className="w-4 h-4" />
                     <span className="text-[10px] font-black text-violet-900 uppercase">
-                      {activeClinic === 'Shenandoah' ? 'Canal: SMS (Twilio — USA)' : 'Canal: WhatsApp (México)'}
+                      {activeClinic === 'Shenandoah' ? 'Canal: SMS (Twilio — USA)' : 'Canal: SMS (México)'}
                     </span>
                   </label>
                 </div>
@@ -3454,9 +3454,9 @@ export default function AppLayout() {
                 <div className="mt-6 mb-4 p-4 rounded-xl bg-indigo-50 border-2 border-indigo-200">
                   <h4 className="text-xs font-black uppercase text-indigo-900 mb-2">Alertas al equipo — cita nueva</h4>
                   <p className="text-[10px] font-bold text-indigo-800/90 mb-3 leading-relaxed">
-                    Cuando un cliente o promotor agenda (web o staff), avisa por {activeClinic === 'Shenandoah' ? 'SMS' : 'WhatsApp'} y/o correo.
+                    Cuando un cliente o promotor agenda (web o staff), avisa por SMS y/o correo.
                     Puedes poner números extra abajo <strong>o</strong> agregar celular y correo en cada empleado (Admin → Personal autorizado).
-                    Requiere {activeClinic === 'Shenandoah' ? 'Twilio (SMS)' : 'WhatsApp Business (Meta)'} y Resend (correo) en Vercel.
+                    Requiere {activeClinic === 'Shenandoah' ? 'Twilio (SMS)' : 'LabsMobile (SMS México)'} y Resend (correo) en Vercel.
                   </p>
                   <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-indigo-200 shadow-sm cursor-pointer mb-3">
                     <input
@@ -3470,7 +3470,7 @@ export default function AppLayout() {
                   <div className="space-y-3">
                     <div>
                       <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">
-                        Teléfonos del equipo ({activeClinic === 'Shenandoah' ? 'SMS' : 'WhatsApp'})
+                        Teléfonos del equipo (SMS)
                       </label>
                       <textarea
                         rows={2}
@@ -3505,10 +3505,10 @@ export default function AppLayout() {
                   <span className="block text-xs font-bold text-emerald-700 mt-1">Primera cita · Programación · Reprogramación · Cancelación · Datos relevantes</span>
                 </button>
                 <details className="mb-6 text-[10px] font-bold text-slate-500">
-                  <summary className="cursor-pointer uppercase text-slate-400 font-black">Configuración técnica (Vercel / Resend / Twilio / WhatsApp)</summary>
+                  <summary className="cursor-pointer uppercase text-slate-400 font-black">Configuración técnica (Vercel / Resend / Twilio / SMS MX)</summary>
                   <p className="mt-2 leading-relaxed pl-2 border-l-2 border-slate-200">
                     Un solo deploy: oxy-agenda.vercel.app. Diagnóstico: /api/health/notify
-                    Correo: RESEND_* · USA SMS: TWILIO_* + TWILIO_MESSAGING_SERVICE_SID (A2P) · MX: WHATSAPP_*
+                    Correo: RESEND_* · USA SMS: TWILIO_* + TWILIO_MESSAGING_SERVICE_SID (A2P) · MX SMS: LABSMOBILE_*
                   </p>
                 </details>
 
