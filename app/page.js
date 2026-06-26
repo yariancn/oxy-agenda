@@ -300,7 +300,7 @@ export default function AppLayout() {
       instructionsLabel: getSessionInstructionsLabel(dbCompanyConfig, locale),
       address: dbCompanyConfig.address || (locale === 'en' ? '123 Medical Center Dr, Houston TX' : 'Av. Patria 123, Guadalajara'),
       mapsUrl: dbCompanyConfig.maps_url || '',
-      clinicPhone: dbCompanyConfig.phone || (locale === 'en' ? '2815550100' : '3321664083'),
+      clinicPhone: dbCompanyConfig.phone || (locale === 'en' ? '7135913379' : '3321664083'),
       ticketMessage: dbCompanyConfig.ticket_message,
       emailTemplates: pickEmailTemplates(),
       durationMins: previewTimes.duration,
