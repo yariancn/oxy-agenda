@@ -3448,7 +3448,7 @@ export default function AppLayout() {
                   </label>
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Horas previas (recordatorio automático — próximamente)</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Horas previas (recordatorio automático por correo — próximamente)</label>
                   <input type="number" value={dbCompanyConfig.reminder_hours} onChange={e => setDbCompanyConfig({...dbCompanyConfig, reminder_hours: Number(e.target.value)})} className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm" />
                 </div>
                 <div className="mt-6 mb-4 p-4 rounded-xl bg-indigo-50 border-2 border-indigo-200">
