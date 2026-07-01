@@ -17,6 +17,7 @@ import {
 } from '../lib/i18n';
 import BitacoraModal from '../components/BitacoraModal';
 import PatientProfileModal from '../components/PatientProfileModal';
+import PatientSessionHistory from '../components/PatientSessionHistory';
 import GFEManager from '../components/GFEManager';
 import { InstallGuideLink } from '../components/InstallGuide';
 import PatientSearchInput from '../components/PatientSearchInput';
@@ -4094,6 +4095,14 @@ export default function AppLayout() {
                   </div>
                   <p className="text-[8px] text-slate-500 font-bold uppercase">{L.p.appt.contactHint}</p>
                 </div>
+
+                <PatientSessionHistory
+                  className="mt-3"
+                  appointments={dbAppointments}
+                  patientName={selectedSlot.patient}
+                  patientId={selectedSlot.patientId || dbPatients.find((p) => normalizeStr(p.patient) === normalizeStr(selectedSlot.patient))?.id}
+                  maxHeightClass="max-h-44"
+                />
                 
                 <div className="mt-4 space-y-3">
                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl">
@@ -4882,6 +4891,7 @@ export default function AppLayout() {
                 prefers_sms: profilePatient?.prefers_sms !== false && selectedSlot.prefers_sms !== false,
               };
             })()}
+            appointments={dbAppointments}
             servicios={dbServices} 
             companyConfig={dbCompanyConfig}
             activeClinic={activeClinic}

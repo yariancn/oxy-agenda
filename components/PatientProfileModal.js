@@ -4,12 +4,14 @@ import { useStaffLocale } from './StaffLocaleContext';
 import { buildPosTicketHtml } from '../lib/posTicket';
 import { printThermalHtml } from '../lib/printReceipt';
 import { applyPurchaseSessions, reversePurchaseSessions } from '../lib/sessionWallet';
+import PatientSessionHistory from './PatientSessionHistory';
 
 export default function PatientProfileModal({
   initialData,
   onSave,
   onClose,
   servicios,
+  appointments = [],
   companyConfig = {},
   currentUserLevel,
   activeClinic = 'Guadalajara',
@@ -230,13 +232,20 @@ export default function PatientProfileModal({
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[120]">
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200 flex flex-col max-h-[92dvh] sm:max-h-[90vh]">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200 flex flex-col max-h-[92dvh] sm:max-h-[90vh]">
         <div className="bg-slate-900 px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-800 flex justify-between items-center shrink-0">
           <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-widest">{t.title}</h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-white text-2xl font-black">&times;</button>
         </div>
 
         <div className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto flex-1 min-h-0">
+          <PatientSessionHistory
+            appointments={appointments}
+            patientName={formData.patient}
+            patientId={formData.id}
+            maxHeightClass="max-h-60"
+          />
+
           <div className="space-y-4">
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.fullName}</label>
