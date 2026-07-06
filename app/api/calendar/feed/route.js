@@ -12,17 +12,16 @@ import {
 } from '../../../../lib/calendarFeedAuth.js';
 import { normalizePromoCode } from '../../../../lib/promoters.js';
 import { timezoneForClinic } from '../../../../lib/calendarLinks.js';
+import { filterRowsByClinic, isPublicClinic, normalizeClinicId } from '../../../../lib/clinicRegistry.js';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
-
-const PUBLIC_CLINICS = new Set(['Guadalajara', 'Shenandoah']);
 
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const clinic = searchParams.get('clinic') || '';
+    const clinic = normalizeClinicId(searchParams.get('clinic') || '');
     const token = String(searchParams.get('token') || '').trim();
 
-    if (!PUBLIC_CLINICS.has(clinic) || !token) {
+    if (!isPublicClinic(clinic) || !token) {
       return new NextResponse('Not found', { status: 404 });
     }
 
@@ -89,7 +88,9 @@ export async function GET(request) {
       return NextResponse.json({ error: blockedError.message }, { status: 500 });
     }
 
-    const allAppointments = appointments || [];
+    const allAppointments = filterRowsByClinic(appointments || [], clinic);
+    const scopedServices = filterRowsByClinic(services || [], clinic);
+    const scopedBlocked = filterRowsByClinic(blockedSlots || [], clinic);
     const scopedAppointments = promoterCode
       ? filterAppointmentsForPromoter(allAppointments, promoterCode)
       : allAppointments;
@@ -98,9 +99,9 @@ export async function GET(request) {
     const availabilitySlots = promoterCode
       ? buildAvailabilitySlotsForRange({
         companyConfig: config,
-        services: services || [],
+        services: scopedServices,
         appointments: allAppointments,
-        blockedSlots: blockedSlots || [],
+        blockedSlots: scopedBlocked,
         timezone,
         fromDate: from,
         toDate: to,
@@ -113,8 +114,8 @@ export async function GET(request) {
 
     const revision = computeFeedRevision({
       appointments: promoterCode ? scopedAppointments : allAppointments,
-      blockedSlots: blockedSlots || [],
-      services: services || [],
+      blockedSlots: scopedBlocked,
+      services: scopedServices,
       promoterCode,
       availabilityCount: availabilitySlots.length,
     });

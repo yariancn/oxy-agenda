@@ -66,10 +66,35 @@ export default function PublicBookingPortal({
     [formData.promoterCode, promoterList],
   );
 
-  const accentRing = branding.accent === 'emerald' ? 'ring-emerald-500' : 'ring-blue-500';
-  const accentBorder = branding.accent === 'emerald' ? 'border-emerald-500' : 'border-blue-500';
-  const accentBg = branding.accent === 'emerald' ? 'bg-emerald-600' : 'bg-blue-600';
-  const accentText = branding.accent === 'emerald' ? 'text-emerald-400' : 'text-blue-400';
+  const accentStyles = {
+    emerald: {
+      ring: 'ring-emerald-500',
+      border: 'border-emerald-500',
+      bg: 'bg-emerald-600',
+      text: 'text-emerald-400',
+      hover: 'hover:border-emerald-500',
+    },
+    teal: {
+      ring: 'ring-teal-500',
+      border: 'border-teal-500',
+      bg: 'bg-teal-600',
+      text: 'text-teal-400',
+      hover: 'hover:border-teal-500',
+    },
+    blue: {
+      ring: 'ring-blue-500',
+      border: 'border-blue-500',
+      bg: 'bg-blue-600',
+      text: 'text-blue-400',
+      hover: 'hover:border-blue-500',
+    },
+  };
+  const accent = accentStyles[branding.accent] || accentStyles.emerald;
+  const accentRing = accent.ring;
+  const accentBorder = accent.border;
+  const accentBg = accent.bg;
+  const accentText = accent.text;
+  const accentHover = accent.hover;
 
   useEffect(() => {
     const load = async () => {
@@ -219,7 +244,11 @@ export default function PublicBookingPortal({
             equipment: selectedService.name,
             clinicName,
             clinicDisplayName: dbConfig?.name || branding.title,
-            instructions: resolveSessionInstructions(formData.notes, dbConfig || {}, locale),
+            instructions: resolveSessionInstructions(formData.notes, dbConfig || {}, locale, {
+              equipment: selectedService.name,
+              notifyType,
+              services: dbServices,
+            }),
             instructionsLabel: getSessionInstructionsLabel(dbConfig || {}, locale),
             address: dbConfig?.address || '',
             mapsUrl: dbConfig?.maps_url || '',
@@ -349,7 +378,7 @@ export default function PublicBookingPortal({
                       setStep(2);
                     }}
                     className={`w-full bg-white border-2 border-slate-200 rounded-2xl p-5 flex justify-between items-center transition hover:border-2 ${
-                      branding.accent === 'emerald' ? 'hover:border-emerald-500' : 'hover:border-blue-500'
+                      branding.accent === 'blue' ? 'hover:border-blue-500' : accentHover
                     }`}
                   >
                     <span className="font-black text-slate-800 uppercase text-left">{srv.name}</span>

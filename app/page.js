@@ -7,7 +7,21 @@ import {
   getAllowedClinics,
   getStaffProfileForClinic,
   normalizeStaffSessionUser,
+  CLINIC_OXYGENDGL,
+  CLINIC_OXYGENDGL2,
+  CLINIC_SHENANDOAH,
 } from '../lib/clinicAccess';
+import {
+  currencyForClinic,
+  filterRowsByClinic,
+  getClinicDefaultName,
+  getClinicMeta,
+  getClinicShortLabel,
+  getClinicTheme,
+  isShenandoah,
+  normalizeClinicId,
+  staffDbSelectByClinic,
+} from '../lib/clinicRegistry';
 import { ensurePatient, digitsOnly } from '../lib/ensurePatient';
 import {
   buildCalendarWeek,
@@ -132,7 +146,7 @@ export default function AppLayout() {
   }, [canonicalHost]);
 
   // --- ESTADOS PRINCIPALES ---
-  const [activeClinic, setActiveClinic] = useState('Guadalajara'); 
+  const [activeClinic, setActiveClinic] = useState(CLINIC_OXYGENDGL); 
   const [activeTab, setActiveTab] = useState('Agenda');
   const [viewMode, setViewMode] = useState('Semana'); 
   const [equipmentFilter, setEquipmentFilter] = useState('Todos');
@@ -153,7 +167,7 @@ export default function AppLayout() {
   const [clinicNow, setClinicNow] = useState({ mins: 0, dateStr: '' });
 
   // Moneda Dinámica
-  const currencyStr = activeClinic === 'Shenandoah' ? 'USD' : 'MXN';
+  const currencyStr = currencyForClinic(activeClinic);
 
   // --- MODALES Y SELECCIÓN ---
   const [showBitacora, setShowBitacora] = useState(false);
@@ -216,7 +230,7 @@ export default function AppLayout() {
   const fetchGenRef = useRef(0);
 
   // --- FORMULARIOS GLOBALES ---
-  const [newSrv, setNewSrv] = useState({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });
+  const [newSrv, setNewSrv] = useState({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '' });
   const [isEditingSrv, setIsEditingSrv] = useState(false);
   const [editingSrvOriginalName, setEditingSrvOriginalName] = useState('');
   const [editingSrvOriginalSchedule, setEditingSrvOriginalSchedule] = useState({ duration: 60, buffer: 30 });
@@ -320,7 +334,11 @@ export default function AppLayout() {
     const dateStr = sampleDate.toISOString().split('T')[0];
     const sampleService = dbServices.find((s) => s.is_active)?.name
       || (locale === 'en' ? 'Hyperbaric Chamber' : 'Cámara Hiperbárica');
-    const previewInstructions = resolveSessionInstructions('', dbCompanyConfig, locale);
+    const previewInstructions = resolveSessionInstructions('', dbCompanyConfig, locale, {
+      equipment: sampleService,
+      notifyType: emailTemplateTab === 'first' ? 'first' : 'booking',
+      services: dbServices,
+    });
     const previewTimes = resolveSessionTimes({ duration: 60, buffer: 30 });
     const preview = buildNotifyContent({
       locale,
@@ -659,6 +677,7 @@ export default function AppLayout() {
 
     const fetchGen = ++fetchGenRef.current;
     const clinicDb = createStaffDb(activeClinic);
+    const clinicId = normalizeClinicId(activeClinic);
 
     const assertDbResult = (label, result) => {
       if (result?.error) {
@@ -673,16 +692,21 @@ export default function AppLayout() {
       setDbErrorMessage('');
 
       // Motor de Paginación para evadir el límite de 1000 de Supabase
-      const fetchPaginated = async (table) => {
+      const fetchPaginated = async (table, { clinicScoped = false } = {}) => {
         let allData = [];
         let from = 0;
         const step = 1000;
         while (true) {
+          let query = clinicDb.from(table).select('*');
+          if (clinicScoped) query = query.eq('clinic', clinicId);
           const result = assertDbResult(
             table,
-            await clinicDb.from(table).select('*').range(from, from + step - 1),
+            await query.range(from, from + step - 1),
           );
-          const data = result.data;
+          let data = result.data;
+          if (clinicScoped && data?.length) {
+            data = filterRowsByClinic(data, clinicId);
+          }
           if (!data || data.length === 0) break;
           allData = [...allData, ...data];
           if (data.length < step) break;
@@ -707,11 +731,11 @@ export default function AppLayout() {
 
       const [patientsData, appointmentsData, resS, resU, resB, resC, resProt, resRoles, resPromo] = await Promise.all([
         fetchPaginated('patients'),
-        fetchPaginated('appointments'),
-        clinicDb.from('services').select('*'),
+        fetchPaginated('appointments', { clinicScoped: true }),
+        staffDbSelectByClinic(clinicDb, 'services', clinicId, (q) => q),
         clinicDb.from('users_staff').select('*'),
-        clinicDb.from('blocked_slots').select('*'),
-        clinicDb.from('company_config').select('*').eq('clinic', activeClinic).maybeSingle(),
+        staffDbSelectByClinic(clinicDb, 'blocked_slots', clinicId, (q) => q),
+        clinicDb.from('company_config').select('*').eq('clinic', clinicId).maybeSingle(),
         clinicDb.from('protocols').select('*'),
         clinicDb.from('user_roles').select('*'),
         fetchPromotersWithFallback(),
@@ -809,11 +833,11 @@ export default function AppLayout() {
       } else {
         const clinicLocale = localeForClinic(activeClinic);
         const defaultCfg = { 
-          clinic: activeClinic, 
-          name: activeClinic === 'Shenandoah' ? 'REGENOXY LLC' : 'OXYGENGDL', 
+          clinic: clinicId, 
+          name: getClinicDefaultName(clinicId), 
           address: '', 
           phone: '', 
-          ticket_message: activeClinic === 'Shenandoah' ? 'Thank you for choosing us' : 'Gracias por su preferencia', 
+          ticket_message: isShenandoah(clinicId) ? 'Thank you for choosing us' : 'Gracias por su preferencia', 
           start_time: '07:00', 
           end_time: '20:00', 
           interval_mins: 30,
@@ -931,7 +955,7 @@ export default function AppLayout() {
       alert(staffAlert(locale, 'noClinicAccess'));
       return;
     }
-    setActiveClinic(clinic);
+    setActiveClinic(normalizeClinicId(clinic));
     saveStaffActiveClinic(clinic);
   };
 
@@ -945,7 +969,7 @@ export default function AppLayout() {
     setLoginPin('');
     setActiveTab('Agenda');
     setIsReportsUnlocked(false);
-    setActiveClinic('Guadalajara');
+    setActiveClinic(CLINIC_OXYGENDGL);
     setDbStatus('sin_sesion');
   };
 
@@ -1044,12 +1068,12 @@ export default function AppLayout() {
   );
   const displayedEquipments = equipmentFilter === 'Todos' ? dynamicColumns : [equipmentFilter];
 
-  const activeClinicLabel = activeClinic === 'Guadalajara' ? L.clinicGdl : L.clinicTx;
-  const activeClinicShort = activeClinic === 'Guadalajara' ? 'GDL' : 'TX';
+  const activeClinicTheme = useMemo(() => getClinicTheme(activeClinic), [activeClinic]);
+  const activeClinicShort = getClinicShortLabel(activeClinic);
   const activeClinicDisplayName = useMemo(() => {
     const configured = formatClinicField(dbCompanyConfig?.name);
     if (configured) return configured;
-    return activeClinic === 'Guadalajara' ? 'OXYGENGDL' : 'REGENOXY LLC';
+    return getClinicDefaultName(activeClinic);
   }, [dbCompanyConfig?.name, activeClinic]);
 
   const getRepeatDateStatusForSlot = useCallback((isoDate) => {
@@ -1584,7 +1608,11 @@ export default function AppLayout() {
         equipment: slot.equipment,
         clinicName: activeClinic,
         clinicDisplayName: dbCompanyConfig.name,
-        instructions: resolveSessionInstructions(slot.notes, dbCompanyConfig, locale),
+        instructions: resolveSessionInstructions(slot.notes, dbCompanyConfig, locale, {
+          equipment: slot.equipment,
+          notifyType,
+          services: dbServices,
+        }),
         instructionsLabel: getSessionInstructionsLabel(dbCompanyConfig, locale),
         address: dbCompanyConfig.address,
         mapsUrl: dbCompanyConfig.maps_url,
@@ -2336,6 +2364,7 @@ export default function AppLayout() {
         notes: selectedSlot.notes || '',
         outside_normal_hours: !!selectedSlot.outside_normal_hours,
         is_extended_block: isExtendedSession(selectedSlot),
+        clinic: normalizeClinicId(activeClinic),
         promoter_code: normalizePromoCode(selectedSlot.promoter_code) || null,
       };
 
@@ -2626,7 +2655,7 @@ export default function AppLayout() {
              </div>
              <span className="text-[8px] text-emerald-400">{L.accessLevel}: {currentUserLevel}</span>
              {allowedClinics.length > 1 && (
-               <span className="text-[8px] text-blue-300">{L.clinics}: {allowedClinics.map(c => c === 'Guadalajara' ? 'GDL' : 'TX').join(' · ')}</span>
+               <span className="text-[8px] text-blue-300">{L.clinics}: {allowedClinics.map((c) => getClinicShortLabel(c)).join(' · ')}</span>
              )}
            </div>
         )}
@@ -2634,13 +2663,20 @@ export default function AppLayout() {
         {currentUser && allowedClinics.length > 1 && (
         <div className="p-3 bg-slate-900 border-b border-slate-800">
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1.5 px-1">{L.activeLocation}</p>
-          <div className="bg-slate-950 p-1 rounded-xl flex border border-slate-800">
-            {allowedClinics.includes('Shenandoah') && (
-              <button onClick={() => switchClinic('Shenandoah')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeClinic === 'Shenandoah' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>🇺🇸 TX</button>
-            )}
-            {allowedClinics.includes('Guadalajara') && (
-              <button onClick={() => switchClinic('Guadalajara')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeClinic === 'Guadalajara' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>🇲🇽 GDL</button>
-            )}
+          <div className="bg-slate-950 p-1 rounded-xl flex border border-slate-800 gap-0.5">
+            {[CLINIC_OXYGENDGL, CLINIC_OXYGENDGL2, CLINIC_SHENANDOAH].filter((c) => allowedClinics.includes(c)).map((clinicKey) => {
+              const theme = getClinicTheme(clinicKey);
+              const meta = getClinicMeta(clinicKey);
+              return (
+                <button
+                  key={clinicKey}
+                  onClick={() => switchClinic(clinicKey)}
+                  className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${activeClinic === clinicKey ? `${theme.active} text-white shadow-md` : 'text-slate-500 hover:text-slate-300'}`}
+                >
+                  {meta.flag} {meta.shortLabel}
+                </button>
+              );
+            })}
           </div>
         </div>
         )}
@@ -2705,16 +2741,24 @@ export default function AppLayout() {
             <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" alt="Logo" className="h-8 w-8 object-contain bg-white rounded p-0.5 shrink-0" />
             {allowedClinics.length > 1 ? (
               <div className="flex bg-slate-900 p-0.5 rounded-lg border border-slate-700 shrink-0">
-                {allowedClinics.includes('Shenandoah') && (
-                  <button onClick={() => switchClinic('Shenandoah')} className={`px-2 py-1 text-[9px] font-black rounded-md ${activeClinic === 'Shenandoah' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>🇺🇸</button>
-                )}
-                {allowedClinics.includes('Guadalajara') && (
-                  <button onClick={() => switchClinic('Guadalajara')} className={`px-2 py-1 text-[9px] font-black rounded-md ${activeClinic === 'Guadalajara' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}>🇲🇽</button>
-                )}
+                {[CLINIC_OXYGENDGL, CLINIC_OXYGENDGL2, CLINIC_SHENANDOAH].filter((c) => allowedClinics.includes(c)).map((clinicKey) => {
+                  const theme = getClinicTheme(clinicKey);
+                  const meta = getClinicMeta(clinicKey);
+                  return (
+                    <button
+                      key={clinicKey}
+                      onClick={() => switchClinic(clinicKey)}
+                      className={`px-2 py-1 text-[9px] font-black rounded-md ${activeClinic === clinicKey ? `${theme.active} text-white` : 'text-slate-400'}`}
+                      title={meta.shortLabel}
+                    >
+                      {meta.flag}
+                    </button>
+                  );
+                })}
               </div>
             ) : (
               <span className="text-[9px] font-black uppercase text-slate-200 shrink-0 max-w-[38vw] truncate" title={activeClinicDisplayName}>
-                {activeClinic === 'Guadalajara' ? '🇲🇽 ' : '🇺🇸 '}{activeClinicDisplayName}
+                {activeClinicTheme.flag} {activeClinicDisplayName}
               </span>
             )}
             <span className="flex-1 truncate text-[10px] font-bold text-slate-200 min-w-0">{currentUser.name}</span>
@@ -2724,9 +2768,9 @@ export default function AppLayout() {
         )}
 
         {currentUser && (
-          <div className={`shrink-0 z-20 border-b ${activeClinic === 'Guadalajara' ? 'bg-emerald-700 border-emerald-800' : 'bg-blue-800 border-blue-900'} text-white px-3 py-2 flex items-center justify-center gap-2 shadow-sm`}>
+          <div className={`shrink-0 z-20 border-b ${activeClinicTheme.banner} text-white px-3 py-2 flex items-center justify-center gap-2 shadow-sm`}>
             <span className="text-[11px] sm:text-sm font-black uppercase tracking-wide truncate max-w-full text-center">
-              {activeClinic === 'Guadalajara' ? '🇲🇽' : '🇺🇸'} {activeClinicDisplayName}
+              {activeClinicTheme.flag} {activeClinicDisplayName}
             </span>
             {dbStatus === 'cargando' ? (
               <span className="text-[8px] font-bold uppercase opacity-80 shrink-0">…</span>
@@ -2741,10 +2785,10 @@ export default function AppLayout() {
               <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-2 lg:gap-3">
               <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-wrap">
                 <span
-                  className={`shrink-0 text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-md border max-w-[10rem] sm:max-w-xs truncate ${activeClinic === 'Guadalajara' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}
+                  className={`shrink-0 text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-md border max-w-[10rem] sm:max-w-xs truncate ${activeClinicTheme.badge}`}
                   title={activeClinicDisplayName}
                 >
-                  {activeClinic === 'Guadalajara' ? '🇲🇽 ' : '🇺🇸 '}{activeClinicDisplayName}
+                  {activeClinicTheme.flag} {activeClinicDisplayName}
                 </span>
                 <div className="flex bg-slate-100 p-0.5 lg:p-1 rounded-lg lg:rounded-xl border border-slate-200 shrink-0">
                   <button onClick={() => navigateDate(-1)} className="p-1.5 lg:p-2 hover:bg-white rounded-lg transition text-slate-600 text-sm">◀</button>
@@ -3140,8 +3184,19 @@ export default function AppLayout() {
                     <input type="checkbox" checked={newSrv.is_active} onChange={e => setNewSrv({...newSrv, is_active: e.target.checked})} className="w-4 h-4" />
                     <span className="text-xs font-black uppercase text-slate-700">Visible en calendario</span>
                   </label>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+                    <p className="text-[9px] font-black text-amber-900 uppercase">{L.p.services.firstSessionNotes}</p>
+                    <p className="text-[8px] font-bold text-amber-800/90 leading-relaxed">{L.p.services.firstSessionNotesHint}</p>
+                    <textarea
+                      rows={4}
+                      className="w-full p-3 rounded-xl border border-amber-200 font-bold text-sm outline-none text-slate-900 bg-white leading-relaxed"
+                      value={newSrv.first_session_notes || ''}
+                      onChange={(e) => setNewSrv({ ...newSrv, first_session_notes: e.target.value })}
+                      placeholder={L.p.services.firstSessionNotesPh}
+                    />
+                  </div>
                   <div className="flex gap-2 pt-1">
-                    {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setEditingSrvOriginalName(''); setEditingSrvOriginalSchedule({ duration: 60, buffer: 30 }); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
+                    {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setEditingSrvOriginalName(''); setEditingSrvOriginalSchedule({ duration: 60, buffer: 30 }); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '' });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
                     <button onClick={async () => {
                       if(!newSrv.name) return alert(L.p.services.missingName);
                       const duration = Math.max(5, Number(newSrv.duration) || 60);
@@ -3160,6 +3215,23 @@ export default function AppLayout() {
                         is_active: newSrv.is_active,
                         start_time: startTrim || null,
                         end_time: endTrim || null,
+                        clinic: normalizeClinicId(activeClinic),
+                        first_session_notes: String(newSrv.first_session_notes || '').trim() || null,
+                      };
+                      const saveServiceRow = async (payload, id) => {
+                        let row = { ...payload };
+                        for (let attempt = 0; attempt < 3; attempt += 1) {
+                          const res = id
+                            ? await activeSupabase.from('services').update(row).eq('id', id)
+                            : await activeSupabase.from('services').insert([row]);
+                          if (!res.error) return res;
+                          if (!/first_session_notes|column|schema cache/i.test(res.error.message || '')) {
+                            return res;
+                          }
+                          const { first_session_notes, ...rest } = row;
+                          row = rest;
+                        }
+                        return { error: { message: 'Ejecuta scripts/supabase-service-first-session-notes.sql en Supabase.' } };
                       };
                       try {
                         let error;
@@ -3179,15 +3251,15 @@ export default function AppLayout() {
                               await logAudit(null, oldName, 'RENOMBRAR EQUIPO', `«${oldName}» → «${newName}». Citas: ${renamed.appointments}, bloqueos: ${renamed.blockedSlots}, pacientes: ${renamed.patients}`);
                             }
                           }
-                          ({ error } = await activeSupabase.from('services').update(p).eq('id', newSrv.id));
+                          ({ error } = await saveServiceRow(p, newSrv.id));
                         } else {
-                          ({ error } = await activeSupabase.from('services').insert([p]));
+                          ({ error } = await saveServiceRow(p));
                         }
                         if (error) return alert(`${L.p.services.saveError}: ${error.message}`);
                         setIsEditingSrv(false);
                         setEditingSrvOriginalName('');
                         setEditingSrvOriginalSchedule({ duration: 60, buffer: 30 });
-                        setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });
+                        setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '' });
                         await fetchAllData();
                       } catch (e) {
                         alert(`${L.p.services.saveError}: ${e.message}`);
@@ -3204,7 +3276,7 @@ export default function AppLayout() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
                     <thead className="border-b border-slate-100 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                      <tr><th className="px-5 py-3">Equipo</th><th className="px-5 py-3">Horario</th><th className="px-5 py-3">Bloque</th><th className="px-5 py-3">Precio</th><th className="px-5 py-3">Estado</th><th className="px-5 py-3 text-right">Acciones</th></tr>
+                      <tr><th className="px-5 py-3">Equipo</th><th className="px-5 py-3">Horario</th><th className="px-5 py-3">Bloque</th><th className="px-5 py-3">Precio</th><th className="px-5 py-3">1ª sesión</th><th className="px-5 py-3">Estado</th><th className="px-5 py-3 text-right">Acciones</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {(dbServices || []).map(s => (
@@ -3223,6 +3295,15 @@ export default function AppLayout() {
                             <span className="block text-[8px] text-slate-400 uppercase">= {(Number(s.duration) || 60) + (Number(s.buffer) ?? 30)} min</span>
                           </td>
                           <td className="px-5 py-4 font-bold text-slate-600 text-sm whitespace-nowrap">${s.price} {currencyStr}</td>
+                          <td className="px-5 py-4">
+                            {String(s.first_session_notes || '').trim() ? (
+                              <span className="inline-block px-2 py-1 rounded-md text-[9px] font-black uppercase bg-amber-100 text-amber-800" title={String(s.first_session_notes).slice(0, 120)}>
+                                {L.p.services.hasFirstSessionNotes}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-bold text-slate-300 uppercase">—</span>
+                            )}
+                          </td>
                           <td className="px-5 py-4">
                             <span className={`inline-block px-2 py-1 rounded-md text-[9px] font-black uppercase ${s.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{s.is_active ? 'Activo' : 'Oculto'}</span>
                           </td>
@@ -3544,7 +3625,7 @@ export default function AppLayout() {
               <div>
                 <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Ajustes de Clínica</h2>
                 <p className="text-[10px] font-bold text-slate-500 uppercase mt-1">
-                  {activeClinic === 'Shenandoah' ? 'Houston · USA' : 'Guadalajara · MX'}
+                  {getClinicMeta(activeClinic).regionLabel}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -3642,7 +3723,8 @@ export default function AppLayout() {
                 <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 sm:p-5 mb-4">
                   <h4 className="text-xs font-black uppercase text-amber-900 mb-1">Indicaciones para tu sesión (bloque amarillo del correo)</h4>
                   <p className="text-[10px] font-bold text-amber-800/90 mb-4 leading-relaxed">
-                    Texto por defecto si la cita no trae notas del día. Si al agendar escribes instrucciones en la cita, esas tienen prioridad.
+                    Texto por defecto si la cita no trae notas del día ni indicaciones propias del equipo (Catálogo → editar equipo → «Primera sesión»).
+                    Si al agendar escribes instrucciones en la cita, esas tienen prioridad.
                     Usa {'{{instrucciones}}'} en el mensaje principal si quieres insertarlo ahí también.
                   </p>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -3927,7 +4009,7 @@ export default function AppLayout() {
                   <label className="flex items-center gap-2 bg-violet-50 p-3 rounded-lg border border-violet-200 cursor-pointer">
                     <input type="checkbox" checked={dbCompanyConfig.notify_channel_sms !== false} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_channel_sms: e.target.checked})} className="w-4 h-4" />
                     <span className="text-[10px] font-black text-violet-900 uppercase">
-                      {activeClinic === 'Shenandoah' ? 'Canal: SMS (Twilio — USA)' : 'Canal: SMS (México)'}
+                      {isShenandoah(activeClinic) ? 'Canal: SMS (Twilio — USA)' : 'Canal: SMS (México)'}
                     </span>
                   </label>
                 </div>
@@ -3940,7 +4022,7 @@ export default function AppLayout() {
                   <p className="text-[10px] font-bold text-indigo-800/90 mb-3 leading-relaxed">
                     Cuando un cliente o promotor agenda (web o staff), avisa por SMS y/o correo.
                     Puedes poner números extra abajo <strong>o</strong> agregar celular y correo en cada empleado (Admin → Personal autorizado).
-                    Requiere {activeClinic === 'Shenandoah' ? 'Twilio (SMS)' : 'LabsMobile (SMS México)'} y Resend (correo) en Vercel.
+                    Requiere {isShenandoah(activeClinic) ? 'Twilio (SMS)' : 'LabsMobile (SMS México)'} y Resend (correo) en Vercel.
                   </p>
                   <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-indigo-200 shadow-sm cursor-pointer mb-3">
                     <input
@@ -4442,7 +4524,7 @@ export default function AppLayout() {
          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[99999]">
             <div className="bg-white rounded-t-2xl sm:rounded-3xl w-full max-w-lg shadow-2xl border max-h-[92dvh] sm:max-h-[85vh] flex flex-col overflow-hidden text-slate-900">
                <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-b shrink-0 flex justify-between items-center">
-                  <h3 className="font-black text-lg uppercase text-slate-800">👁️ Auditoría</h3>
+                  <h3 className="font-black text-lg uppercase text-slate-800">{L.p.audit.modalTitle}</h3>
                   <button onClick={() => setShowAudit(false)} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
                </div>
                <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-3 min-h-0">
@@ -4450,12 +4532,12 @@ export default function AppLayout() {
                      <div key={log.id} className="text-xs p-4 bg-slate-50 border border-slate-200 rounded-xl shadow-sm">
                         <span className="font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{new Date(log.timestamp).toLocaleString()}</span>
                         <div className="mt-2 text-slate-800">
-                           <span className="font-black">{log.action}</span> operado por <span className="font-bold uppercase bg-slate-200 px-1 rounded">{log.changed_by}</span>
+                           <span className="font-black">{log.action}</span> {L.p.print.operatedBy} <span className="font-bold uppercase bg-slate-200 px-1 rounded">{log.changed_by}</span>
                         </div>
                         <p className="text-slate-500 mt-1 font-mono text-[10px]">{log.details}</p>
                      </div>
                   ))}
-                  {auditLogs.length === 0 && <p className="text-sm text-slate-400 font-bold text-center py-6">No hay registros auditables para esta cita.</p>}
+                  {auditLogs.length === 0 && <p className="text-sm text-slate-400 font-bold text-center py-6">{L.p.audit.noRecords}</p>}
                </div>
             </div>
          </div>
@@ -5283,7 +5365,8 @@ export default function AppLayout() {
                   end_time: oooData.end_time, 
                   equipment: oooData.is_global ? null : oooData.equipment, 
                   reason: oooData.reason, 
-                  is_global: oooData.is_global 
+                  is_global: oooData.is_global,
+                  clinic: normalizeClinicId(activeClinic),
                 }]);
                 setShowOOOModal(false); 
                 fetchAllData();
@@ -5488,19 +5571,23 @@ export default function AppLayout() {
 
               await activeSupabase.from('appointments').update({ check_in_status: 'Finalizado', attendant: selectedSlot.attendant, signature: sd }).eq('id', selectedSlot.id);
               
-              let auditStr = locale === 'en'
-                ? `Attendance sealed and signed by ${selectedSlot.attendant}.`
-                : `Bitácora sellada y firmada por ${selectedSlot.attendant}.`;
+              let auditStr = a('bitacoraSealedAuditDetail', selectedSlot.attendant);
               if (summaryLines?.headline) auditStr += ` ${summaryLines.headline}.`;
               if (!deducted) {
-                auditStr += ` Sin saldo pagado: adeudo +1 (total adeudo: ${nextAdeudo}).`;
+                auditStr += locale === 'en'
+                  ? ` No paid balance: debt +1 (total debt: ${nextAdeudo}).`
+                  : ` Sin saldo pagado: adeudo +1 (total adeudo: ${nextAdeudo}).`;
               } else {
-                auditStr += ` Se descontó 1 sesión de cartera (${consumed?.walletKey || eq}).`;
+                auditStr += locale === 'en'
+                  ? ` Deducted 1 session from wallet (${consumed?.walletKey || eq}).`
+                  : ` Se descontó 1 sesión de cartera (${consumed?.walletKey || eq}).`;
               }
               if (selectedSlot.protocol === 'Médico' && vt) {
-                 auditStr += ` Signos: PA ${vt.pa}, Temp ${vt.temp}, HR ${vt.hr}.`;
+                 auditStr += locale === 'en'
+                   ? ` Vitals: BP ${vt.pa}, Temp ${vt.temp}, HR ${vt.hr}.`
+                   : ` Signos: PA ${vt.pa}, Temp ${vt.temp}, HR ${vt.hr}.`;
               }
-              await logAudit(selectedSlot.id, selectedSlot.patient, 'FIRMA MÉDICA', auditStr);
+              await logAudit(selectedSlot.id, selectedSlot.patient, a('bitacoraSealedAuditAction'), auditStr);
 
               setShowBitacora(false); setSelectedSlot(null); fetchAllData();
             }} 

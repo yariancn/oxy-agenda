@@ -16,7 +16,7 @@ export default function PatientProfileModal({
   appointments = [],
   companyConfig = {},
   currentUserLevel,
-  activeClinic = 'Guadalajara',
+  activeClinic = 'Oxygengdl',
   onAllocateTicketNumber,
   onLogSale,
   onCancelSale,

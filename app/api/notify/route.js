@@ -13,7 +13,7 @@ export async function POST(request) {
       date,
       time,
       equipment,
-      clinicName = 'Guadalajara',
+      clinicName = 'Oxygengdl',
       clinicDisplayName,
       instructions = '',
       address = '',

@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
 import { submitPublicBooking } from '../../../../lib/publicBooking.js';
 import { normalizePromoCode } from '../../../../lib/promoters.js';
-
-const PUBLIC_CLINICS = new Set(['Guadalajara', 'Shenandoah']);
+import { filterRowsByClinic, isPublicClinic, normalizeClinicId } from '../../../../lib/clinicRegistry.js';
 
 function sanitizeCompanyConfig(row) {
   if (!row) return null;
@@ -18,8 +17,8 @@ function sanitizeCompanyConfig(row) {
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const clinicName = searchParams.get('clinic') || 'Guadalajara';
-    if (!PUBLIC_CLINICS.has(clinicName)) {
+    const clinicName = normalizeClinicId(searchParams.get('clinic') || 'Oxygengdl');
+    if (!isPublicClinic(clinicName)) {
       return NextResponse.json({ error: 'Invalid clinic' }, { status: 400 });
     }
 
@@ -28,7 +27,7 @@ export async function GET(request) {
       supabase.from('services').select('*').eq('is_active', true),
       supabase
         .from('appointments')
-        .select('equipment, full_date, time, duration, buffer, check_in_status')
+        .select('equipment, full_date, time, duration, buffer, check_in_status, clinic')
         .neq('check_in_status', 'Cancelado'),
       supabase.from('blocked_slots').select('*'),
       supabase.from('company_config').select('*').eq('clinic', clinicName).maybeSingle(),
@@ -44,9 +43,9 @@ export async function GET(request) {
     }
 
     return NextResponse.json({
-      services: resSrv.data || [],
-      appointments: resApp.data || [],
-      blockedSlots: resBlock.data || [],
+      services: filterRowsByClinic(resSrv.data || [], clinicName),
+      appointments: filterRowsByClinic(resApp.data || [], clinicName),
+      blockedSlots: filterRowsByClinic(resBlock.data || [], clinicName),
       companyConfig: sanitizeCompanyConfig(resConf.data) || {
         start_time: '08:00',
         end_time: '20:00',
@@ -64,7 +63,7 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const {
-      clinicName = 'Guadalajara',
+      clinicName: rawClinic = 'Oxygengdl',
       portalTag,
       locale = 'es',
       formData,
@@ -73,7 +72,8 @@ export async function POST(request) {
       selectedTime,
     } = body;
 
-    if (!PUBLIC_CLINICS.has(clinicName)) {
+    const clinicName = normalizeClinicId(rawClinic);
+    if (!isPublicClinic(clinicName)) {
       return NextResponse.json({ error: 'Invalid clinic' }, { status: 400 });
     }
     if (!selectedService || !selectedDate || !selectedTime || !formData?.name || !formData?.phone) {

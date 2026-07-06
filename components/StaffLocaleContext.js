@@ -8,6 +8,7 @@ import {
   staffStrings,
   translateCheckInStatus,
 } from '../lib/i18n';
+import { CLINIC_OXYGENDGL } from '../lib/clinicRegistry';
 
 const StaffLocaleContext = createContext(null);
 
@@ -34,7 +35,7 @@ export function useStaffLocale() {
   if (!ctx) {
     return {
       locale: 'es',
-      clinic: 'Guadalajara',
+      clinic: CLINIC_OXYGENDGL,
       L: staffStrings('es'),
       a: (key, ...args) => staffAlert('es', key, ...args),
       sessionPresets: getSessionPresetLabels('es'),
