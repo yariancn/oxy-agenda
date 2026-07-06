@@ -40,6 +40,11 @@ import { insertStaffAppointment, updateStaffAppointment } from '../lib/staffAppo
 import { sortOccurrenceDates } from '../lib/appointmentRecurrence';
 import { getRepeatDateAvailability } from '../lib/repeatDateAvailability';
 import { resolveStaffActiveClinic, saveStaffActiveClinic } from '../lib/staffClinicPrefs';
+import {
+  buildCalendarEquipmentColumns,
+  countAppointmentsForEquipment,
+  renameEquipmentAcrossClinic,
+} from '../lib/serviceEquipmentSync';
 import { saveCompanyConfigRow } from '../lib/companyConfigSave';
 import { formatClinicField, formatClinicPhone } from '../lib/clinicText';
 import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
@@ -195,6 +200,7 @@ export default function AppLayout() {
   // --- FORMULARIOS GLOBALES ---
   const [newSrv, setNewSrv] = useState({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });
   const [isEditingSrv, setIsEditingSrv] = useState(false);
+  const [editingSrvOriginalName, setEditingSrvOriginalName] = useState('');
   
   const [newProtocol, setNewProtocol] = useState({ id: null, name: '', is_active: true });
   const [isEditingProtocol, setIsEditingProtocol] = useState(false);
@@ -975,7 +981,11 @@ export default function AppLayout() {
   };
 
   const activeServices = dbServices.filter(s => s.is_active);
-  const dynamicColumns = activeServices.map(s => s.name);
+  const { columns: calendarEquipmentColumns, orphans: orphanEquipmentSet } = useMemo(
+    () => buildCalendarEquipmentColumns(activeServices.map((s) => s.name), dbAppointments),
+    [activeServices, dbAppointments],
+  );
+  const dynamicColumns = calendarEquipmentColumns;
   const displayedEquipments = equipmentFilter === 'Todos' ? dynamicColumns : [equipmentFilter];
 
   const activeClinicLabel = activeClinic === 'Guadalajara' ? L.clinicGdl : L.clinicTx;
@@ -983,8 +993,8 @@ export default function AppLayout() {
   const activeClinicDisplayName = useMemo(() => {
     const configured = formatClinicField(dbCompanyConfig?.name);
     if (configured) return configured;
-    return activeClinicLabel;
-  }, [dbCompanyConfig?.name, activeClinicLabel]);
+    return activeClinic === 'Guadalajara' ? 'OXYGENGDL' : 'REGENOXY LLC';
+  }, [dbCompanyConfig?.name, activeClinic]);
 
   const getRepeatDateStatusForSlot = useCallback((isoDate) => {
     const service = dbServices.find((s) => s.name === selectedSlot?.equipment);
@@ -2604,6 +2614,17 @@ export default function AppLayout() {
             <button onClick={handleLogout} className="shrink-0 text-[9px] font-black text-red-400 uppercase px-1">{L.logout}</button>
           </div>
         )}
+
+        {currentUser && (
+          <div className={`shrink-0 z-20 border-b ${activeClinic === 'Guadalajara' ? 'bg-emerald-700 border-emerald-800' : 'bg-blue-800 border-blue-900'} text-white px-3 py-2 flex items-center justify-center gap-2 shadow-sm`}>
+            <span className="text-[11px] sm:text-sm font-black uppercase tracking-wide truncate max-w-full text-center">
+              {activeClinic === 'Guadalajara' ? '🇲🇽' : '🇺🇸'} {activeClinicDisplayName}
+            </span>
+            {dbStatus === 'cargando' ? (
+              <span className="text-[8px] font-bold uppercase opacity-80 shrink-0">…</span>
+            ) : null}
+          </div>
+        )}
         
         {/* VISTA AGENDA */}
         {activeTab === 'Agenda' && (
@@ -2744,11 +2765,12 @@ export default function AppLayout() {
                   {viewMode === 'Día' ? (
                     <div className="flex min-w-full">
                       {displayedEquipments.map((eqName) => {
-                        const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
+                        const isOrphan = orphanEquipmentSet.has(eqName);
+                        const srvColor = isOrphan ? 'slate' : (dbServices.find(s => s.name === eqName)?.color || 'blue');
                         return (
-                        <div key={eqName} className={`flex-1 border-r border-slate-300 ${getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth * 2}px` }}>
-                          <div className={`h-12 border-b border-slate-200 flex flex-col items-center justify-center sticky top-0 z-40 ${getEquipmentHeaderColor(srvColor)}`}>
-                            <span className="text-[10px] font-black uppercase leading-none">{eqName}</span>
+                        <div key={eqName} className={`flex-1 border-r border-slate-300 ${isOrphan ? 'bg-slate-200/90' : getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth * 2}px` }}>
+                          <div className={`h-12 border-b border-slate-200 flex flex-col items-center justify-center sticky top-0 z-40 ${isOrphan ? 'bg-slate-600 text-white' : getEquipmentHeaderColor(srvColor)}`}>
+                            <span className="text-[10px] font-black uppercase leading-none">{eqName}{isOrphan ? ' *' : ''}</span>
                             <span className="text-[11px] font-bold opacity-80">{currentDayInfo.date}</span>
                           </div>
                           <div className="relative w-full pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
@@ -2807,16 +2829,17 @@ export default function AppLayout() {
                             </div>
                             <div className="flex border-t border-slate-200 h-7">
                               {displayedEquipments.map((eqName) => {
-                                const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
+                                const isOrphan = orphanEquipmentSet.has(eqName);
+                                const srvColor = isOrphan ? 'slate' : (dbServices.find(s => s.name === eqName)?.color || 'blue');
                                 return (
                                   <div
                                     key={`${dayInfo.fullDate}-hdr-${eqName}`}
-                                    className={`flex-1 flex items-center justify-center border-r border-slate-300/80 last:border-r-0 ${getEquipmentHeaderColor(srvColor)}`}
+                                    className={`flex-1 flex items-center justify-center border-r border-slate-300/80 last:border-r-0 ${isOrphan ? 'bg-slate-600 text-white' : getEquipmentHeaderColor(srvColor)}`}
                                     style={{ minWidth: `${currentColWidth}px` }}
-                                    title={eqName}
+                                    title={isOrphan ? `${eqName} (citas con nombre anterior)` : eqName}
                                   >
                                     <span className="text-[7px] sm:text-[8px] font-black uppercase truncate px-0.5 text-center w-full leading-none">
-                                      {currentColWidth >= 104 ? eqName : getEquipmentShortLabel(eqName)}
+                                      {currentColWidth >= 104 ? `${eqName}${isOrphan ? '*' : ''}` : getEquipmentShortLabel(eqName)}
                                     </span>
                                   </div>
                                 );
@@ -2825,9 +2848,10 @@ export default function AppLayout() {
                           </div>
                           <div className="flex w-full relative pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
                             {displayedEquipments.map(eqName => {
-                              const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
+                              const isOrphan = orphanEquipmentSet.has(eqName);
+                              const srvColor = isOrphan ? 'slate' : (dbServices.find(s => s.name === eqName)?.color || 'blue');
                               return (
-                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`flex-1 relative border-r border-slate-300 ${getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth}px` }}>
+                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`flex-1 relative border-r border-slate-300 ${isOrphan ? 'bg-slate-200/90' : getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth}px` }}>
                                 
                                 <div className="absolute inset-0 z-0">{renderBackgroundSlots(eqName, dayInfo.name, dayInfo.fullDate)}</div>
                                 
@@ -3012,7 +3036,7 @@ export default function AppLayout() {
                     <span className="text-xs font-black uppercase text-slate-700">Visible en calendario</span>
                   </label>
                   <div className="flex gap-2 pt-1">
-                    {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
+                    {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setEditingSrvOriginalName(''); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
                     <button onClick={async () => {
                       if(!newSrv.name) return alert(L.p.services.missingName);
                       const duration = Math.max(5, Number(newSrv.duration) || 60);
@@ -3034,13 +3058,26 @@ export default function AppLayout() {
                       };
                       try {
                         let error;
-                        if(isEditingSrv && newSrv.id) {
+                        if (isEditingSrv && newSrv.id) {
+                          const oldName = editingSrvOriginalName || newSrv.name;
+                          const newName = p.name;
+                          if (oldName !== newName) {
+                            const apptCount = await countAppointmentsForEquipment(activeSupabase, oldName);
+                            if (apptCount > 0 && !window.confirm(a('renameEquipmentConfirm', oldName, newName, apptCount))) {
+                              return;
+                            }
+                            if (apptCount > 0) {
+                              const renamed = await renameEquipmentAcrossClinic(activeSupabase, oldName, newName);
+                              await logAudit(null, oldName, 'RENOMBRAR EQUIPO', `«${oldName}» → «${newName}». Citas: ${renamed.appointments}, bloqueos: ${renamed.blockedSlots}, pacientes: ${renamed.patients}`);
+                            }
+                          }
                           ({ error } = await activeSupabase.from('services').update(p).eq('id', newSrv.id));
                         } else {
                           ({ error } = await activeSupabase.from('services').insert([p]));
                         }
                         if (error) return alert(`${L.p.services.saveError}: ${error.message}`);
                         setIsEditingSrv(false);
+                        setEditingSrvOriginalName('');
                         setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });
                         await fetchAllData();
                       } catch (e) {
@@ -3090,13 +3127,21 @@ export default function AppLayout() {
                                   start_time: normalizeTimeInput(s.start_time),
                                   end_time: normalizeTimeInput(s.end_time),
                                 });
+                                setEditingSrvOriginalName(s.name);
                                 setIsEditingSrv(true);
                               }} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-blue-100 border border-blue-100">Editar</button>
-                              <button onClick={async () => { 
-                                if(window.confirm(a('deleteEquipment'))) { 
-                                  await activeSupabase.from('services').delete().eq('id', s.id); 
-                                  fetchAllData(); 
-                                } 
+                              <button onClick={async () => {
+                                try {
+                                  const apptCount = await countAppointmentsForEquipment(activeSupabase, s.name);
+                                  if (apptCount > 0) {
+                                    return alert(a('deleteEquipmentHasAppts', apptCount));
+                                  }
+                                  if (!window.confirm(a('deleteEquipment'))) return;
+                                  await activeSupabase.from('services').delete().eq('id', s.id);
+                                  fetchAllData();
+                                } catch (e) {
+                                  alert(a('genericError', e?.message || String(e)));
+                                }
                               }} className="bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-100 border border-red-100">Borrar</button>
                             </div>
                           </td>
