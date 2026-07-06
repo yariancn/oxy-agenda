@@ -19,6 +19,7 @@ import BitacoraModal from '../components/BitacoraModal';
 import PatientProfileModal from '../components/PatientProfileModal';
 import PatientSessionHistory from '../components/PatientSessionHistory';
 import AppointmentSavingOverlay from '../components/AppointmentSavingOverlay';
+import RepeatDatesCalendar from '../components/RepeatDatesCalendar';
 import GFEManager from '../components/GFEManager';
 import { InstallGuideLink } from '../components/InstallGuide';
 import PatientSearchInput from '../components/PatientSearchInput';
@@ -35,7 +36,7 @@ import {
   WEEKDAY_KEYS,
 } from '../lib/clinicWeeklySchedule';
 import { insertStaffAppointment, updateStaffAppointment } from '../lib/staffAppointmentSave';
-import { buildRecurrenceDates } from '../lib/appointmentRecurrence';
+import { sortOccurrenceDates } from '../lib/appointmentRecurrence';
 import { saveCompanyConfigRow } from '../lib/companyConfigSave';
 import { formatClinicField, formatClinicPhone } from '../lib/clinicText';
 import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
@@ -136,7 +137,7 @@ export default function AppLayout() {
   const [showNewAppointment, setShowNewAppointment] = useState(false);
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
   const [appointmentSaveFeedback, setAppointmentSaveFeedback] = useState(null);
-  const [repeatBooking, setRepeatBooking] = useState({ enabled: false, frequency: 'weekly', count: 4 });
+  const [repeatBooking, setRepeatBooking] = useState({ enabled: false, dates: [] });
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelDeductSession, setCancelDeductSession] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -1257,10 +1258,20 @@ export default function AppLayout() {
   };
 
   const openNewAppointment = (draft = {}) => {
-    setRepeatBooking({ enabled: false, frequency: 'weekly', count: 4 });
+    setRepeatBooking({ enabled: false, dates: [] });
     setSelectedSlot({ ...createEmptyAppointmentDraft(), ...draft });
     setShowNewAppointment(true);
   };
+
+  useEffect(() => {
+    if (!showNewAppointment || !repeatBooking.enabled) return;
+    const d = selectedSlot?.fullDate || selectedSlot?.full_date;
+    if (!d) return;
+    setRepeatBooking((prev) => {
+      if (!prev.enabled || prev.dates.includes(d)) return prev;
+      return { ...prev, dates: sortOccurrenceDates([...prev.dates, d]) };
+    });
+  }, [showNewAppointment, repeatBooking.enabled, selectedSlot?.fullDate, selectedSlot?.full_date]);
 
   const selectedPromoterContext = useMemo(() => {
     if (!selectedSlot) return null;
@@ -2047,15 +2058,11 @@ export default function AppLayout() {
       const sessionTimes = resolveSessionTimes(selectedSlot);
       const useRecurrence = repeatBooking.enabled && !selectedSlot.id;
       const occurrenceDates = useRecurrence
-        ? buildRecurrenceDates({
-          startDate: apptDate,
-          frequency: repeatBooking.frequency,
-          count: repeatBooking.count,
-        })
+        ? sortOccurrenceDates(repeatBooking.dates)
         : [apptDate];
 
       if (useRecurrence && occurrenceDates.length === 0) {
-        return alert(staffAlert(locale, 'missingData'));
+        return alert(L.p.appt.repeatNeedDates);
       }
 
       if (!useRecurrence && checkOverlap(
@@ -4802,40 +4809,33 @@ export default function AppLayout() {
                     <input
                       type="checkbox"
                       checked={repeatBooking.enabled}
-                      onChange={(e) => setRepeatBooking((prev) => ({ ...prev, enabled: e.target.checked }))}
+                      onChange={(e) => {
+                        const enabled = e.target.checked;
+                        const baseDate = selectedSlot?.fullDate || selectedSlot?.full_date || currentFullDate;
+                        setRepeatBooking({
+                          enabled,
+                          dates: enabled && baseDate ? [baseDate] : [],
+                        });
+                      }}
                       className="w-4 h-4 shrink-0"
                     />
                     <span className="text-[10px] font-black uppercase text-emerald-900">{L.p.appt.repeatEnable}</span>
                   </label>
                   {repeatBooking.enabled ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-emerald-200">
-                      <div>
-                        <label className="text-[9px] font-black uppercase text-emerald-800 block mb-1">{L.p.appt.repeatTitle}</label>
-                        <select
-                          value={repeatBooking.frequency}
-                          onChange={(e) => setRepeatBooking((prev) => ({ ...prev, frequency: e.target.value }))}
-                          className="w-full p-2 border border-emerald-200 rounded-lg text-xs font-bold bg-white text-emerald-900"
-                        >
-                          <option value="daily">{L.p.appt.repeatDaily}</option>
-                          <option value="weekly">{L.p.appt.repeatWeekly}</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[9px] font-black uppercase text-emerald-800 block mb-1">{L.p.appt.repeatCount}</label>
-                        <input
-                          type="number"
-                          min={2}
-                          max={52}
-                          value={repeatBooking.count}
-                          onChange={(e) => setRepeatBooking((prev) => ({
-                            ...prev,
-                            count: Math.min(52, Math.max(2, parseInt(e.target.value, 10) || 2)),
-                          }))}
-                          className="w-full p-2 border border-emerald-200 rounded-lg text-xs font-bold bg-white text-emerald-900"
-                        />
-                        <p className="text-[8px] font-bold text-emerald-700/80 mt-1 uppercase">{L.p.appt.repeatCountHint}</p>
-                      </div>
-                    </div>
+                    <RepeatDatesCalendar
+                      selectedDates={repeatBooking.dates}
+                      onChange={(dates) => setRepeatBooking((prev) => ({ ...prev, dates }))}
+                      anchorDate={selectedSlot?.fullDate || selectedSlot?.full_date || currentFullDate}
+                      primaryDate={selectedSlot?.fullDate || selectedSlot?.full_date || currentFullDate}
+                      locale={locale}
+                      labels={{
+                        calendarHint: L.p.appt.repeatCalendarHint,
+                        selectedCount: L.p.appt.repeatSelectedCount,
+                        clearSelection: L.p.appt.repeatClear,
+                        prevMonth: L.p.appt.repeatPrevMonth,
+                        nextMonth: L.p.appt.repeatNextMonth,
+                      }}
+                    />
                   ) : null}
                 </div>
               ) : null}
