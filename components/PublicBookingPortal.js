@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { buildDaySlots, countAvailableSlots } from '../lib/publicBookingSlots';
 import { isClinicOpenOnDate } from '../lib/clinicWeeklySchedule';
 import { PUBLIC_SESSION } from '../lib/sessionPresets';
 import { PUBLIC_BOOKING_COPY, PUBLIC_SLOT_STATUS } from '../lib/i18n';
 import {
   getPromoFromUrl,
+  getServiceFromUrl,
   normalizePromoCode,
   resolvePromoter,
 } from '../lib/promoters';
@@ -58,6 +59,7 @@ export default function PublicBookingPortal({
   const [dbConfig, setDbConfig] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const serviceFromLinkApplied = useRef(false);
 
   const activePromoter = useMemo(
     () => resolvePromoter(formData.promoterCode, promoterList),
@@ -104,6 +106,20 @@ export default function PublicBookingPortal({
     };
     load();
   }, [clinicName]);
+
+  useEffect(() => {
+    if (serviceFromLinkApplied.current || !dbServices.length || isLoading) return;
+    const serviceName = getServiceFromUrl();
+    if (!serviceName) return;
+    const match = dbServices.find(
+      (s) => String(s.name || '').toLowerCase() === serviceName.toLowerCase(),
+    );
+    if (match) {
+      serviceFromLinkApplied.current = true;
+      setSelectedService(match);
+      setStep(2);
+    }
+  }, [dbServices, isLoading]);
 
   const dateOptions = useMemo(() => {
     const dates = [];
