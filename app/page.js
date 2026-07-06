@@ -18,6 +18,7 @@ import {
 import BitacoraModal from '../components/BitacoraModal';
 import PatientProfileModal from '../components/PatientProfileModal';
 import PatientSessionHistory from '../components/PatientSessionHistory';
+import AppointmentSavingOverlay from '../components/AppointmentSavingOverlay';
 import GFEManager from '../components/GFEManager';
 import { InstallGuideLink } from '../components/InstallGuide';
 import PatientSearchInput from '../components/PatientSearchInput';
@@ -34,6 +35,7 @@ import {
   WEEKDAY_KEYS,
 } from '../lib/clinicWeeklySchedule';
 import { insertStaffAppointment, updateStaffAppointment } from '../lib/staffAppointmentSave';
+import { buildRecurrenceDates } from '../lib/appointmentRecurrence';
 import { saveCompanyConfigRow } from '../lib/companyConfigSave';
 import { formatClinicField, formatClinicPhone } from '../lib/clinicText';
 import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
@@ -132,6 +134,9 @@ export default function AppLayout() {
   const [showBitacora, setShowBitacora] = useState(false);
   const [showPatientProfile, setShowPatientProfile] = useState(false);
   const [showNewAppointment, setShowNewAppointment] = useState(false);
+  const [isSavingAppointment, setIsSavingAppointment] = useState(false);
+  const [appointmentSaveFeedback, setAppointmentSaveFeedback] = useState(null);
+  const [repeatBooking, setRepeatBooking] = useState({ enabled: false, frequency: 'weekly', count: 4 });
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelDeductSession, setCancelDeductSession] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -1252,6 +1257,7 @@ export default function AppLayout() {
   };
 
   const openNewAppointment = (draft = {}) => {
+    setRepeatBooking({ enabled: false, frequency: 'weekly', count: 4 });
     setSelectedSlot({ ...createEmptyAppointmentDraft(), ...draft });
     setShowNewAppointment(true);
   };
@@ -2011,6 +2017,248 @@ export default function AppLayout() {
   };
 
   const isNewPatientInline = selectedSlot?.patient && selectedSlot.patient.length > 0 && !dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
+
+  const closeAppointmentSaveFeedback = () => {
+    setAppointmentSaveFeedback((current) => {
+      if (current?.closeForm) {
+        setShowNewAppointment(false);
+        setSelectedSlot(null);
+        fetchAllData();
+      }
+      return null;
+    });
+  };
+
+  const handleSaveNewAppointment = async () => {
+    if (isSavingAppointment) return;
+    try {
+      if (!selectedSlot?.patient || !selectedSlot?.equipment || !selectedSlot?.time) {
+        return alert(staffAlert(locale, 'missingData'));
+      }
+
+      const apptDate = selectedSlot.fullDate || selectedSlot.full_date || currentFullDate;
+      if (isPastTime(apptDate, selectedSlot.time) && selectedSlot.status !== 'booked') {
+        return alert(staffAlert(locale, 'pastSchedule'));
+      }
+
+      const existingP = dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
+      if (existingP?.is_blocked) return alert(staffAlert(locale, 'patientBlockedShort'));
+
+      const sessionTimes = resolveSessionTimes(selectedSlot);
+      const useRecurrence = repeatBooking.enabled && !selectedSlot.id;
+      const occurrenceDates = useRecurrence
+        ? buildRecurrenceDates({
+          startDate: apptDate,
+          frequency: repeatBooking.frequency,
+          count: repeatBooking.count,
+        })
+        : [apptDate];
+
+      if (useRecurrence && occurrenceDates.length === 0) {
+        return alert(staffAlert(locale, 'missingData'));
+      }
+
+      if (!useRecurrence && checkOverlap(
+        selectedSlot.equipment,
+        apptDate,
+        selectedSlot.time,
+        sessionTimes.duration,
+        sessionTimes.buffer,
+        selectedSlot.id,
+      )) {
+        return alert(staffAlert(locale, 'overlap'));
+      }
+
+      setIsSavingAppointment(true);
+      setAppointmentSaveFeedback({
+        phase: 'creating',
+        title: L.p.appt.creatingTitle,
+        detail: L.p.appt.creatingHint,
+      });
+
+      let canonicalPatient = selectedSlot.patient.trim();
+      const resolvedContact = resolveSlotContact(selectedSlot);
+      let canonicalPhone = resolvedContact.phone;
+      let canonicalEmail = resolvedContact.email;
+      let isNewForAppointment = !!(selectedSlot.is_new_patient || isNewPatientInline);
+
+      const phoneDigits = digitsOnly(canonicalPhone).slice(-10);
+      if (phoneDigits.length === 10) {
+        const ensured = await ensurePatient(activeSupabase, {
+          name: canonicalPatient,
+          phone: canonicalPhone,
+          email: canonicalEmail,
+          protocol: selectedSlot.protocol || 'Wellness',
+          notes: selectedSlot.patientNotes || '',
+          prefers_email: selectedSlot.prefers_email !== false,
+          prefers_sms: selectedSlot.prefers_sms !== false,
+        });
+        if (ensured.error) {
+          setAppointmentSaveFeedback({
+            phase: 'error',
+            title: locale === 'en' ? 'Could not save' : 'No se pudo guardar',
+            detail: staffAlert(locale, 'patientFileError', ensured.error.message),
+            closeForm: false,
+          });
+          return;
+        }
+        canonicalPatient = ensured.displayName;
+        canonicalPhone = ensured.phone;
+        canonicalEmail = ensured.email;
+        if (ensured.isNew) isNewForAppointment = true;
+      } else if (isNewPatientInline && !selectedSlot.id) {
+        setAppointmentSaveFeedback({
+          phase: 'error',
+          title: locale === 'en' ? 'Phone required' : 'Teléfono requerido',
+          detail: staffAlert(locale, 'phoneRequired'),
+          closeForm: false,
+        });
+        return;
+      } else if (!isNewPatientInline) {
+        const contactResult = await persistPatientContactFromSlot(selectedSlot);
+        if (contactResult.error) {
+          setAppointmentSaveFeedback({
+            phase: 'error',
+            title: locale === 'en' ? 'Could not save' : 'No se pudo guardar',
+            detail: staffAlert(locale, 'patientFileError', contactResult.error.message),
+            closeForm: false,
+          });
+          return;
+        }
+        if (contactResult.phone) canonicalPhone = contactResult.phone;
+        if (contactResult.email) canonicalEmail = contactResult.email;
+        if (contactResult.patient) canonicalPatient = contactResult.patient;
+      }
+
+      const basePayload = {
+        patient: canonicalPatient,
+        phone: canonicalPhone,
+        email: canonicalEmail,
+        protocol: selectedSlot.protocol || 'Wellness',
+        equipment: selectedSlot.equipment,
+        duration: sessionTimes.duration,
+        buffer: sessionTimes.buffer,
+        time: selectedSlot.time,
+        appointment_time: selectedSlot.time,
+        attendant: selectedSlot.attendant || 'Por Asignar',
+        check_in_status: selectedSlot.check_in_status || 'Agendado',
+        is_new_patient: isNewForAppointment,
+        notes: selectedSlot.notes || '',
+        outside_normal_hours: !!selectedSlot.outside_normal_hours,
+        is_extended_block: isExtendedSession(selectedSlot),
+        promoter_code: normalizePromoCode(selectedSlot.promoter_code) || null,
+      };
+
+      let createdCount = 0;
+      let skippedCount = 0;
+      let firstCreated = null;
+
+      for (const dateIso of occurrenceDates) {
+        if (checkOverlap(
+          selectedSlot.equipment,
+          dateIso,
+          selectedSlot.time,
+          sessionTimes.duration,
+          sessionTimes.buffer,
+          selectedSlot.id,
+        )) {
+          skippedCount += 1;
+          continue;
+        }
+
+        const dayName = getDayNameFromDate(locale, new Date(`${dateIso}T12:00:00`));
+        const payload = {
+          ...basePayload,
+          full_date: dateIso,
+          appointment_date: dateIso,
+          day: dayName,
+        };
+
+        const { data: na, error } = await insertStaffAppointment(activeSupabase, payload);
+        if (error) {
+          if (error.message === 'SLOT_UNAVAILABLE') {
+            skippedCount += 1;
+            continue;
+          }
+          throw error;
+        }
+
+        if (na?.[0]) {
+          createdCount += 1;
+          if (!firstCreated) firstCreated = na[0];
+          const flags = [
+            selectedSlot.outside_normal_hours ? L.p.appt.badgeOutsideHours : '',
+            isExtendedSession(selectedSlot) ? L.p.appt.badgeExtended : '',
+          ].filter(Boolean).join(' · ');
+          await logAudit(na[0].id, payload.patient, 'CREACIÓN', `${payload.time} · ${dateIso}${flags ? ` (${flags})` : ''}`);
+        }
+      }
+
+      if (createdCount === 0) {
+        setAppointmentSaveFeedback({
+          phase: 'error',
+          title: locale === 'en' ? 'No appointments created' : 'No se creó ninguna cita',
+          detail: skippedCount > 0
+            ? (locale === 'en' ? 'All selected times conflict with existing bookings.' : 'Todos los horarios chocan con citas existentes.')
+            : a('genericError', ''),
+          closeForm: false,
+        });
+        return;
+      }
+
+      let notifySummary = '';
+      if (firstCreated) {
+        const patientNotifyResult = await notifyPatientFromSlot({
+          ...basePayload,
+          id: firstCreated.id,
+          full_date: firstCreated.full_date || apptDate,
+          fullDate: firstCreated.full_date || apptDate,
+          phone: canonicalPhone,
+          email: canonicalEmail,
+          prefers_email: selectedSlot.prefers_email ?? resolvedContact.prefers_email,
+          prefers_sms: selectedSlot.prefers_sms ?? resolvedContact.prefers_sms,
+          is_new_patient: isNewForAppointment,
+        }, { reportResult: true, forceNotify: true });
+        const staffNotifyResult = await alertStaffNewBooking({
+          ...basePayload,
+          full_date: firstCreated.full_date || apptDate,
+          fullDate: firstCreated.full_date || apptDate,
+          phone: canonicalPhone,
+          email: canonicalEmail,
+        }, { source: 'staff' });
+        notifySummary = formatBookingNotifyFeedback({
+          patientResult: patientNotifyResult,
+          staffResult: staffNotifyResult,
+          locale,
+        });
+        if (notifyHadFailure(patientNotifyResult?.report)) {
+          notifySummary = a('notifyFailed', notifySummary || '');
+        } else {
+          notifySummary = a('notifySent', notifySummary || '');
+        }
+      }
+
+      const recurrenceLine = createdCount > 1
+        ? `${L.p.appt.repeatCreated(createdCount, skippedCount)}\n`
+        : (skippedCount > 0 ? `${L.p.appt.repeatCreated(createdCount, skippedCount)}\n` : '');
+
+      setAppointmentSaveFeedback({
+        phase: 'success',
+        title: locale === 'en' ? 'Appointment saved' : 'Cita guardada',
+        detail: `${recurrenceLine}${notifySummary || (locale === 'en' ? 'Done.' : 'Listo.')}`,
+        closeForm: true,
+      });
+    } catch (e) {
+      setAppointmentSaveFeedback({
+        phase: 'error',
+        title: locale === 'en' ? 'Error' : 'Error',
+        detail: a('connectionErrorMsg', e?.message || String(e)),
+        closeForm: false,
+      });
+    } finally {
+      setIsSavingAppointment(false);
+    }
+  };
 
   const selectTab = (tab) => {
     setActiveTab(tab);
@@ -4547,123 +4795,67 @@ export default function AppLayout() {
                   </select>
                 </div>
               </div>
+
+              {!selectedSlot?.id ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-3 space-y-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={repeatBooking.enabled}
+                      onChange={(e) => setRepeatBooking((prev) => ({ ...prev, enabled: e.target.checked }))}
+                      className="w-4 h-4 shrink-0"
+                    />
+                    <span className="text-[10px] font-black uppercase text-emerald-900">{L.p.appt.repeatEnable}</span>
+                  </label>
+                  {repeatBooking.enabled ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-emerald-200">
+                      <div>
+                        <label className="text-[9px] font-black uppercase text-emerald-800 block mb-1">{L.p.appt.repeatTitle}</label>
+                        <select
+                          value={repeatBooking.frequency}
+                          onChange={(e) => setRepeatBooking((prev) => ({ ...prev, frequency: e.target.value }))}
+                          className="w-full p-2 border border-emerald-200 rounded-lg text-xs font-bold bg-white text-emerald-900"
+                        >
+                          <option value="daily">{L.p.appt.repeatDaily}</option>
+                          <option value="weekly">{L.p.appt.repeatWeekly}</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-black uppercase text-emerald-800 block mb-1">{L.p.appt.repeatCount}</label>
+                        <input
+                          type="number"
+                          min={2}
+                          max={52}
+                          value={repeatBooking.count}
+                          onChange={(e) => setRepeatBooking((prev) => ({
+                            ...prev,
+                            count: Math.min(52, Math.max(2, parseInt(e.target.value, 10) || 2)),
+                          }))}
+                          className="w-full p-2 border border-emerald-200 rounded-lg text-xs font-bold bg-white text-emerald-900"
+                        />
+                        <p className="text-[8px] font-bold text-emerald-700/80 mt-1 uppercase">{L.p.appt.repeatCountHint}</p>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-t shrink-0 flex flex-col sm:flex-row gap-2 sm:gap-3 text-slate-900">
-              <button onClick={() => {setShowNewAppointment(false); setSelectedSlot(null);}} className="w-full sm:w-1/3 bg-white border border-slate-300 font-black py-3 sm:py-4 rounded-xl uppercase text-xs hover:bg-slate-50 transition">Cancelar</button>
-              <button onClick={async () => {
-                try {
-                  if(!selectedSlot?.patient || !selectedSlot?.equipment || !selectedSlot?.time) return alert(staffAlert(locale, 'missingData'));
-                  const apptDate = selectedSlot.fullDate || selectedSlot.full_date || currentFullDate;
-                  if (isPastTime(apptDate, selectedSlot.time) && selectedSlot.status !== 'booked') return alert(staffAlert(locale, 'pastSchedule'));
-                  const existingP = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
-                  if (existingP && existingP.is_blocked) return alert(staffAlert(locale, 'patientBlockedShort'));
-                  if (checkOverlap(
-                    selectedSlot.equipment,
-                    apptDate,
-                    selectedSlot.time,
-                    resolveSessionTimes(selectedSlot).duration,
-                    resolveSessionTimes(selectedSlot).buffer,
-                    selectedSlot.id
-                  )) return alert(staffAlert(locale, 'overlap'));
-
-                  let canonicalPatient = selectedSlot.patient.trim();
-                  const resolvedContact = resolveSlotContact(selectedSlot);
-                  let canonicalPhone = resolvedContact.phone;
-                  let canonicalEmail = resolvedContact.email;
-                  let isNewForAppointment = !!(selectedSlot.is_new_patient || isNewPatientInline);
-
-                  const phoneDigits = digitsOnly(canonicalPhone).slice(-10);
-                  if (phoneDigits.length === 10) {
-                    const ensured = await ensurePatient(activeSupabase, {
-                      name: canonicalPatient,
-                      phone: canonicalPhone,
-                      email: canonicalEmail,
-                      protocol: selectedSlot.protocol || 'Wellness',
-                      notes: selectedSlot.patientNotes || '',
-                      prefers_email: selectedSlot.prefers_email !== false,
-                      prefers_sms: selectedSlot.prefers_sms !== false,
-                    });
-                    if (ensured.error) return alert(staffAlert(locale, 'patientFileError', ensured.error.message));
-                    canonicalPatient = ensured.displayName;
-                    canonicalPhone = ensured.phone;
-                    canonicalEmail = ensured.email;
-                    if (ensured.isNew) isNewForAppointment = true;
-                  } else if (isNewPatientInline && !selectedSlot.id) {
-                    return alert(staffAlert(locale, 'phoneRequired'));
-                  } else if (!isNewPatientInline) {
-                    const contactResult = await persistPatientContactFromSlot(selectedSlot);
-                    if (contactResult.error) return alert(staffAlert(locale, 'patientFileError', contactResult.error.message));
-                    if (contactResult.phone) canonicalPhone = contactResult.phone;
-                    if (contactResult.email) canonicalEmail = contactResult.email;
-                    if (contactResult.patient) canonicalPatient = contactResult.patient;
-                  }
-
-                  const sessionTimes = resolveSessionTimes(selectedSlot);
-                  const payload = {
-                    patient: canonicalPatient,
-                    phone: canonicalPhone,
-                    email: canonicalEmail,
-                    protocol: selectedSlot.protocol || 'Wellness',
-                    equipment: selectedSlot.equipment,
-                    duration: sessionTimes.duration,
-                    buffer: sessionTimes.buffer,
-                    full_date: apptDate,
-                    appointment_date: apptDate,
-                    day: selectedSlot.day || currentDayInfo.name,
-                    time: selectedSlot.time,
-                    appointment_time: selectedSlot.time,
-                    attendant: selectedSlot.attendant || 'Por Asignar',
-                    check_in_status: selectedSlot.check_in_status || 'Agendado',
-                    is_new_patient: isNewForAppointment,
-                    notes: selectedSlot.notes || '',
-                    outside_normal_hours: !!selectedSlot.outside_normal_hours,
-                    is_extended_block: isExtendedSession(selectedSlot),
-                    promoter_code: normalizePromoCode(selectedSlot.promoter_code) || null,
-                  };
-                  const { data: na, error } = await insertStaffAppointment(activeSupabase, payload);
-                  if (error) {
-                    if (error.message === 'SLOT_UNAVAILABLE') return alert(a('overlapLong'));
-                    return alert(a('genericError', error.message));
-                  }
-                  if (na && na[0]) {
-                    const flags = [
-                      selectedSlot.outside_normal_hours ? L.p.appt.badgeOutsideHours : '',
-                      isExtendedSession(selectedSlot) ? L.p.appt.badgeExtended : '',
-                    ].filter(Boolean).join(' · ');
-                    await logAudit(na[0].id, payload.patient, 'CREACIÓN', `${payload.time}${flags ? ` (${flags})` : ''}`);
-                    const patientNotifyResult = await notifyPatientFromSlot({
-                      ...payload,
-                      id: na[0].id,
-                      full_date: apptDate,
-                      fullDate: apptDate,
-                      phone: canonicalPhone,
-                      email: canonicalEmail,
-                      prefers_email: selectedSlot.prefers_email ?? resolvedContact.prefers_email,
-                      prefers_sms: selectedSlot.prefers_sms ?? resolvedContact.prefers_sms,
-                      is_new_patient: isNewForAppointment,
-                    }, { reportResult: true, forceNotify: true });
-                    const staffNotifyResult = await alertStaffNewBooking({
-                      ...payload,
-                      full_date: apptDate,
-                      fullDate: apptDate,
-                      phone: canonicalPhone,
-                      email: canonicalEmail,
-                    }, { source: 'staff' });
-                    const notifySummary = formatBookingNotifyFeedback({
-                      patientResult: patientNotifyResult,
-                      staffResult: staffNotifyResult,
-                      locale,
-                    });
-                    alert(notifyHadFailure(patientNotifyResult?.report)
-                      ? a('notifyFailed', notifySummary || (locale === 'en' ? 'Appointment saved.' : 'Cita guardada.'))
-                      : a('notifySent', notifySummary || (locale === 'en' ? 'Appointment saved.' : 'Cita guardada.')));
-                  }
-                  setShowNewAppointment(false);
-                  setSelectedSlot(null);
-                  fetchAllData();
-                } catch (e) { alert(a('connectionErrorMsg', e?.message || String(e))); }
-              }} className="w-full sm:flex-1 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-emerald-700 transition">Agendar Espacio</button>
+              <button
+                onClick={() => { setShowNewAppointment(false); setSelectedSlot(null); }}
+                disabled={isSavingAppointment}
+                className="w-full sm:w-1/3 bg-white border border-slate-300 font-black py-3 sm:py-4 rounded-xl uppercase text-xs hover:bg-slate-50 transition disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveNewAppointment}
+                disabled={isSavingAppointment}
+                className="w-full sm:flex-1 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-emerald-700 transition disabled:opacity-60"
+              >
+                {isSavingAppointment ? L.p.appt.creatingTitle : L.p.appt.scheduleSlot}
+              </button>
             </div>
           </div>
         </div>
@@ -5018,6 +5210,15 @@ export default function AppLayout() {
           />
         </div>
       )}
+
+      <AppointmentSavingOverlay
+        open={Boolean(appointmentSaveFeedback)}
+        phase={appointmentSaveFeedback?.phase || 'creating'}
+        title={appointmentSaveFeedback?.title || L.p.appt.creatingTitle}
+        detail={appointmentSaveFeedback?.detail || ''}
+        closeLabel={L.modals.patient.close}
+        onClose={appointmentSaveFeedback?.phase === 'creating' ? undefined : closeAppointmentSaveFeedback}
+      />
 
       {/* Navegación inferior móvil — iconos */}
       {currentUser && (

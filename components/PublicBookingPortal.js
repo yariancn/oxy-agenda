@@ -23,6 +23,7 @@ import {
 } from '../lib/notifySettings';
 import { notifyStaffNewBooking } from '../lib/staffBookingAlert';
 import { getLegalLinks } from '../lib/legalLinks';
+import AppointmentSavingOverlay from './AppointmentSavingOverlay';
 
 export default function PublicBookingPortal({
   clinicName,
@@ -612,6 +613,13 @@ export default function PublicBookingPortal({
           </p>
         </footer>
       )}
+
+      <AppointmentSavingOverlay
+        open={isSubmitting}
+        phase="creating"
+        title={t.creatingTitle}
+        detail={t.creatingHint}
+      />
     </div>
   );
 }
