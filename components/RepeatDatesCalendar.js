@@ -35,6 +35,14 @@ function buildMonthGrid(year, month) {
   return cells;
 }
 
+function reasonLabel(reason, labels) {
+  if (reason === 'closed') return labels.dayClosed;
+  if (reason === 'occupied') return labels.dayOccupied;
+  if (reason === 'blocked') return labels.dayBlocked;
+  if (reason === 'outside_hours') return labels.dayOutsideHours;
+  return labels.dayUnavailable;
+}
+
 export default function RepeatDatesCalendar({
   selectedDates = [],
   onChange,
@@ -42,6 +50,7 @@ export default function RepeatDatesCalendar({
   locale = 'es',
   labels = {},
   primaryDate = '',
+  getDateStatus,
 }) {
   const anchor = anchorDate || selectedDates[0] || '';
   const anchorParts = anchor ? anchor.split('-').map(Number) : [];
@@ -72,6 +81,9 @@ export default function RepeatDatesCalendar({
 
   const toggleDate = (isoDate) => {
     if (!isoDate || !onChange) return;
+    const status = getDateStatus?.(isoDate);
+    const isSelected = selectedSet.has(isoDate);
+    if (!isSelected && status && !status.selectable) return;
     const next = toggleOccurrenceDate(selectedDates, isoDate, maxDates);
     onChange(sortOccurrenceDates(next));
   };
@@ -117,23 +129,45 @@ export default function RepeatDatesCalendar({
           const dayNum = Number(isoDate.split('-')[2]);
           const isSelected = selectedSet.has(isoDate);
           const isPrimary = isoDate === primaryDate;
+          const status = getDateStatus?.(isoDate) || { selectable: true, reason: null };
+          const disabled = !status.selectable && !isSelected;
+          const title = disabled
+            ? `${isoDate} — ${reasonLabel(status.reason, labels)}`
+            : isoDate;
+
+          let tone = 'bg-white text-emerald-900 border-emerald-100 hover:bg-emerald-50';
+          if (isSelected) {
+            tone = 'bg-emerald-600 text-white border-emerald-700 shadow-sm';
+          } else if (status.reason === 'closed') {
+            tone = 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed';
+          } else if (status.reason === 'occupied') {
+            tone = 'bg-red-50 text-red-400 border-red-100 cursor-not-allowed line-through';
+          } else if (status.reason === 'blocked' || status.reason === 'outside_hours') {
+            tone = 'bg-amber-50 text-amber-500 border-amber-100 cursor-not-allowed';
+          } else if (disabled) {
+            tone = 'bg-slate-50 text-slate-400 border-slate-100 cursor-not-allowed';
+          }
 
           return (
             <button
               key={isoDate}
               type="button"
               onClick={() => toggleDate(isoDate)}
-              className={`aspect-square rounded-lg text-[10px] font-black transition border ${
-                isSelected
-                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm'
-                  : 'bg-white text-emerald-900 border-emerald-100 hover:bg-emerald-50'
-              } ${isPrimary ? 'ring-2 ring-emerald-300 ring-offset-1' : ''}`}
-              title={isoDate}
+              disabled={disabled}
+              className={`aspect-square rounded-lg text-[10px] font-black transition border ${tone} ${isPrimary ? 'ring-2 ring-emerald-300 ring-offset-1' : ''}`}
+              title={title}
             >
               {dayNum}
             </button>
           );
         })}
+      </div>
+
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[7px] font-bold uppercase text-emerald-800/80">
+        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-600" /> {labels.legendSelected}</span>
+        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-slate-200 border border-slate-300" /> {labels.dayClosed}</span>
+        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-red-100 border border-red-200" /> {labels.dayOccupied}</span>
+        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-amber-100 border border-amber-200" /> {labels.dayBlocked}</span>
       </div>
 
       <div className="flex items-center justify-between gap-2 pt-1 border-t border-emerald-200">

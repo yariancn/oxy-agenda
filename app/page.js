@@ -6,6 +6,7 @@ import {
   canAccessClinic,
   getAllowedClinics,
   getStaffProfileForClinic,
+  normalizeStaffSessionUser,
 } from '../lib/clinicAccess';
 import { ensurePatient, digitsOnly } from '../lib/ensurePatient';
 import {
@@ -37,6 +38,8 @@ import {
 } from '../lib/clinicWeeklySchedule';
 import { insertStaffAppointment, updateStaffAppointment } from '../lib/staffAppointmentSave';
 import { sortOccurrenceDates } from '../lib/appointmentRecurrence';
+import { getRepeatDateAvailability } from '../lib/repeatDateAvailability';
+import { resolveStaffActiveClinic, saveStaffActiveClinic } from '../lib/staffClinicPrefs';
 import { saveCompanyConfigRow } from '../lib/companyConfigSave';
 import { formatClinicField, formatClinicPhone } from '../lib/clinicText';
 import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
@@ -816,12 +819,9 @@ export default function AppLayout() {
       .then((res) => res.json())
       .then((data) => {
         if (data?.user) {
-          setCurrentUser(data.user);
-          if (data.user.allowedClinics?.length) {
-            setActiveClinic((prev) => (
-              data.user.allowedClinics.includes(prev) ? prev : data.user.allowedClinics[0]
-            ));
-          }
+          const user = normalizeStaffSessionUser(data.user);
+          setCurrentUser(user);
+          setActiveClinic(resolveStaffActiveClinic(user));
         }
       })
       .catch(() => {});
@@ -857,8 +857,8 @@ export default function AppLayout() {
         setLoginPin('');
         return;
       }
-      setCurrentUser(result.user);
-      setActiveClinic(result.user.allowedClinics[0] || 'Guadalajara');
+      setCurrentUser(normalizeStaffSessionUser(result.user));
+      setActiveClinic(resolveStaffActiveClinic(normalizeStaffSessionUser(result.user)));
       setLoginPin('');
     } catch {
       alert(staffAlert(locale, 'loginFailed'));
@@ -874,6 +874,7 @@ export default function AppLayout() {
       return;
     }
     setActiveClinic(clinic);
+    saveStaffActiveClinic(clinic);
   };
 
   const handleLogout = async () => {
@@ -979,6 +980,28 @@ export default function AppLayout() {
 
   const activeClinicLabel = activeClinic === 'Guadalajara' ? L.clinicGdl : L.clinicTx;
   const activeClinicShort = activeClinic === 'Guadalajara' ? 'GDL' : 'TX';
+  const activeClinicDisplayName = useMemo(() => {
+    const configured = formatClinicField(dbCompanyConfig?.name);
+    if (configured) return configured;
+    return activeClinicLabel;
+  }, [dbCompanyConfig?.name, activeClinicLabel]);
+
+  const getRepeatDateStatusForSlot = useCallback((isoDate) => {
+    const service = dbServices.find((s) => s.name === selectedSlot?.equipment);
+    const sessionTimes = resolveSessionTimes(selectedSlot || {});
+    return getRepeatDateAvailability({
+      isoDate,
+      companyConfig: dbCompanyConfig,
+      service,
+      equipment: selectedSlot?.equipment,
+      time: selectedSlot?.time,
+      duration: sessionTimes.duration,
+      buffer: sessionTimes.buffer,
+      appointments: dbAppointments,
+      blockedSlots: dbBlockedSlots,
+      outsideNormalHours: !!selectedSlot?.outside_normal_hours,
+    });
+  }, [selectedSlot, dbCompanyConfig, dbServices, dbAppointments, dbBlockedSlots]);
 
   const calendarFeedUrl = useMemo(() => {
     if (!dbCompanyConfig.calendar_feed_enabled || !dbCompanyConfig.calendar_feed_token) return '';
@@ -1269,9 +1292,51 @@ export default function AppLayout() {
     if (!d) return;
     setRepeatBooking((prev) => {
       if (!prev.enabled || prev.dates.includes(d)) return prev;
+      if (!selectedSlot?.time) return { ...prev, dates: prev.dates };
+      const status = getRepeatDateAvailability({
+        isoDate: d,
+        companyConfig: dbCompanyConfig,
+        service: dbServices.find((s) => s.name === selectedSlot?.equipment),
+        equipment: selectedSlot?.equipment,
+        time: selectedSlot?.time,
+        duration: resolveSessionTimes(selectedSlot).duration,
+        buffer: resolveSessionTimes(selectedSlot).buffer,
+        appointments: dbAppointments,
+        blockedSlots: dbBlockedSlots,
+        outsideNormalHours: !!selectedSlot?.outside_normal_hours,
+      });
+      if (!status.selectable) return prev;
       return { ...prev, dates: sortOccurrenceDates([...prev.dates, d]) };
     });
-  }, [showNewAppointment, repeatBooking.enabled, selectedSlot?.fullDate, selectedSlot?.full_date]);
+  }, [
+    showNewAppointment,
+    repeatBooking.enabled,
+    selectedSlot?.fullDate,
+    selectedSlot?.full_date,
+    selectedSlot?.time,
+    selectedSlot?.equipment,
+    selectedSlot?.outside_normal_hours,
+    dbCompanyConfig,
+    dbServices,
+    dbAppointments,
+    dbBlockedSlots,
+  ]);
+
+  useEffect(() => {
+    if (!showNewAppointment || !repeatBooking.enabled || !selectedSlot?.time) return;
+    const filtered = repeatBooking.dates.filter((iso) => getRepeatDateStatusForSlot(iso).selectable);
+    if (filtered.length !== repeatBooking.dates.length) {
+      setRepeatBooking((prev) => ({ ...prev, dates: filtered }));
+    }
+  }, [
+    showNewAppointment,
+    repeatBooking.enabled,
+    repeatBooking.dates,
+    selectedSlot?.time,
+    selectedSlot?.equipment,
+    selectedSlot?.outside_normal_hours,
+    getRepeatDateStatusForSlot,
+  ]);
 
   const selectedPromoterContext = useMemo(() => {
     if (!selectedSlot) return null;
@@ -2465,8 +2530,8 @@ export default function AppLayout() {
         {currentUser && allowedClinics.length === 1 && (
         <div className="p-3 bg-slate-900 border-b border-slate-800">
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1.5 px-1">{L.location}</p>
-          <div className="bg-slate-950 py-2 px-3 rounded-xl border border-slate-800 text-center text-[10px] font-black uppercase text-white">
-            {allowedClinics[0] === 'Guadalajara' ? L.clinicGdl : L.clinicTx}
+          <div className="bg-slate-950 py-2 px-3 rounded-xl border border-slate-800 text-center text-[10px] font-black uppercase text-white leading-snug">
+            {activeClinicDisplayName}
           </div>
         </div>
         )}
@@ -2530,7 +2595,9 @@ export default function AppLayout() {
                 )}
               </div>
             ) : (
-              <span className="text-[9px] font-black uppercase text-slate-300 shrink-0">{allowedClinics[0] === 'Guadalajara' ? '🇲🇽 GDL' : '🇺🇸 TX'}</span>
+              <span className="text-[9px] font-black uppercase text-slate-200 shrink-0 max-w-[38vw] truncate" title={activeClinicDisplayName}>
+                {activeClinic === 'Guadalajara' ? '🇲🇽 ' : '🇺🇸 '}{activeClinicDisplayName}
+              </span>
             )}
             <span className="flex-1 truncate text-[10px] font-bold text-slate-200 min-w-0">{currentUser.name}</span>
             <button onClick={() => openNewAppointment()} className="shrink-0 h-8 w-8 bg-emerald-600 rounded-lg text-white font-black text-lg leading-none shadow" aria-label={L.ariaNewAppt}>+</button>
@@ -2544,8 +2611,11 @@ export default function AppLayout() {
             <header className="bg-white p-2 lg:p-3 border-b border-slate-200 flex flex-col gap-2 shrink-0 shadow-sm z-20">
               <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-2 lg:gap-3">
               <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-wrap">
-                <span className={`shrink-0 text-[9px] font-black uppercase px-2 py-0.5 rounded-md border ${activeClinic === 'Guadalajara' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`} title={activeClinicLabel}>
-                  {activeClinicShort}
+                <span
+                  className={`shrink-0 text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-md border max-w-[10rem] sm:max-w-xs truncate ${activeClinic === 'Guadalajara' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}
+                  title={activeClinicDisplayName}
+                >
+                  {activeClinic === 'Guadalajara' ? '🇲🇽 ' : '🇺🇸 '}{activeClinicDisplayName}
                 </span>
                 <div className="flex bg-slate-100 p-0.5 lg:p-1 rounded-lg lg:rounded-xl border border-slate-200 shrink-0">
                   <button onClick={() => navigateDate(-1)} className="p-1.5 lg:p-2 hover:bg-white rounded-lg transition text-slate-600 text-sm">◀</button>
@@ -4812,30 +4882,46 @@ export default function AppLayout() {
                       onChange={(e) => {
                         const enabled = e.target.checked;
                         const baseDate = selectedSlot?.fullDate || selectedSlot?.full_date || currentFullDate;
-                        setRepeatBooking({
-                          enabled,
-                          dates: enabled && baseDate ? [baseDate] : [],
-                        });
+                        let dates = [];
+                        if (enabled && baseDate && selectedSlot?.time) {
+                          const status = getRepeatDateStatusForSlot(baseDate);
+                          if (status.selectable) dates = [baseDate];
+                        }
+                        setRepeatBooking({ enabled, dates });
                       }}
                       className="w-4 h-4 shrink-0"
                     />
                     <span className="text-[10px] font-black uppercase text-emerald-900">{L.p.appt.repeatEnable}</span>
                   </label>
                   {repeatBooking.enabled ? (
-                    <RepeatDatesCalendar
-                      selectedDates={repeatBooking.dates}
-                      onChange={(dates) => setRepeatBooking((prev) => ({ ...prev, dates }))}
-                      anchorDate={selectedSlot?.fullDate || selectedSlot?.full_date || currentFullDate}
-                      primaryDate={selectedSlot?.fullDate || selectedSlot?.full_date || currentFullDate}
-                      locale={locale}
-                      labels={{
-                        calendarHint: L.p.appt.repeatCalendarHint,
-                        selectedCount: L.p.appt.repeatSelectedCount,
-                        clearSelection: L.p.appt.repeatClear,
-                        prevMonth: L.p.appt.repeatPrevMonth,
-                        nextMonth: L.p.appt.repeatNextMonth,
-                      }}
-                    />
+                    <>
+                      {!selectedSlot?.time ? (
+                        <p className="text-[9px] font-bold text-amber-700 uppercase border border-amber-200 bg-amber-50 rounded-lg px-2 py-2">
+                          {L.p.appt.repeatPickTimeFirst}
+                        </p>
+                      ) : null}
+                      <RepeatDatesCalendar
+                        selectedDates={repeatBooking.dates}
+                        onChange={(dates) => setRepeatBooking((prev) => ({ ...prev, dates }))}
+                        anchorDate={selectedSlot?.fullDate || selectedSlot?.full_date || currentFullDate}
+                        primaryDate={selectedSlot?.fullDate || selectedSlot?.full_date || currentFullDate}
+                        locale={locale}
+                        getDateStatus={getRepeatDateStatusForSlot}
+                        labels={{
+                          calendarHint: L.p.appt.repeatCalendarHint,
+                          selectedCount: L.p.appt.repeatSelectedCount,
+                          clearSelection: L.p.appt.repeatClear,
+                          prevMonth: L.p.appt.repeatPrevMonth,
+                          nextMonth: L.p.appt.repeatNextMonth,
+                          dayClosed: L.p.appt.repeatDayClosed,
+                          dayOccupied: L.p.appt.repeatDayOccupied,
+                          dayBlocked: L.p.appt.repeatDayBlocked,
+                          dayOutsideHours: L.p.appt.repeatDayOutsideHours,
+                          dayUnavailable: L.p.appt.repeatDayUnavailable,
+                          legendSelected: L.p.appt.repeatLegendSelected,
+                        }}
+                      />
+                    </>
                   ) : null}
                 </div>
               ) : null}
