@@ -41,9 +41,13 @@ import { sortOccurrenceDates } from '../lib/appointmentRecurrence';
 import { getRepeatDateAvailability } from '../lib/repeatDateAvailability';
 import { resolveStaffActiveClinic, saveStaffActiveClinic } from '../lib/staffClinicPrefs';
 import {
+  applyEquipmentRepairsToAppointments,
+  autoRepairOrphanEquipmentNames,
   buildCalendarEquipmentColumns,
-  countAppointmentsForEquipment,
+  countAppointmentsForServiceResolved,
+  hasServiceScheduleChange,
   renameEquipmentAcrossClinic,
+  resolveAppointmentEquipment,
 } from '../lib/serviceEquipmentSync';
 import { saveCompanyConfigRow } from '../lib/companyConfigSave';
 import { formatClinicField, formatClinicPhone } from '../lib/clinicText';
@@ -201,6 +205,7 @@ export default function AppLayout() {
   const [newSrv, setNewSrv] = useState({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });
   const [isEditingSrv, setIsEditingSrv] = useState(false);
   const [editingSrvOriginalName, setEditingSrvOriginalName] = useState('');
+  const [editingSrvOriginalSchedule, setEditingSrvOriginalSchedule] = useState({ duration: 60, buffer: 30 });
   
   const [newProtocol, setNewProtocol] = useState({ id: null, name: '', is_active: true });
   const [isEditingProtocol, setIsEditingProtocol] = useState(false);
@@ -514,7 +519,7 @@ export default function AppLayout() {
     const end1 = start1 + Number(dur) + Number(buffer);
     return dbAppointments.some(a => {
       if (a.id === ignoreId || a.check_in_status === 'Cancelado') return false;
-      if (a.equipment !== equipment || a.full_date !== targetDate) return false;
+      if (resolveAppointmentEquipment(a.equipment, dbServices) !== equipment || a.full_date !== targetDate) return false;
       const start2 = getMinutes(a.time);
       const end2 = start2 + (Number(a.duration)||60) + (Number(a.buffer)||0);
       return (start1 < end2 && end1 > start2);
@@ -799,7 +804,25 @@ export default function AppLayout() {
 
       if (fetchGen !== fetchGenRef.current) return;
 
-      setDbAppointments(appointmentsData || []);
+      let appointmentsReady = appointmentsData || [];
+      if (currentUserLevel <= 2 && safeServices.length && appointmentsReady.length) {
+        try {
+          const repairs = await autoRepairOrphanEquipmentNames(clinicDb, safeServices, appointmentsReady);
+          if (repairs.length > 0) {
+            appointmentsReady = applyEquipmentRepairsToAppointments(appointmentsReady, repairs);
+            await logAudit(
+              null,
+              'Sistema',
+              'REPARAR EQUIPOS',
+              repairs.map((r) => `«${r.from}» → «${r.to}»`).join('; '),
+            );
+          }
+        } catch (repairErr) {
+          console.warn('Auto-repair equipment names failed', repairErr);
+        }
+      }
+
+      setDbAppointments(appointmentsReady);
       setDbStatus('listo');
       setDbErrorMessage('');
     } catch (err) {
@@ -981,11 +1004,15 @@ export default function AppLayout() {
   };
 
   const activeServices = dbServices.filter(s => s.is_active);
-  const { columns: calendarEquipmentColumns, orphans: orphanEquipmentSet } = useMemo(
-    () => buildCalendarEquipmentColumns(activeServices.map((s) => s.name), dbAppointments),
-    [activeServices, dbAppointments],
+  const { columns: calendarEquipmentColumns } = useMemo(
+    () => buildCalendarEquipmentColumns(dbServices),
+    [dbServices],
   );
   const dynamicColumns = calendarEquipmentColumns;
+  const appointmentEquipment = useCallback(
+    (equipment) => resolveAppointmentEquipment(equipment, dbServices),
+    [dbServices],
+  );
   const displayedEquipments = equipmentFilter === 'Todos' ? dynamicColumns : [equipmentFilter];
 
   const activeClinicLabel = activeClinic === 'Guadalajara' ? L.clinicGdl : L.clinicTx;
@@ -2765,12 +2792,11 @@ export default function AppLayout() {
                   {viewMode === 'Día' ? (
                     <div className="flex min-w-full">
                       {displayedEquipments.map((eqName) => {
-                        const isOrphan = orphanEquipmentSet.has(eqName);
-                        const srvColor = isOrphan ? 'slate' : (dbServices.find(s => s.name === eqName)?.color || 'blue');
+                        const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                         return (
-                        <div key={eqName} className={`flex-1 border-r border-slate-300 ${isOrphan ? 'bg-slate-200/90' : getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth * 2}px` }}>
-                          <div className={`h-12 border-b border-slate-200 flex flex-col items-center justify-center sticky top-0 z-40 ${isOrphan ? 'bg-slate-600 text-white' : getEquipmentHeaderColor(srvColor)}`}>
-                            <span className="text-[10px] font-black uppercase leading-none">{eqName}{isOrphan ? ' *' : ''}</span>
+                        <div key={eqName} className={`flex-1 border-r border-slate-300 ${getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth * 2}px` }}>
+                          <div className={`h-12 border-b border-slate-200 flex flex-col items-center justify-center sticky top-0 z-40 ${getEquipmentHeaderColor(srvColor)}`}>
+                            <span className="text-[10px] font-black uppercase leading-none">{eqName}</span>
                             <span className="text-[11px] font-bold opacity-80">{currentDayInfo.date}</span>
                           </div>
                           <div className="relative w-full pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
@@ -2786,7 +2812,7 @@ export default function AppLayout() {
                             )}
 
                             {/* BLOQUEOS OOO */}
-                            {dbBlockedSlots.filter(b => b.date === currentDayInfo.fullDate && (b.is_global || b.equipment === eqName)).map(b => (
+                            {dbBlockedSlots.filter(b => b.date === currentDayInfo.fullDate && (b.is_global || appointmentEquipment(b.equipment) === eqName)).map(b => (
                               <div key={b.id} className="absolute left-1 right-1 bg-slate-200 border-l-4 border-slate-400 rounded-md opacity-80 overflow-hidden flex flex-col justify-center items-center z-0" style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.03) 10px, rgba(0,0,0,0.03) 20px)', top: `${timeToPixels(b.start_time)}px`, height: `${timeToPixels(b.end_time) - timeToPixels(b.start_time)}px` }}>
                                 <span className="text-[10px] font-black text-slate-500 uppercase bg-white/80 px-2 py-1 rounded">{b.reason}</span>
                                 {currentUserLevel <= 2 && <button onClick={async () => { await activeSupabase.from('blocked_slots').delete().eq('id', b.id); fetchAllData(); }} className="text-red-500 text-[8px] font-black mt-1 uppercase bg-white/80 px-2 rounded">Eliminar</button>}
@@ -2794,7 +2820,7 @@ export default function AppLayout() {
                             ))}
 
                             {/* CITAS */}
-                            {dbAppointments.filter(app => app.equipment === eqName && app.full_date === currentDayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
+                            {dbAppointments.filter(app => appointmentEquipment(app.equipment) === eqName && app.full_date === currentDayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
                               <CalendarAppointmentBlock
                                 key={app.id}
                                 app={app}
@@ -2829,17 +2855,16 @@ export default function AppLayout() {
                             </div>
                             <div className="flex border-t border-slate-200 h-7">
                               {displayedEquipments.map((eqName) => {
-                                const isOrphan = orphanEquipmentSet.has(eqName);
-                                const srvColor = isOrphan ? 'slate' : (dbServices.find(s => s.name === eqName)?.color || 'blue');
+                                const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                                 return (
                                   <div
                                     key={`${dayInfo.fullDate}-hdr-${eqName}`}
-                                    className={`flex-1 flex items-center justify-center border-r border-slate-300/80 last:border-r-0 ${isOrphan ? 'bg-slate-600 text-white' : getEquipmentHeaderColor(srvColor)}`}
+                                    className={`flex-1 flex items-center justify-center border-r border-slate-300/80 last:border-r-0 ${getEquipmentHeaderColor(srvColor)}`}
                                     style={{ minWidth: `${currentColWidth}px` }}
-                                    title={isOrphan ? `${eqName} (citas con nombre anterior)` : eqName}
+                                    title={eqName}
                                   >
                                     <span className="text-[7px] sm:text-[8px] font-black uppercase truncate px-0.5 text-center w-full leading-none">
-                                      {currentColWidth >= 104 ? `${eqName}${isOrphan ? '*' : ''}` : getEquipmentShortLabel(eqName)}
+                                      {currentColWidth >= 104 ? eqName : getEquipmentShortLabel(eqName)}
                                     </span>
                                   </div>
                                 );
@@ -2848,10 +2873,9 @@ export default function AppLayout() {
                           </div>
                           <div className="flex w-full relative pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
                             {displayedEquipments.map(eqName => {
-                              const isOrphan = orphanEquipmentSet.has(eqName);
-                              const srvColor = isOrphan ? 'slate' : (dbServices.find(s => s.name === eqName)?.color || 'blue');
+                              const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                               return (
-                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`flex-1 relative border-r border-slate-300 ${isOrphan ? 'bg-slate-200/90' : getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth}px` }}>
+                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`flex-1 relative border-r border-slate-300 ${getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth}px` }}>
                                 
                                 <div className="absolute inset-0 z-0">{renderBackgroundSlots(eqName, dayInfo.name, dayInfo.fullDate)}</div>
                                 
@@ -2863,13 +2887,13 @@ export default function AppLayout() {
                                   </div>
                                 )}
 
-                                {dbBlockedSlots.filter(b => b.date === dayInfo.fullDate && (b.is_global || b.equipment === eqName)).map(b => (
+                                {dbBlockedSlots.filter(b => b.date === dayInfo.fullDate && (b.is_global || appointmentEquipment(b.equipment) === eqName)).map(b => (
                                   <div key={b.id} className="absolute left-0.5 right-0.5 bg-slate-200 border-l-2 border-slate-400 rounded-md opacity-80 overflow-hidden flex flex-col justify-center items-center z-0" style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.03) 10px, rgba(0,0,0,0.03) 20px)', top: `${timeToPixels(b.start_time)}px`, height: `${timeToPixels(b.end_time) - timeToPixels(b.start_time)}px` }}>
                                     <span className="text-[7px] font-black text-slate-500 uppercase bg-white/80 px-1 rounded truncate w-full text-center">{b.reason}</span>
                                   </div>
                                 ))}
 
-                                {dbAppointments.filter(app => app.equipment === eqName && app.full_date === dayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
+                                {dbAppointments.filter(app => appointmentEquipment(app.equipment) === eqName && app.full_date === dayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
                                   <CalendarAppointmentBlock
                                     key={app.id}
                                     app={app}
@@ -3036,7 +3060,7 @@ export default function AppLayout() {
                     <span className="text-xs font-black uppercase text-slate-700">Visible en calendario</span>
                   </label>
                   <div className="flex gap-2 pt-1">
-                    {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setEditingSrvOriginalName(''); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
+                    {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setEditingSrvOriginalName(''); setEditingSrvOriginalSchedule({ duration: 60, buffer: 30 }); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
                     <button onClick={async () => {
                       if(!newSrv.name) return alert(L.p.services.missingName);
                       const duration = Math.max(5, Number(newSrv.duration) || 60);
@@ -3061,8 +3085,11 @@ export default function AppLayout() {
                         if (isEditingSrv && newSrv.id) {
                           const oldName = editingSrvOriginalName || newSrv.name;
                           const newName = p.name;
+                          const apptCount = countAppointmentsForServiceResolved(oldName, dbServices, dbAppointments);
+                          if (hasServiceScheduleChange(editingSrvOriginalSchedule, { duration, buffer }) && apptCount > 0) {
+                            return alert(a('serviceDurationLocked', apptCount));
+                          }
                           if (oldName !== newName) {
-                            const apptCount = await countAppointmentsForEquipment(activeSupabase, oldName);
                             if (apptCount > 0 && !window.confirm(a('renameEquipmentConfirm', oldName, newName, apptCount))) {
                               return;
                             }
@@ -3078,6 +3105,7 @@ export default function AppLayout() {
                         if (error) return alert(`${L.p.services.saveError}: ${error.message}`);
                         setIsEditingSrv(false);
                         setEditingSrvOriginalName('');
+                        setEditingSrvOriginalSchedule({ duration: 60, buffer: 30 });
                         setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '' });
                         await fetchAllData();
                       } catch (e) {
@@ -3128,11 +3156,15 @@ export default function AppLayout() {
                                   end_time: normalizeTimeInput(s.end_time),
                                 });
                                 setEditingSrvOriginalName(s.name);
+                                setEditingSrvOriginalSchedule({
+                                  duration: Number(s.duration) || 60,
+                                  buffer: Number(s.buffer ?? 30),
+                                });
                                 setIsEditingSrv(true);
                               }} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-blue-100 border border-blue-100">Editar</button>
                               <button onClick={async () => {
                                 try {
-                                  const apptCount = await countAppointmentsForEquipment(activeSupabase, s.name);
+                                  const apptCount = countAppointmentsForServiceResolved(s.name, dbServices, dbAppointments);
                                   if (apptCount > 0) {
                                     return alert(a('deleteEquipmentHasAppts', apptCount));
                                   }
