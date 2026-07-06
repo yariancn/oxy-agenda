@@ -75,8 +75,20 @@ import {
   applyPurchaseSessions,
   consumeSessionFromWallet,
   hasPaidSessionBalance,
+  persistWalletAfterConsume,
+  resolveWalletContext,
   reversePurchaseSessions,
 } from '../lib/sessionWallet';
+import {
+  addSessionGroupMember,
+  createSessionGroup,
+  enrichGroupForDisplay,
+  findGroupForPatient,
+  normalizeGroup,
+  removeSessionGroupMember,
+  reverseGroupPurchase,
+} from '../lib/sessionGroup';
+import { buildSessionSummary, getServicePrice } from '../lib/sessionSummary';
 import {
   buildNotifyContent,
   formatBookingNotifyFeedback,
@@ -162,6 +174,8 @@ export default function AppLayout() {
 
   // --- BASE DE DATOS ---
   const [dbPatients, setDbPatients] = useState([]);
+  const [dbSessionGroups, setDbSessionGroups] = useState([]);
+  const [sessionGroupsEnabled, setSessionGroupsEnabled] = useState(false);
   const [dbServices, setDbServices] = useState([]);
   const [dbAppointments, setDbAppointments] = useState([]);
   const [dbUsers, setDbUsers] = useState([]);
@@ -726,9 +740,24 @@ export default function AppLayout() {
         packageHistory: p.package_history || [],
         historicoSesiones: p.historico_sesiones || 0,
         adeudo: Number(p.adeudo) || 0,
+        sessionGroupId: p.session_group_id || null,
       }));
 
       setDbPatients(safePatients.sort((a, b) => a.patient.localeCompare(b.patient)));
+
+      try {
+        const resGroups = await clinicDb.from('session_groups').select('*');
+        if (!resGroups.error) {
+          setDbSessionGroups((resGroups.data || []).map(normalizeGroup));
+          setSessionGroupsEnabled(true);
+        } else {
+          setDbSessionGroups([]);
+          setSessionGroupsEnabled(false);
+        }
+      } catch {
+        setDbSessionGroups([]);
+        setSessionGroupsEnabled(false);
+      }
       
       const safeServices = resS.data || [];
       setDbServices(safeServices.sort((a, b) => (a.name || '').localeCompare(b.name || '')));
@@ -1375,6 +1404,36 @@ export default function AppLayout() {
     getRepeatDateStatusForSlot,
   ]);
 
+  const selectedSlotSessionSummary = useMemo(() => {
+    if (!selectedSlot) return null;
+    return buildSessionSummary({
+      historicoSesiones: selectedSlot.historicoSesiones,
+      adeudo: selectedSlot.adeudo,
+      wallets: selectedSlot.wallets,
+      packageHistory: selectedSlot.packageHistory,
+      equipment: selectedSlot.equipment,
+      servicePrice: selectedSlot.servicePrice || getServicePrice(dbServices, selectedSlot.equipment),
+      sessionGroup: selectedSlot.sessionGroup,
+      groupMembers: selectedSlot.groupMembers,
+      patientName: selectedSlot.patient,
+    });
+  }, [selectedSlot, dbServices]);
+
+  const selectedSlotWalletBalance = useMemo(() => {
+    if (!selectedSlot) return 0;
+    const ctx = resolveWalletContext({
+      patient: selectedSlot,
+      sessionGroup: selectedSlot.sessionGroup,
+      equipment: selectedSlot.equipment,
+      servicePrice: selectedSlot.servicePrice || getServicePrice(dbServices, selectedSlot.equipment),
+    });
+    return hasPaidSessionBalance(
+      ctx.wallets,
+      selectedSlot.equipment,
+      selectedSlot.servicePrice || getServicePrice(dbServices, selectedSlot.equipment),
+    );
+  }, [selectedSlot, dbServices]);
+
   const selectedPromoterContext = useMemo(() => {
     if (!selectedSlot) return null;
     return resolvePromoterContext({
@@ -1384,10 +1443,59 @@ export default function AppLayout() {
     });
   }, [selectedSlot, dbPromoters]);
 
+  const getPatientSessionGroup = useCallback((patient) => {
+    if (!patient) return null;
+    const group = findGroupForPatient(patient, dbSessionGroups);
+    return enrichGroupForDisplay(group, dbPatients);
+  }, [dbSessionGroups, dbPatients]);
+
+  const attachSessionContext = useCallback((slot, patInfo) => {
+    const group = patInfo ? getPatientSessionGroup(patInfo) : null;
+    const servicePrice = getServicePrice(dbServices, slot?.equipment);
+    return {
+      ...slot,
+      sessionGroupId: patInfo?.sessionGroupId || null,
+      sessionGroup: group,
+      groupMembers: group?.members || [],
+      servicePrice,
+    };
+  }, [dbServices, getPatientSessionGroup]);
+
+  const processSessionDeduction = async (patient, equipment, servicePrice) => {
+    if (!patient?.id) return { deducted: false, nextAdeudo: 0, walletContext: null };
+    const sessionGroup = getPatientSessionGroup(patient);
+    const walletContext = resolveWalletContext({
+      patient,
+      sessionGroup,
+      equipment,
+      servicePrice,
+    });
+    const consumed = consumeSessionFromWallet(walletContext.wallets, equipment, servicePrice);
+    let nextAdeudo = walletContext.adeudo;
+    if (!consumed.deducted) nextAdeudo += 1;
+
+    await persistWalletAfterConsume({
+      supabase: activeSupabase,
+      walletContext,
+      consumed,
+      nextAdeudo,
+      patientId: patient.id,
+      historicoSesiones: (patient.historicoSesiones || 0) + 1,
+    });
+
+    return { deducted: consumed.deducted, nextAdeudo, walletContext, consumed };
+  };
+
+  const resolveDefaultAttendant = useCallback((appAttendant) => {
+    const saved = String(appAttendant || '').trim();
+    if (saved && saved !== 'Por Asignar') return saved;
+    return currentUser?.name || saved || '';
+  }, [currentUser?.name]);
+
   const openAppointmentDetails = (app) => {
     const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(app.patient));
     const patInfo = matchingPatients.find(x => x.notes && x.notes.trim() !== '') || matchingPatients[0];
-    setSelectedSlot({
+    setSelectedSlot(attachSessionContext({
       ...app,
       status: 'booked',
       patientId: patInfo?.id,
@@ -1402,8 +1510,9 @@ export default function AppLayout() {
       sessionPreset: getPresetFromTimes(app.duration, app.buffer).id,
       prefers_email: patInfo?.prefers_email !== false,
       prefers_sms: patInfo?.prefers_sms !== false,
+      attendant: resolveDefaultAttendant(app.attendant),
       ...appointmentFlagsFromApp(app),
-    });
+    }, patInfo));
   };
 
   const resolveSlotContact = (slot) => {
@@ -1827,23 +1936,8 @@ export default function AppLayout() {
         const p = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(patientName));
         if (p) {
           const eq = equipment || app.equipment;
-          const currentWallets = { ...(p.wallets || {}) };
-          let nextAdeudo = Number(p.adeudo) || 0;
-          const consumed = consumeSessionFromWallet(currentWallets, eq);
-          let deducted = consumed.deducted;
-          if (!deducted) nextAdeudo += 1;
-
-          let patUpdate = await activeSupabase.from('patients').update({
-            wallets: consumed.wallets,
-            adeudo: nextAdeudo,
-            historico_sesiones: (p.historicoSesiones || 0) + 1
-          }).eq('id', p.id);
-          if (patUpdate.error && /column|adeudo/i.test(patUpdate.error.message || '')) {
-            await activeSupabase.from('patients').update({
-              wallets: consumed.wallets,
-              historico_sesiones: (p.historicoSesiones || 0) + 1,
-            }).eq('id', p.id);
-          }
+          const servicePrice = getServicePrice(dbServices, eq);
+          const { deducted, nextAdeudo } = await processSessionDeduction(p, eq, servicePrice);
 
           await logAudit(id, patientName, 'NO ASISTIÓ', deducted
             ? `No asistió. Se descontó 1 sesión pagada de cartera (${eq}).`
@@ -1884,27 +1978,13 @@ export default function AppLayout() {
     if (!p) return { deducted: false, detail: 'Paciente no encontrado en expediente.' };
 
     const eq = equipment;
-    const consumed = consumeSessionFromWallet(p.wallets || {}, eq);
-    let nextAdeudo = Number(p.adeudo) || 0;
-    let deducted = consumed.deducted;
-    if (!deducted) nextAdeudo += 1;
-
-    let patRes = await activeSupabase.from('patients').update({
-      wallets: consumed.wallets,
-      adeudo: nextAdeudo,
-      historico_sesiones: (p.historicoSesiones || 0) + 1,
-    }).eq('id', p.id);
-    if (patRes.error && /column|adeudo/i.test(patRes.error.message || '')) {
-      await activeSupabase.from('patients').update({
-        wallets: consumed.wallets,
-        historico_sesiones: (p.historicoSesiones || 0) + 1,
-      }).eq('id', p.id);
-    }
+    const servicePrice = getServicePrice(dbServices, eq);
+    const { deducted, nextAdeudo, consumed } = await processSessionDeduction(p, eq, servicePrice);
 
     return {
       deducted,
       detail: deducted
-        ? `Se descontó 1 sesión pagada de cartera (${eq}).`
+        ? `Se descontó 1 sesión pagada de cartera (${consumed?.walletKey || eq}).`
         : `Sin saldo pagado: se registró adeudo +1 (total adeudo: ${nextAdeudo}).`,
     };
   };
@@ -1969,6 +2049,7 @@ export default function AppLayout() {
     const apps = dbAppointments.filter(a => String(a.patient) === String(patientName) && a.check_in_status === 'Finalizado').sort((a,b) => new Date(b.full_date) - new Date(a.full_date));
     if(apps.length === 0) return alert(a('noFinishedAppts'));
 
+    const audit = L.p.audit;
     const ROWS_PER_PAGE = 15;
     let pagesHTML = '';
     
@@ -1980,7 +2061,7 @@ export default function AppLayout() {
           <td style="border: 1px solid #000; padding: 8px; font-size: 12px;">${a.equipment}</td>
           <td style="border: 1px solid #000; padding: 8px; font-size: 12px;">${a.attendant || 'N/A'}</td>
           <td style="border: 1px solid #000; padding: 8px; text-align: center; height: 50px;">
-            ${a.signature ? `<img src="${a.signature}" style="max-height: 40px;"/>` : '<span style="color:#ccc; font-style:italic;">Firma Física</span>'}
+            ${a.signature ? `<img src="${a.signature}" style="max-height: 40px;"/>` : `<span style="color:#ccc; font-style:italic;">${audit.physicalSig}</span>`}
           </td>
         </tr>
       `).join('');
@@ -1990,19 +2071,19 @@ export default function AppLayout() {
           <div style="text-align: center; margin-bottom: 30px;">
             <h1 style="margin: 0; font-size: 24px; text-transform: uppercase;">${formatClinicField(dbCompanyConfig.name) || 'OXYHYPERBARIC'}</h1>
             <p style="margin: 0; font-size: 12px; text-transform: uppercase;">${formatClinicField(dbCompanyConfig.address)} | Tel: ${formatClinicPhone(dbCompanyConfig.phone)}</p>
-            <h2 style="margin-top: 20px; font-size: 18px; border-bottom: 2px solid #000; display: inline-block; padding-bottom: 5px;">BITÁCORA OFICIAL DE ASISTENCIA</h2>
+            <h2 style="margin-top: 20px; font-size: 18px; border-bottom: 2px solid #000; display: inline-block; padding-bottom: 5px;">${audit.title}</h2>
           </div>
           <div style="margin-bottom: 20px;">
-            <p style="margin: 0; font-weight: bold; font-size: 14px; text-transform: uppercase;">PACIENTE: ${patientName}</p>
-            <p style="margin: 0; font-size: 12px; color: #555;">Fecha de Impresión: ${new Date().toLocaleDateString()}</p>
+            <p style="margin: 0; font-weight: bold; font-size: 14px; text-transform: uppercase;">${audit.patientLabel}: ${patientName}</p>
+            <p style="margin: 0; font-size: 12px; color: #555;">${audit.printDate}: ${new Date().toLocaleDateString()}</p>
           </div>
           <table style="width: 100%; border-collapse: collapse;">
             <thead>
               <tr style="background-color: #f1f5f9;">
-                <th style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 12px;">FECHA Y HORA</th>
-                <th style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 12px;">SERVICIO MÉDICO</th>
-                <th style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 12px;">ATENDIÓ</th>
-                <th style="border: 1px solid #000; padding: 10px; text-align: center; font-size: 12px;">FIRMA DEL PACIENTE</th>
+                <th style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 12px;">${audit.dateTimeCol.toUpperCase()}</th>
+                <th style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 12px;">${audit.service.toUpperCase()}</th>
+                <th style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 12px;">${audit.attendedBy.toUpperCase()}</th>
+                <th style="border: 1px solid #000; padding: 10px; text-align: center; font-size: 12px;">${audit.patientSignatureCol.toUpperCase()}</th>
               </tr>
             </thead>
             <tbody>${rowsHTML}</tbody>
@@ -2011,7 +2092,7 @@ export default function AppLayout() {
       `;
     }
 
-    printHTML(pagesHTML, `Expediente - ${patientName}`);
+    printHTML(pagesHTML, audit.fileTitle(patientName));
   };
 
   const renderBackgroundSlots = (equipment, day, fullDate) => {
@@ -4662,55 +4743,67 @@ export default function AppLayout() {
               {!isRescheduling && (
               <>
               <div className="bg-blue-50 border border-blue-200 p-5 rounded-2xl shadow-sm space-y-3">
+                  {selectedSlot.sessionGroup?.name && (
+                    <p className="text-[9px] font-black uppercase text-violet-800 bg-violet-100 border border-violet-200 rounded-lg px-2 py-1.5">
+                      👥 {selectedSlot.sessionGroup.name} · {L.modals.bitacora.sharedLabel}
+                    </p>
+                  )}
                   <div className="flex justify-between items-center bg-white p-3 rounded-xl border border-blue-100">
-                    <span className="text-xs font-black text-slate-500 uppercase">Histórico de Sesiones</span>
+                    <span className="text-xs font-black text-slate-500 uppercase">
+                      {selectedSlotSessionSummary?.isDebtor
+                        ? L.modals.bitacora.debtHeadline(selectedSlotSessionSummary.adeudo)
+                        : L.p.appt.sessionsPaidSummary(selectedSlotSessionSummary?.used || 0, selectedSlotSessionSummary?.totalPurchased || 0)}
+                    </span>
                     <span className="text-sm font-black text-slate-800 bg-slate-100 px-2 rounded">{selectedSlot.historicoSesiones || 0}</span>
                   </div>
-                  <div className={`p-3 rounded-lg flex justify-between items-center text-white shadow-sm ${(selectedSlot.wallets?.[selectedSlot.equipment] || 0) > 0 ? 'bg-emerald-600' : 'bg-red-600'}`}>
-                    <span className="text-xs font-black uppercase">Pendientes ({selectedSlot.equipment})</span>
+                  <div className={`p-3 rounded-lg flex justify-between items-center text-white shadow-sm ${selectedSlotWalletBalance ? 'bg-emerald-600' : 'bg-red-600'}`}>
+                    <span className="text-xs font-black uppercase">{L.p.appt.pendingForEquipment(selectedSlot.equipment)}</span>
                     <span className="text-lg font-black">
-                      {selectedSlot.wallets?.[selectedSlot.equipment] || 0}
+                      {selectedSlotSessionSummary?.pendingForService ?? 0}
                     </span>
                   </div>
-                  {(selectedSlot.adeudo || 0) > 0 && (
+                  {(selectedSlotSessionSummary?.adeudo || 0) > 0 && (
                     <div className="p-3 rounded-lg flex justify-between items-center bg-orange-500 text-white shadow-sm border border-orange-600">
                       <span className="text-xs font-black uppercase">{L.p.appt.adeudoLabel}</span>
-                      <span className="text-lg font-black">{selectedSlot.adeudo}</span>
+                      <span className="text-lg font-black">{selectedSlotSessionSummary.adeudo}</span>
                     </div>
                   )}
-                  {!hasPaidSessionBalance(selectedSlot.wallets, selectedSlot.equipment) && (selectedSlot.adeudo || 0) === 0 && selectedSlot.check_in_status !== 'Finalizado' && (
+                  {!selectedSlotWalletBalance && (selectedSlotSessionSummary?.adeudo || 0) === 0 && selectedSlot.check_in_status !== 'Finalizado' && (
                     <p className="text-[9px] font-bold text-amber-700 uppercase bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
-                      ⚠️ Sin saldo pagado — al sellar bitácora se registrará adeudo
+                      ⚠️ {L.p.appt.noBalanceBitacora}
                     </p>
                   )}
               </div>
 
               <div className="pt-4 pb-2 border-t text-slate-900">
-                 <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Sesión a cargo de (Para Bitácora):</label>
+                 <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">{L.p.appt.bitacoraAttendantLabel}</label>
                  {selectedSlot.check_in_status === 'Finalizado' ? (
                     <p className="font-bold text-slate-700 uppercase p-3 bg-slate-50 rounded-xl border border-slate-200 text-sm">{selectedSlot.attendant || 'N/A'}</p>
                  ) : (
                     <select value={selectedSlot.attendant || ''} onChange={(e) => setSelectedSlot({...selectedSlot, attendant: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl font-bold uppercase outline-none focus:border-blue-500 text-sm bg-white text-slate-900">
-                      <option value="">Selecciona Personal...</option>
+                      <option value="">{L.p.appt.selectStaff}</option>
+                      {currentUser?.name && !dbUsers.some((u) => u.is_active && u.name === currentUser.name) && (
+                        <option value={currentUser.name}>{currentUser.name}</option>
+                      )}
                       {dbUsers.filter(u => u.is_active).map(u => <option key={u.id} value={u.name}>{u.name}</option>)}
                     </select>
                  )}
               </div>
 
               <div className="flex gap-3 flex-wrap">
-                <button onClick={() => setShowPatientProfile(true)} className="flex-1 bg-slate-100 text-slate-700 py-4 rounded-2xl font-black uppercase text-[10px] hover:bg-slate-200 transition">Expediente</button>
+                <button onClick={() => setShowPatientProfile(true)} className="flex-1 bg-slate-100 text-slate-700 py-4 rounded-2xl font-black uppercase text-[10px] hover:bg-slate-200 transition">{L.p.appt.openChart}</button>
                 {selectedSlot.check_in_status === 'Finalizado' ? (
-                   <div className="flex-1 bg-emerald-100 text-emerald-800 py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center text-center border border-emerald-300">✅ Bitácora Sellada y Firmada</div>
+                   <div className="flex-1 bg-emerald-100 text-emerald-800 py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center text-center border border-emerald-300">{L.p.appt.bitacoraSealed}</div>
                 ) : (
                    <button onClick={() => {
                       if(!selectedSlot.attendant || selectedSlot.attendant === 'Por Asignar') return alert(a('selectAttendant'));
                       setShowBitacora(true);
-                   }} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] shadow-lg hover:bg-blue-700 transition">Bitácora Médica</button>
+                   }} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] shadow-lg hover:bg-blue-700 transition">{L.p.appt.bitacoraOpen}</button>
                 )}
-                <button onClick={() => printPatientBitacora(selectedSlot.patient)} className="w-full bg-slate-800 text-white py-3 rounded-2xl font-black uppercase text-[10px] hover:bg-slate-700 transition mt-2">🖨️ Imprimir Historial Completo (Firmas)</button>
+                <button onClick={() => printPatientBitacora(selectedSlot.patient)} className="w-full bg-slate-800 text-white py-3 rounded-2xl font-black uppercase text-[10px] hover:bg-slate-700 transition mt-2">{L.p.appt.printSignatureHistory}</button>
               </div>
               
-              <button onClick={() => loadAuditLogs(selectedSlot.id)} className="w-full text-slate-400 py-2 rounded-2xl font-black uppercase text-[9px] hover:text-slate-600 transition mt-1 underline">👁️ Ver Caja Negra (Auditoría)</button>
+              <button onClick={() => loadAuditLogs(selectedSlot.id)} className="w-full text-slate-400 py-2 rounded-2xl font-black uppercase text-[9px] hover:text-slate-600 transition mt-1 underline">{L.p.appt.viewAudit}</button>
 
               <button
                 type="button"
@@ -5251,6 +5344,46 @@ export default function AppLayout() {
             companyConfig={dbCompanyConfig}
             activeClinic={activeClinic}
             currentUserLevel={currentUserLevel}
+            sessionGroupsEnabled={sessionGroupsEnabled}
+            allPatients={dbPatients}
+            sessionGroup={getPatientSessionGroup(
+              dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient)),
+            )}
+            onCreateSessionGroup={async ({ name, titularPatient }) => {
+              await createSessionGroup(activeSupabase, { name, titularPatient, patients: dbPatients });
+              await fetchAllData();
+            }}
+            onAddGroupMember={async ({ groupId, memberPatient }) => {
+              const group = dbSessionGroups.find((g) => g.id === groupId);
+              await addSessionGroupMember(activeSupabase, group, memberPatient);
+              await fetchAllData();
+            }}
+            onRemoveGroupMember={async ({ groupId, memberId }) => {
+              await removeSessionGroupMember(activeSupabase, memberId);
+              await fetchAllData();
+            }}
+            onGroupPurchase={async ({ groupId, wallets, adeudo, transaction }) => {
+              const group = dbSessionGroups.find((g) => g.id === groupId);
+              const history = [transaction, ...(group?.packageHistory || [])];
+              await activeSupabase.from('session_groups').update({
+                wallets,
+                adeudo,
+                package_history: history,
+              }).eq('id', groupId);
+              await fetchAllData();
+            }}
+            onGroupCancelSale={async ({ groupId, transaction }) => {
+              const group = dbSessionGroups.find((g) => g.id === groupId);
+              if (!group) return;
+              const reversed = reverseGroupPurchase(group, transaction);
+              const history = (group.packageHistory || []).filter((t) => t.id !== transaction.id);
+              await activeSupabase.from('session_groups').update({
+                wallets: reversed.wallets,
+                adeudo: reversed.adeudo,
+                package_history: history,
+              }).eq('id', groupId);
+              await fetchAllData();
+            }}
             onAllocateTicketNumber={async () => {
               const next = resolveNextTicketNumber({
                 ticketCounter: dbCompanyConfig.ticket_counter,
@@ -5333,35 +5466,36 @@ export default function AppLayout() {
           <BitacoraModal 
             selectedSlot={selectedSlot} 
             onClose={() => setShowBitacora(false)} 
-            onSeal={async (sd, vt) => {
+            onSeal={async (sd, vt, summaryLines) => {
               const eq = selectedSlot.equipment;
-              const currentAdeudo = Number(selectedSlot.adeudo) || 0;
-              if (!hasPaidSessionBalance(selectedSlot.wallets, eq)) {
-                if (!window.confirm(a('bitacoraNoBalanceConfirm', currentAdeudo + 1))) return;
+              const servicePrice = selectedSlot.servicePrice || getServicePrice(dbServices, eq);
+              const pat = dbPatients.find((x) => x.id === selectedSlot.patientId)
+                || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
+              if (!pat) return alert(a('genericError', 'Paciente no encontrado'));
+
+              const walletContext = resolveWalletContext({
+                patient: pat,
+                sessionGroup: getPatientSessionGroup(pat),
+                equipment: eq,
+                servicePrice,
+              });
+
+              if (!hasPaidSessionBalance(walletContext.wallets, eq, servicePrice)) {
+                if (!window.confirm(a('bitacoraNoBalanceConfirm', walletContext.adeudo + 1))) return;
               }
 
-              const consumed = consumeSessionFromWallet(selectedSlot.wallets || {}, eq);
-              let nextAdeudo = currentAdeudo;
-              if (!consumed.deducted) nextAdeudo += 1;
-
-              const patientPayload = {
-                wallets: consumed.wallets,
-                adeudo: nextAdeudo,
-                historico_sesiones: (selectedSlot.historicoSesiones || 0) + 1,
-              };
-              let patRes = await activeSupabase.from('patients').update(patientPayload).eq('id', selectedSlot.patientId);
-              if (patRes.error && /column|adeudo/i.test(patRes.error.message || '')) {
-                const { adeudo, ...fallbackPayload } = patientPayload;
-                patRes = await activeSupabase.from('patients').update(fallbackPayload).eq('id', selectedSlot.patientId);
-              }
+              const { deducted, nextAdeudo, consumed } = await processSessionDeduction(pat, eq, servicePrice);
 
               await activeSupabase.from('appointments').update({ check_in_status: 'Finalizado', attendant: selectedSlot.attendant, signature: sd }).eq('id', selectedSlot.id);
               
-              let auditStr = `Bitácora sellada y firmada por ${selectedSlot.attendant}.`;
-              if (!consumed.deducted) {
+              let auditStr = locale === 'en'
+                ? `Attendance sealed and signed by ${selectedSlot.attendant}.`
+                : `Bitácora sellada y firmada por ${selectedSlot.attendant}.`;
+              if (summaryLines?.headline) auditStr += ` ${summaryLines.headline}.`;
+              if (!deducted) {
                 auditStr += ` Sin saldo pagado: adeudo +1 (total adeudo: ${nextAdeudo}).`;
               } else {
-                auditStr += ` Se descontó 1 sesión de cartera (${consumed.walletKey || eq}).`;
+                auditStr += ` Se descontó 1 sesión de cartera (${consumed?.walletKey || eq}).`;
               }
               if (selectedSlot.protocol === 'Médico' && vt) {
                  auditStr += ` Signos: PA ${vt.pa}, Temp ${vt.temp}, HR ${vt.hr}.`;

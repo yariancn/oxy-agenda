@@ -1,16 +1,38 @@
 "use client";
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useStaffLocale } from './StaffLocaleContext';
+import { buildSessionSummary, formatSessionSummaryLines } from '../lib/sessionSummary';
 
-export default function BitacoraModal({ selectedSlot, onClose, onSeal }) {
+export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, onSeal }) {
   const { L } = useStaffLocale();
   const t = L.modals.bitacora;
 
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
-  const [isAgreed, setIsAgreed] = useState(false);
+  const [isAgreed, setIsAgreed] = useState(true);
   const [vitals, setVitals] = useState({ pa: '', temp: '', hr: '' });
+
+  const summaryLines = useMemo(() => {
+    const built = sessionSummary || buildSessionSummary({
+      historicoSesiones: selectedSlot?.historicoSesiones,
+      adeudo: selectedSlot?.adeudo,
+      wallets: selectedSlot?.wallets,
+      packageHistory: selectedSlot?.packageHistory,
+      equipment: selectedSlot?.equipment,
+      servicePrice: selectedSlot?.servicePrice,
+      sessionGroup: selectedSlot?.sessionGroup,
+      groupMembers: selectedSlot?.groupMembers,
+      patientName: selectedSlot?.patient,
+    });
+    return formatSessionSummaryLines(built, t);
+  }, [sessionSummary, selectedSlot, t]);
+
+  const statusToneClass = summaryLines.tone === 'debt'
+    ? 'bg-orange-100 border-orange-400 text-orange-950'
+    : summaryLines.tone === 'ok'
+      ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+      : 'bg-amber-50 border-amber-300 text-amber-900';
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -70,7 +92,7 @@ export default function BitacoraModal({ selectedSlot, onClose, onSeal }) {
   const handleSeal = () => {
     if (!isAgreed) return alert(t.needAgreement);
     if (!hasSignature) return alert(t.needSignature);
-    onSeal(canvasRef.current.toDataURL('image/png'), vitals);
+    onSeal(canvasRef.current.toDataURL('image/png'), vitals, summaryLines);
   };
 
   if (!selectedSlot) return null;
@@ -95,6 +117,16 @@ export default function BitacoraModal({ selectedSlot, onClose, onSeal }) {
               <p className="text-lg font-black text-slate-800 uppercase">{selectedSlot.day} · {selectedSlot.time}</p>
               <p className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block mt-1">{selectedSlot.equipment}</p>
             </div>
+          </div>
+
+          <div className={`p-4 rounded-xl border-2 ${statusToneClass}`}>
+            <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-1">
+              {selectedSlot.sessionGroup?.name ? `${t.sharedLabel} · ${t.sessionStatusTitle}` : t.sessionStatusTitle}
+            </p>
+            <p className="text-sm font-black uppercase leading-snug">{summaryLines.headline}</p>
+            {summaryLines.detail ? (
+              <p className="text-[10px] font-bold uppercase mt-2 leading-relaxed opacity-90">{summaryLines.detail}</p>
+            ) : null}
           </div>
 
           {selectedSlot.protocol === 'Médico' && (
