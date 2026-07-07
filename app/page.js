@@ -18,8 +18,10 @@ import {
   getClinicMeta,
   getClinicShortLabel,
   getClinicTheme,
+  isMissingClinicColumnError,
   isShenandoah,
   normalizeClinicId,
+  shouldScopeTableByClinic,
   staffDbSelectByClinic,
 } from '../lib/clinicRegistry';
 import { ensurePatient, digitsOnly } from '../lib/ensurePatient';
@@ -696,13 +698,18 @@ export default function AppLayout() {
         let allData = [];
         let from = 0;
         const step = 1000;
+        let useClinicFilter = clinicScoped && shouldScopeTableByClinic(clinicId);
         while (true) {
           let query = clinicDb.from(table).select('*');
-          if (clinicScoped) query = query.eq('clinic', clinicId);
-          const result = assertDbResult(
-            table,
-            await query.range(from, from + step - 1),
-          );
+          if (useClinicFilter) query = query.eq('clinic', clinicId);
+          let result = await query.range(from, from + step - 1);
+          if (result?.error && useClinicFilter && isMissingClinicColumnError(result.error)) {
+            useClinicFilter = false;
+            from = 0;
+            allData = [];
+            continue;
+          }
+          result = assertDbResult(table, result);
           let data = result.data;
           if (clinicScoped && data?.length) {
             data = filterRowsByClinic(data, clinicId);
@@ -731,10 +738,14 @@ export default function AppLayout() {
 
       const [patientsData, appointmentsData, resS, resU, resB, resC, resProt, resRoles, resPromo] = await Promise.all([
         fetchPaginated('patients'),
-        fetchPaginated('appointments', { clinicScoped: true }),
-        staffDbSelectByClinic(clinicDb, 'services', clinicId, (q) => q),
+        fetchPaginated('appointments', { clinicScoped: shouldScopeTableByClinic(clinicId) }),
+        shouldScopeTableByClinic(clinicId)
+          ? staffDbSelectByClinic(clinicDb, 'services', clinicId, (q) => q)
+          : clinicDb.from('services').select('*'),
         clinicDb.from('users_staff').select('*'),
-        staffDbSelectByClinic(clinicDb, 'blocked_slots', clinicId, (q) => q),
+        shouldScopeTableByClinic(clinicId)
+          ? staffDbSelectByClinic(clinicDb, 'blocked_slots', clinicId, (q) => q)
+          : clinicDb.from('blocked_slots').select('*'),
         clinicDb.from('company_config').select('*').eq('clinic', clinicId).maybeSingle(),
         clinicDb.from('protocols').select('*'),
         clinicDb.from('user_roles').select('*'),
