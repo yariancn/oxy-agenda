@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
 import { submitPublicBooking } from '../../../../lib/publicBooking.js';
 import { normalizePromoCode } from '../../../../lib/promoters.js';
-import { filterRowsByClinic, isPublicClinic, normalizeClinicId } from '../../../../lib/clinicRegistry.js';
+import { filterRowsByClinic, isMissingClinicColumnError, isPublicClinic, normalizeClinicId } from '../../../../lib/clinicRegistry.js';
 
 function sanitizeCompanyConfig(row) {
   if (!row) return null;
@@ -12,6 +12,20 @@ function sanitizeCompanyConfig(row) {
     ...safe
   } = row;
   return safe;
+}
+
+async function fetchActiveAppointments(supabase) {
+  let res = await supabase
+    .from('appointments')
+    .select('equipment, full_date, time, duration, buffer, check_in_status, clinic')
+    .neq('check_in_status', 'Cancelado');
+  if (res.error && isMissingClinicColumnError(res.error)) {
+    res = await supabase
+      .from('appointments')
+      .select('equipment, full_date, time, duration, buffer, check_in_status')
+      .neq('check_in_status', 'Cancelado');
+  }
+  return res;
 }
 
 export async function GET(request) {
@@ -25,10 +39,7 @@ export async function GET(request) {
     const supabase = getSupabaseAdmin(clinicName);
     const [resSrv, resApp, resBlock, resConf, resPromo] = await Promise.all([
       supabase.from('services').select('*').eq('is_active', true),
-      supabase
-        .from('appointments')
-        .select('equipment, full_date, time, duration, buffer, check_in_status, clinic')
-        .neq('check_in_status', 'Cancelado'),
+      fetchActiveAppointments(supabase),
       supabase.from('blocked_slots').select('*'),
       supabase.from('company_config').select('*').eq('clinic', clinicName).maybeSingle(),
       supabase.from('promoters').select('code, name').eq('is_active', true),

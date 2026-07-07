@@ -369,7 +369,12 @@ export default function PublicBookingPortal({
                     {t.bookingWith(promoterDisplayName)}
                   </p>
                 )}
-                {dbServices.map((srv) => (
+                {dbServices.length === 0 ? (
+                  <p className="text-center text-sm font-bold text-slate-500 uppercase py-6">
+                    {t.noServices}
+                  </p>
+                ) : (
+                  dbServices.map((srv) => (
                   <button
                     key={srv.id}
                     type="button"
@@ -384,7 +389,8 @@ export default function PublicBookingPortal({
                     <span className="font-black text-slate-800 uppercase text-left">{srv.name}</span>
                     <span className="bg-slate-100 p-2 rounded-full shrink-0">▶</span>
                   </button>
-                ))}
+                  ))
+                )}
               </div>
             )}
 
