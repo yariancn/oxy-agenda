@@ -42,6 +42,7 @@ import { InstallGuideLink } from '../components/InstallGuide';
 import PatientSearchInput from '../components/PatientSearchInput';
 import { StaffLocaleProvider } from '../components/StaffLocaleContext';
 import StaffBookingOverrides from '../components/StaffBookingOverrides';
+import DemoOccupancyPanel from '../components/DemoOccupancyPanel';
 import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
 import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
 import {
@@ -4150,6 +4151,7 @@ export default function AppLayout() {
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Horas previas (recordatorio automático por correo — próximamente)</label>
                   <input type="number" value={dbCompanyConfig.reminder_hours} onChange={e => setDbCompanyConfig({...dbCompanyConfig, reminder_hours: Number(e.target.value)})} className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm" />
                 </div>
+                <DemoOccupancyPanel clinicName={activeClinic} locale={locale} />
                 <div className="mt-6 mb-4 p-4 rounded-xl bg-indigo-50 border-2 border-indigo-200">
                   <h4 className="text-xs font-black uppercase text-indigo-900 mb-2">Alertas al equipo — cita nueva</h4>
                   <p className="text-[10px] font-bold text-indigo-800/90 mb-3 leading-relaxed">

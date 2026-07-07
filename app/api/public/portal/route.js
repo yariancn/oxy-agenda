@@ -3,12 +3,15 @@ import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
 import { submitPublicBooking } from '../../../../lib/publicBooking.js';
 import { normalizePromoCode } from '../../../../lib/promoters.js';
 import { filterRowsByClinic, isPublicClinic, normalizeClinicId, selectActiveAppointments, selectCompanyConfigForClinic } from '../../../../lib/clinicRegistry.js';
+import { mergePortalAppointments, readDemoConfig } from '../../../../lib/demoOccupancyServer.js';
 
 function sanitizeCompanyConfig(row) {
   if (!row) return null;
   const {
     master_pin,
     financial_pin,
+    demo_occupancy_slots,
+    demo_occupancy_overrides,
     ...safe
   } = row;
   return safe;
@@ -39,16 +42,27 @@ export async function GET(request) {
       throw resPromo.error;
     }
 
+    const services = filterRowsByClinic(resSrv.data || [], clinicName);
+    const realAppointments = filterRowsByClinic(resApp.data || [], clinicName);
+    const rawConfig = resConf.data;
+    const companyConfig = sanitizeCompanyConfig(rawConfig) || {
+      start_time: '08:00',
+      end_time: '20:00',
+      interval_mins: 30,
+      booking_limit_hours: 2,
+    };
+    const demo = readDemoConfig(rawConfig);
+
     return NextResponse.json({
-      services: filterRowsByClinic(resSrv.data || [], clinicName),
-      appointments: filterRowsByClinic(resApp.data || [], clinicName),
+      services,
+      appointments: mergePortalAppointments(realAppointments, {
+        enabled: demo.enabled,
+        demoSlots: demo.slots,
+        overrides: demo.overrides,
+        services,
+      }),
       blockedSlots: filterRowsByClinic(resBlock.data || [], clinicName),
-      companyConfig: sanitizeCompanyConfig(resConf.data) || {
-        start_time: '08:00',
-        end_time: '20:00',
-        interval_mins: 30,
-        booking_limit_hours: 2,
-      },
+      companyConfig,
       promoters: resPromo.data || [],
     });
   } catch (error) {

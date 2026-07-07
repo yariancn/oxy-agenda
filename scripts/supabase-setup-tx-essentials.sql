@@ -42,7 +42,11 @@ ALTER TABLE company_config
   ADD COLUMN IF NOT EXISTS staff_alert_emails text,
   ADD COLUMN IF NOT EXISTS weekly_schedule jsonb,
   ADD COLUMN IF NOT EXISTS calendar_feed_enabled boolean NOT NULL DEFAULT false,
-  ADD COLUMN IF NOT EXISTS calendar_feed_token text;
+  ADD COLUMN IF NOT EXISTS calendar_feed_token text,
+  ADD COLUMN IF NOT EXISTS demo_occupancy_enabled boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS demo_occupancy_percent integer NOT NULL DEFAULT 30,
+  ADD COLUMN IF NOT EXISTS demo_occupancy_slots jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS demo_occupancy_overrides jsonb NOT NULL DEFAULT '[]'::jsonb;
 
 UPDATE company_config SET clinic = 'Shenandoah' WHERE clinic IS NULL;
 
