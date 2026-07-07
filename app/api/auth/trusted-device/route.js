@@ -10,7 +10,7 @@ export async function GET(request) {
     if (!device?.email) {
       return NextResponse.json({ trusted: false });
     }
-    return NextResponse.json(buildTrustedDeviceHint(device.email));
+    return NextResponse.json(buildTrustedDeviceHint(device.email, device));
   } catch {
     return NextResponse.json({ trusted: false });
   }

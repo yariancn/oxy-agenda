@@ -138,6 +138,7 @@ export default function AppLayout() {
   const [rememberDevice, setRememberDevice] = useState(true);
   const [trustedDevice, setTrustedDevice] = useState(null);
   const [loginModeTrusted, setLoginModeTrusted] = useState(false);
+  const [authBootstrapping, setAuthBootstrapping] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [wrongHostWarning, setWrongHostWarning] = useState(false);
@@ -912,29 +913,56 @@ export default function AppLayout() {
   }, [dbErrorMessage, L]);
 
   useEffect(() => {
-    fetch('/api/auth/me', { credentials: 'include' })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.user) {
-          const user = normalizeStaffSessionUser(data.user);
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const meRes = await fetch('/api/auth/me', { credentials: 'include' });
+        const meData = await meRes.json().catch(() => ({}));
+        if (cancelled) return;
+
+        if (meData?.user) {
+          const user = normalizeStaffSessionUser(meData.user);
           setCurrentUser(user);
           setActiveClinic(resolveStaffActiveClinic(user));
+          return;
         }
-      })
-      .catch(() => {});
 
-    fetch('/api/auth/trusted-device', { credentials: 'include' })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.trusted && data?.emailMasked) {
-          setTrustedDevice(data);
+        const tdRes = await fetch('/api/auth/trusted-device', { credentials: 'include' });
+        const tdData = await tdRes.json().catch(() => ({}));
+        if (cancelled) return;
+
+        if (tdData?.trusted && tdData?.emailMasked) {
+          setTrustedDevice(tdData);
           setLoginModeTrusted(true);
+
+          if (tdData.pinFresh) {
+            const autoRes = await fetch('/api/auth/auto-login', {
+              method: 'POST',
+              credentials: 'include',
+            });
+            const autoData = await autoRes.json().catch(() => ({}));
+            if (cancelled) return;
+            if (autoData?.user) {
+              const user = normalizeStaffSessionUser(autoData.user);
+              setCurrentUser(user);
+              setActiveClinic(resolveStaffActiveClinic(user));
+            }
+          }
         } else {
           setTrustedDevice(null);
           setLoginModeTrusted(false);
         }
-      })
-      .catch(() => {});
+      } catch {
+        /* ignore */
+      } finally {
+        if (!cancelled) setAuthBootstrapping(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -2668,13 +2696,23 @@ export default function AppLayout() {
       )}
       
       {/* CAPA DE BLOQUEO: INICIAR TURNO Y LLAVE MAESTRA */}
-      {!currentUser && (
+      {authBootstrapping && !currentUser && (
+        <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md flex items-center justify-center z-[99999]">
+          <div className="bg-white p-8 rounded-3xl shadow-2xl text-center border mx-4">
+            <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" className="h-16 mx-auto mb-4 rounded-xl shadow-sm" alt="Logo"/>
+            <p className="text-sm font-black uppercase text-slate-600">{L.loginRestoring}</p>
+          </div>
+        </div>
+      )}
+      {!currentUser && !authBootstrapping && (
         <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md flex items-center justify-center z-[99999]">
            <div className="bg-white p-6 sm:p-10 rounded-3xl shadow-2xl w-full max-w-sm text-center border mx-4">
              <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" className="h-20 mx-auto mb-6 rounded-xl shadow-sm" alt="Logo"/>
              <h2 className="text-2xl font-black uppercase mb-2 text-slate-800">{L.loginTitle}</h2>
              <p className="text-xs font-bold text-slate-500 mb-6 uppercase">
-               {loginModeTrusted ? L.loginTrustedHint : L.loginHint}
+               {loginModeTrusted
+                 ? (trustedDevice?.pinFresh === false ? L.loginTrustedPinHint : L.loginTrustedHint)
+                 : L.loginHint}
              </p>
              {loginModeTrusted && trustedDevice?.emailMasked ? (
                <div className="mb-4 p-3 rounded-xl bg-blue-50 border border-blue-100 text-left">
@@ -4254,6 +4292,8 @@ export default function AppLayout() {
                         <button onClick={async () => {
                           if (!newUser.name) return alert(L.p.admin.userName);
                           if (!newUser.pin || newUser.pin.length !== 6) return alert(L.p.admin.pinSix);
+                          const email = (newUser.email || '').trim();
+                          if (!email) return alert(L.p.admin.staffEmailRequired);
                           const staffPayload = {
                             name: newUser.name,
                             role: newUser.role,
@@ -4261,10 +4301,9 @@ export default function AppLayout() {
                             is_active: newUser.is_active,
                             pin: newUser.pin,
                             notify_on_booking: newUser.notify_on_booking !== false,
+                            email,
                           };
-                          const email = (newUser.email || '').trim();
                           const phone = (newUser.phone || '').trim();
-                          if (email) staffPayload.email = email;
                           if (phone) staffPayload.phone = phone;
 
                           const saveStaff = async (payload) => {
