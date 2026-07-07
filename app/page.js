@@ -42,8 +42,21 @@ import { InstallGuideLink } from '../components/InstallGuide';
 import PatientSearchInput from '../components/PatientSearchInput';
 import { StaffLocaleProvider } from '../components/StaffLocaleContext';
 import StaffBookingOverrides from '../components/StaffBookingOverrides';
-import DemoOccupancyPanel from '../components/DemoOccupancyPanel';
+import dynamic from 'next/dynamic';
+import AppSymbolLegend from '../components/AppSymbolLegend';
+import StaffTabErrorBoundary from '../components/StaffTabErrorBoundary';
 import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
+
+const DemoOccupancyPanel = dynamic(() => import('../components/DemoOccupancyPanel'), {
+  ssr: false,
+  loading: () => (
+    <div className="mb-6 p-4 rounded-2xl border border-violet-200 bg-violet-50 text-[10px] font-bold uppercase text-violet-700">
+      …
+    </div>
+  ),
+});
+
+const STAFF_TAB_PANEL = 'flex-1 min-h-0 overflow-y-auto overscroll-y-contain flex flex-col z-10 p-3 pb-20 lg:p-6 lg:pb-6';
 import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
 import {
   buildDefaultWeeklySchedule,
@@ -163,6 +176,7 @@ export default function AppLayout() {
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [weekFilterHintDismissed, setWeekFilterHintDismissed] = useState(false);
   const [showCalendarLegend, setShowCalendarLegend] = useState(false);
+  const [showSymbolLegend, setShowSymbolLegend] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
   const prefsHydratedRef = useRef(false);
   const skipAutoZoomRef = useRef(false);
@@ -2864,10 +2878,19 @@ export default function AppLayout() {
             </>
           )}
         </nav>
+        <div className="p-3 pt-0 hidden lg:block">
+          <button
+            type="button"
+            onClick={() => setShowSymbolLegend(true)}
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+          >
+            ℹ️ {L.symbolLegendBtn}
+          </button>
+        </div>
       </aside>
 
       {/* CONTENIDO PRINCIPAL */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden relative min-w-0 pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+      <main className="flex-1 flex flex-col min-h-0 h-screen overflow-hidden relative min-w-0 pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0">
 
         {/* Barra superior móvil — compacta */}
         {currentUser && (
@@ -2896,6 +2919,7 @@ export default function AppLayout() {
               </span>
             )}
             <span className="flex-1 truncate text-[10px] font-bold text-slate-200 min-w-0">{currentUser.name}</span>
+            <button type="button" onClick={() => setShowSymbolLegend(true)} className="shrink-0 h-8 w-8 rounded-lg border border-slate-700 text-sm leading-none" aria-label={L.symbolLegendBtn}>ℹ️</button>
             <button onClick={() => openNewAppointment()} className="shrink-0 h-8 w-8 bg-emerald-600 rounded-lg text-white font-black text-lg leading-none shadow" aria-label={L.ariaNewAppt}>+</button>
             <button onClick={handleLogout} className="shrink-0 text-[9px] font-black text-red-400 uppercase px-1">{L.logout}</button>
           </div>
@@ -3000,6 +3024,9 @@ export default function AppLayout() {
                   <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg">🟡 {L.legendOutsideHours}</span>
                   <span className="inline-flex items-center gap-1 bg-violet-50 border border-violet-200 px-2 py-1 rounded-lg">🟣 {L.legendExtended}</span>
                   <span className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">⭐ {L.legendNewPatient}</span>
+                  <button type="button" onClick={() => setShowSymbolLegend(true)} className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 px-2 py-1 rounded-lg text-blue-700 font-black uppercase">
+                    ℹ️ {L.legendViewAll}
+                  </button>
                   <span className="hidden lg:inline text-slate-400 self-center">{L.shortcutsHint}</span>
                 </div>
               )}
@@ -3193,6 +3220,11 @@ export default function AppLayout() {
               </div>
               <input type="text" placeholder={L.searchPatients} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full md:max-w-md p-3 border border-slate-300 rounded-xl shadow-sm outline-none focus:border-blue-500 font-bold bg-white text-slate-900 text-sm" />
             </div>
+            {currentUserLevel <= 2 && (
+              <div className="mb-4 bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 text-[10px] font-bold text-violet-900 normal-case leading-relaxed">
+                👥 {L.patientsPackagesHint}
+              </div>
+            )}
             
             {dbStatus === 'listo' && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -3201,6 +3233,7 @@ export default function AppLayout() {
 
                       <p className="font-black text-slate-900 uppercase text-base truncate pr-6">
                         {p.is_blocked && <span title="Paciente Bloqueado" className="mr-2">🚫</span>}
+                        {p.sessionGroupId && <span title={L.symbolLegend?.legendSharedWallet || 'Cartera compartida'} className="mr-2">👥</span>}
                         {p.patient}
                       </p>
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{p.phone || L.noPhone}</p>
@@ -3243,7 +3276,8 @@ export default function AppLayout() {
 
         {/* VISTA SERVICIOS Y PROTOCOLOS (CATÁLOGO) */}
         {activeTab === 'Servicios' && currentUserLevel <= 2 && (
-          <div className="flex-1 p-3 lg:p-6 bg-slate-50 overflow-auto flex flex-col h-full z-10">
+          <StaffTabErrorBoundary locale={locale} onGoAgenda={() => selectTab('Agenda')}>
+          <div className={`${STAFF_TAB_PANEL} bg-slate-50`}>
             <div className="mb-6">
               <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">{L.p.services.title}</h2>
               <p className="text-xs font-bold text-slate-500 mt-1">{L.p.services.subtitle}</p>
@@ -3554,11 +3588,13 @@ export default function AppLayout() {
               </div>
             </div>
           </div>
+          </StaffTabErrorBoundary>
         )}
 
         {/* VISTA REPORTES */}
         {activeTab === 'Reportes' && currentUserLevel <= 2 && (
-          <div className="flex-1 p-3 lg:p-6 overflow-auto bg-white flex flex-col h-full z-10 relative">
+          <StaffTabErrorBoundary locale={locale} onGoAgenda={() => selectTab('Agenda')}>
+          <div className={`${STAFF_TAB_PANEL} bg-white relative`}>
             <div className="flex justify-between items-end mb-6 border-b border-slate-200 pb-4">
               <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Centro de Reportes</h2>
               <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
@@ -3747,6 +3783,7 @@ export default function AppLayout() {
               )
             )}
           </div>
+          </StaffTabErrorBoundary>
         )}
 
         {/* VISTA GFE */}
@@ -3754,7 +3791,8 @@ export default function AppLayout() {
 
         {/* VISTA ADMIN */}
         {activeTab === 'Admin' && currentUserLevel <= 2 && (
-          <div className="flex-1 p-3 lg:p-6 bg-white overflow-auto flex flex-col h-full z-10">
+          <StaffTabErrorBoundary locale={locale} onGoAgenda={() => selectTab('Agenda')}>
+          <div className={`${STAFF_TAB_PANEL} bg-white`}>
             <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6 pb-4 border-b border-slate-200">
               <div>
                 <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Ajustes de Clínica</h2>
@@ -4285,7 +4323,7 @@ export default function AppLayout() {
                         <span className="text-[10px] font-black uppercase text-indigo-900">{L.p.admin.staffNotifyBooking}</span>
                       </label>
                       <select className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})}>
-                        {dbRoles.map(r => <option key={r.id} value={r.name}>{r.name} (Nivel {r.level})</option>)}
+                        {(dbRoles || []).map(r => <option key={r.id} value={r.name}>{r.name} (Nivel {r.level})</option>)}
                       </select>
                       <input type="text" placeholder="Certificación (Ej. IBUM, D.O.)" className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" value={newUser.cert} onChange={e => setNewUser({...newUser, cert: e.target.value})} />
                       <input type="text" placeholder="PIN Personal (6 Dígitos)" maxLength="6" className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none tracking-widest text-slate-900 bg-white" value={newUser.pin || ''} onChange={e => setNewUser({...newUser, pin: e.target.value})} />
@@ -4581,6 +4619,7 @@ export default function AppLayout() {
             </>
             )}
           </div>
+          </StaffTabErrorBoundary>
         )}
 
       </main>
@@ -5786,6 +5825,7 @@ export default function AppLayout() {
         </>
       )}
     </div>
+    <AppSymbolLegend open={showSymbolLegend} onClose={() => setShowSymbolLegend(false)} />
     </StaffLocaleProvider>
   );
 }

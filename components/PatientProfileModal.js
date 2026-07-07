@@ -59,6 +59,8 @@ export default function PatientProfileModal({
   const [receipt, setReceipt] = useState(null);
   const [charging, setCharging] = useState(false);
   const [printResult, setPrintResult] = useState(null);
+  const [smsResult, setSmsResult] = useState(null);
+  const [smsBusy, setSmsBusy] = useState(false);
   const [lastPurchaseNote, setLastPurchaseNote] = useState('');
   const [sharedGroupName, setSharedGroupName] = useState('');
   const [memberToAdd, setMemberToAdd] = useState('');
@@ -109,6 +111,43 @@ export default function PatientProfileModal({
   const dismissReceipt = () => {
     setReceipt(null);
     setPrintResult(null);
+    setSmsResult(null);
+  };
+
+  const runSms = async (tx) => {
+    const phone = String(tx.phone || formData.phone || '').trim();
+    if (!phone) {
+      alert(t.receiptNoPhone);
+      return { ok: false };
+    }
+    setSmsBusy(true);
+    setSmsResult('sending');
+    try {
+      const res = await fetch('/api/staff/pos-receipt-sms', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clinic: activeClinic,
+          receipt: { ...tx, phone },
+          companyConfig,
+          locale,
+          labels: t,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setSmsResult('error');
+        return { ok: false, error: data.error };
+      }
+      setSmsResult('ok');
+      return { ok: true };
+    } catch {
+      setSmsResult('error');
+      return { ok: false };
+    } finally {
+      setSmsBusy(false);
+    }
   };
 
   const handleChange = (field, value) => {
@@ -240,8 +279,9 @@ export default function PatientProfileModal({
 
     onLogSale?.(newTransaction, formData.patient);
 
+    setPrintResult(null);
+    setSmsResult(null);
     setReceipt(newTransaction);
-    await runPrint(newTransaction);
 
     setPosService('');
     setPosQty(1);
@@ -351,6 +391,13 @@ export default function PatientProfileModal({
           {formData.is_blocked && currentUserLevel > 1 && (
             <div className="bg-red-600 p-4 rounded-xl text-white text-center">
               <span className="text-xs font-black uppercase">{t.profileBlocked}</span>
+            </div>
+          )}
+
+          {canManageShared && (
+            <div className="rounded-xl border-2 border-indigo-300 bg-indigo-50 p-3">
+              <p className="text-[11px] font-black uppercase text-indigo-900">{t.packagesSectionTitle}</p>
+              <p className="text-[9px] font-bold text-indigo-800/90 mt-1 leading-snug normal-case">{t.packagesSectionHint}</p>
             </div>
           )}
 
@@ -547,8 +594,8 @@ export default function PatientProfileModal({
                         <p className="text-[8px] text-slate-400 uppercase">{tx.date} · ${tx.price}</p>
                       </div>
                       <div className="flex flex-col gap-1 shrink-0">
-                        <button type="button" onClick={() => runPrint(tx)} className="text-[9px] font-black text-slate-700 uppercase px-2 py-1 border border-slate-200 rounded bg-slate-50">
-                          {t.receiptReprint}
+                        <button type="button" onClick={() => { setPrintResult(null); setSmsResult(null); setReceipt(tx); }} className="text-[9px] font-black text-slate-700 uppercase px-2 py-1 border border-slate-200 rounded bg-slate-50">
+                          {t.receiptGenerated}
                         </button>
                         {canCancelSales && (
                           <button type="button" onClick={() => handleCancelTransaction(tx)} className="text-[9px] font-black text-red-600 uppercase px-2 py-1 border border-red-200 rounded">
@@ -638,6 +685,8 @@ export default function PatientProfileModal({
       {receipt && (
         <div className="fixed inset-0 bg-slate-900/80 flex items-center justify-center p-4 z-[200]">
           <div className="bg-slate-100 rounded-xl max-w-sm w-full p-4 max-h-[90vh] overflow-y-auto">
+            <p className="text-center text-xs font-black text-slate-800 mb-3 uppercase">{t.receiptGenerated}</p>
+            <p className="text-center text-[9px] font-bold text-slate-500 mb-3 normal-case">{t.receiptChooseDelivery}</p>
             {printResult === 'error' && (
               <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 mb-4">
                 <p className="text-xs font-black text-red-800 uppercase mb-2">⚠️ {locale === 'en' ? 'Print error' : 'Error de impresión'}</p>
@@ -650,23 +699,31 @@ export default function PatientProfileModal({
             {printResult === 'ok' && (
               <p className="text-center text-[10px] font-black text-emerald-700 mb-3 uppercase">{t.receiptPrintSent}</p>
             )}
+            {smsResult === 'sending' && (
+              <p className="text-center text-[10px] font-black text-slate-500 mb-3 uppercase">{t.receiptSmsSending}</p>
+            )}
+            {smsResult === 'ok' && (
+              <p className="text-center text-[10px] font-black text-emerald-700 mb-3 uppercase">{t.receiptSmsSent}</p>
+            )}
+            {smsResult === 'error' && (
+              <p className="text-center text-[10px] font-black text-red-700 mb-3 uppercase normal-case">{t.receiptSmsError}</p>
+            )}
             <div className="bg-white p-4 font-mono text-sm mb-4 uppercase overflow-x-auto" dangerouslySetInnerHTML={{ __html: buildReceiptHtml(receipt) }} />
             <div className="text-center text-[10px] font-bold text-slate-500 mb-3 normal-case">
               {receipt.sessions} {t.sessionsShort} · {t.receiptSubtotal} ${((receipt.unitPrice || 0) * receipt.sessions).toFixed(2)} {currency} · {t.receiptTotal} ${receipt.price.toFixed(2)} {currency}
             </div>
             <p className="text-[9px] text-slate-400 text-center mb-3 normal-case leading-relaxed">{t.receiptBtHint}</p>
             <div className="flex flex-col gap-2">
-              {printResult === 'error' ? (
-                <>
-                  <button type="button" onClick={() => runPrint(receipt)} className="w-full bg-slate-900 text-white font-black py-3 rounded uppercase text-xs">{t.receiptReprint}</button>
-                  <button type="button" onClick={dismissReceipt} className="w-full bg-emerald-600 text-white font-black py-3 rounded uppercase text-xs">{t.receiptPrintAccept}</button>
-                </>
-              ) : (
-                <div className="flex gap-3">
-                  <button type="button" onClick={dismissReceipt} className="flex-1 bg-slate-300 font-black py-3 rounded uppercase text-xs">{t.close}</button>
-                  <button type="button" onClick={() => runPrint(receipt)} className="flex-1 bg-slate-900 text-white font-black py-3 rounded uppercase text-xs">{t.receiptReprint}</button>
-                </div>
-              )}
+              <button type="button" onClick={() => runPrint(receipt)} className="w-full bg-slate-900 text-white font-black py-3 rounded uppercase text-xs">{t.printTicket}</button>
+              <button
+                type="button"
+                disabled={smsBusy || !String(receipt.phone || formData.phone || '').trim()}
+                onClick={() => runSms(receipt)}
+                className="w-full bg-blue-600 text-white font-black py-3 rounded uppercase text-xs disabled:opacity-50"
+              >
+                {t.receiptSendSms}
+              </button>
+              <button type="button" onClick={dismissReceipt} className="w-full bg-emerald-600 text-white font-black py-3 rounded uppercase text-xs">{t.receiptPrintAccept}</button>
             </div>
           </div>
         </div>
