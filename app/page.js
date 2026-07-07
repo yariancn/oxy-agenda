@@ -134,6 +134,10 @@ export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
   const [currentUser, setCurrentUser] = useState(null);
   const [loginPin, setLoginPin] = useState('');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [rememberDevice, setRememberDevice] = useState(true);
+  const [trustedDevice, setTrustedDevice] = useState(null);
+  const [loginModeTrusted, setLoginModeTrusted] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [wrongHostWarning, setWrongHostWarning] = useState(false);
@@ -918,6 +922,19 @@ export default function AppLayout() {
         }
       })
       .catch(() => {});
+
+    fetch('/api/auth/trusted-device', { credentials: 'include' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.trusted && data?.emailMasked) {
+          setTrustedDevice(data);
+          setLoginModeTrusted(true);
+        } else {
+          setTrustedDevice(null);
+          setLoginModeTrusted(false);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -933,20 +950,47 @@ export default function AppLayout() {
   }, [currentUser, activeClinic]);
 
   // --- MOTORES DE ACCESO Y SEGURIDAD ---
+  const handleForgetDevice = async () => {
+    try {
+      await fetch('/api/auth/forget-device', { method: 'POST', credentials: 'include' });
+    } catch {
+      /* ignore */
+    }
+    setTrustedDevice(null);
+    setLoginModeTrusted(false);
+    setLoginEmail('');
+    setLoginPin('');
+  };
+
   const handleLoginSubmit = async () => {
     if (isLoggingIn) return;
+    if (!loginModeTrusted && !loginEmail.trim()) {
+      alert(staffAlert(locale, 'emailRequired'));
+      return;
+    }
     setIsLoggingIn(true);
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: loginPin }),
+        body: JSON.stringify({
+          pin: loginPin,
+          email: loginModeTrusted ? '' : loginEmail.trim(),
+          rememberDevice: loginModeTrusted ? true : rememberDevice,
+        }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.user) {
-        const detail = result.error ? `\n\n${result.error}` : '';
-        alert(`${staffAlert(locale, 'pinInvalid')}${detail}`);
+        if (result.error === 'locked' && result.lockedMinutes) {
+          alert(staffAlert(locale, 'loginLocked', result.lockedMinutes));
+        } else if (result.error === 'email_required') {
+          alert(staffAlert(locale, 'emailRequired'));
+        } else if (result.error === 'email_invalid') {
+          alert(staffAlert(locale, 'emailInvalid'));
+        } else {
+          alert(staffAlert(locale, 'pinInvalid'));
+        }
         setLoginPin('');
         return;
       }
@@ -2629,9 +2673,49 @@ export default function AppLayout() {
            <div className="bg-white p-6 sm:p-10 rounded-3xl shadow-2xl w-full max-w-sm text-center border mx-4">
              <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" className="h-20 mx-auto mb-6 rounded-xl shadow-sm" alt="Logo"/>
              <h2 className="text-2xl font-black uppercase mb-2 text-slate-800">{L.loginTitle}</h2>
-             <p className="text-xs font-bold text-slate-500 mb-8 uppercase">{L.loginHint}</p>
+             <p className="text-xs font-bold text-slate-500 mb-6 uppercase">
+               {loginModeTrusted ? L.loginTrustedHint : L.loginHint}
+             </p>
+             {loginModeTrusted && trustedDevice?.emailMasked ? (
+               <div className="mb-4 p-3 rounded-xl bg-blue-50 border border-blue-100 text-left">
+                 <p className="text-[10px] font-black uppercase text-blue-600 mb-1">{L.loginTrustedHint}</p>
+                 <p className="text-sm font-black text-slate-800">{trustedDevice.emailMasked}</p>
+                 <button
+                   type="button"
+                   onClick={handleForgetDevice}
+                   className="mt-2 text-[10px] font-black uppercase text-blue-700 underline"
+                 >
+                   {L.loginUseOtherAccount}
+                 </button>
+               </div>
+             ) : (
+               <>
+                 <label className="block text-[10px] font-black uppercase text-slate-400 text-left mb-1 ml-1">{L.loginEmail}</label>
+                 <input
+                   type="email"
+                   autoComplete="username"
+                   value={loginEmail}
+                   onChange={(e) => setLoginEmail(e.target.value)}
+                   disabled={isLoggingIn}
+                   placeholder={L.loginEmailPh}
+                   className="w-full p-3 mb-4 border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold text-sm text-slate-900 bg-slate-50 disabled:opacity-60"
+                 />
+                 <label className="flex items-start gap-2 mb-4 text-left cursor-pointer">
+                   <input
+                     type="checkbox"
+                     checked={rememberDevice}
+                     onChange={(e) => setRememberDevice(e.target.checked)}
+                     disabled={isLoggingIn}
+                     className="mt-0.5 w-4 h-4"
+                   />
+                   <span className="text-[10px] font-bold text-slate-600 uppercase leading-relaxed">{L.loginRememberDevice}</span>
+                 </label>
+               </>
+             )}
+             <label className="block text-[10px] font-black uppercase text-slate-400 text-left mb-1 ml-1">NIP</label>
              <input 
-                type="password" 
+                type="password"
+                autoComplete="current-password"
                 maxLength="10" 
                 value={loginPin} 
                 onChange={e => setLoginPin(e.target.value)} 
@@ -2641,7 +2725,7 @@ export default function AppLayout() {
                disabled={isLoggingIn}
                className="w-full text-center text-3xl tracking-[0.2em] font-black p-4 border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 mb-6 bg-slate-50 text-slate-900 disabled:opacity-60" 
              />
-             <button onClick={handleLoginSubmit} disabled={isLoggingIn || !loginPin.trim()} className="w-full bg-blue-600 text-white font-black py-4 rounded-xl uppercase text-sm shadow-md hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed">
+             <button onClick={handleLoginSubmit} disabled={isLoggingIn || !loginPin.trim() || (!loginModeTrusted && !loginEmail.trim())} className="w-full bg-blue-600 text-white font-black py-4 rounded-xl uppercase text-sm shadow-md hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed">
                 {isLoggingIn ? L.loginVerifying : L.loginEnter}
              </button>
              <div className="mt-5 pt-4 border-t border-slate-100">
