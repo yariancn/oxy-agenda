@@ -334,12 +334,6 @@ export default function PublicBookingPortal({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <a
-            href="/"
-            className="text-[9px] font-black uppercase border border-amber-500/60 text-amber-200 px-2 py-1 rounded whitespace-nowrap"
-          >
-            {t.staff}
-          </a>
           {step > 1 && step < 4 && (
             <button
               type="button"
