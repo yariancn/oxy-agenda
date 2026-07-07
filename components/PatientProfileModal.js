@@ -1,8 +1,7 @@
 "use client";
 import React, { useState } from 'react';
 import { useStaffLocale } from './StaffLocaleContext';
-import { buildPosTicketHtml } from '../lib/posTicket';
-import { printThermalHtml } from '../lib/printReceipt';
+import PosReceiptModal from './PosReceiptModal';
 import { applyPurchaseSessions, priceWalletKey, reversePurchaseSessions, sumWalletBalance } from '../lib/sessionWallet';
 import { sumPurchasedSessions } from '../lib/sessionSummary';
 import { canCreateSessionGroup, canJoinSessionGroup, isGroupTitular } from '../lib/sessionGroup';
@@ -58,9 +57,6 @@ export default function PatientProfileModal({
   const [posNotes, setPosNotes] = useState('');
   const [receipt, setReceipt] = useState(null);
   const [charging, setCharging] = useState(false);
-  const [printResult, setPrintResult] = useState(null);
-  const [smsResult, setSmsResult] = useState(null);
-  const [smsBusy, setSmsBusy] = useState(false);
   const [lastPurchaseNote, setLastPurchaseNote] = useState('');
   const [sharedGroupName, setSharedGroupName] = useState('');
   const [memberToAdd, setMemberToAdd] = useState('');
@@ -88,67 +84,7 @@ export default function PatientProfileModal({
       ];
 
   const currency = activeClinic === 'Shenandoah' ? 'USD' : 'MXN';
-
-  const buildReceiptHtml = (tx) => buildPosTicketHtml({
-    receipt: tx,
-    companyConfig,
-    clinicName: activeClinic,
-    locale,
-    labels: t,
-    origin: typeof window !== 'undefined' ? window.location.origin : '',
-  });
-
-  const runPrint = async (tx) => {
-    setPrintResult('printing');
-    const result = await printThermalHtml(
-      buildReceiptHtml(tx),
-      locale === 'en' ? 'POS receipt' : 'Ticket POS',
-    );
-    setPrintResult(result.ok ? 'ok' : 'error');
-    return result;
-  };
-
-  const dismissReceipt = () => {
-    setReceipt(null);
-    setPrintResult(null);
-    setSmsResult(null);
-  };
-
-  const runSms = async (tx) => {
-    const phone = String(tx.phone || formData.phone || '').trim();
-    if (!phone) {
-      alert(t.receiptNoPhone);
-      return { ok: false };
-    }
-    setSmsBusy(true);
-    setSmsResult('sending');
-    try {
-      const res = await fetch('/api/staff/pos-receipt-sms', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clinic: activeClinic,
-          receipt: { ...tx, phone },
-          companyConfig,
-          locale,
-          labels: t,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setSmsResult('error');
-        return { ok: false, error: data.error };
-      }
-      setSmsResult('ok');
-      return { ok: true };
-    } catch {
-      setSmsResult('error');
-      return { ok: false };
-    } finally {
-      setSmsBusy(false);
-    }
-  };
+  const hasPhoneForSms = Boolean(String(formData.phone || '').trim());
 
   const handleChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -279,8 +215,6 @@ export default function PatientProfileModal({
 
     onLogSale?.(newTransaction, formData.patient);
 
-    setPrintResult(null);
-    setSmsResult(null);
     setReceipt(newTransaction);
 
     setPosService('');
@@ -594,7 +528,7 @@ export default function PatientProfileModal({
                         <p className="text-[8px] text-slate-400 uppercase">{tx.date} · ${tx.price}</p>
                       </div>
                       <div className="flex flex-col gap-1 shrink-0">
-                        <button type="button" onClick={() => { setPrintResult(null); setSmsResult(null); setReceipt(tx); }} className="text-[9px] font-black text-slate-700 uppercase px-2 py-1 border border-slate-200 rounded bg-slate-50">
+                        <button type="button" onClick={() => setReceipt(tx)} className="text-[9px] font-black text-slate-700 uppercase px-2 py-1 border border-slate-200 rounded bg-slate-50">
                           {t.receiptGenerated}
                         </button>
                         {canCancelSales && (
@@ -670,6 +604,22 @@ export default function PatientProfileModal({
               className="w-full p-2 border border-blue-200 rounded-lg text-xs font-bold bg-white text-blue-900 mb-3"
               rows={2}
             />
+            <div className="mb-3 p-3 rounded-xl border-2 border-blue-300 bg-white">
+              <p className="text-[9px] font-black uppercase text-blue-900 mb-2">{t.receiptChooseDelivery}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center justify-center gap-1.5 bg-slate-900 text-white font-black py-2.5 rounded-lg text-[10px] uppercase">
+                  {t.printTicket}
+                </div>
+                <div className={`flex items-center justify-center gap-1.5 font-black py-2.5 rounded-lg text-[10px] uppercase ${hasPhoneForSms ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                  📱 {locale === 'en' ? 'SMS' : 'SMS'}
+                </div>
+              </div>
+              <p className="text-[8px] font-bold text-blue-700/90 mt-2 normal-case leading-snug">
+                {hasPhoneForSms
+                  ? (locale === 'en' ? 'After charging you choose print or SMS.' : 'Al cobrar podrás elegir imprimir o enviar por SMS.')
+                  : t.receiptNoPhone}
+              </p>
+            </div>
             <button type="button" disabled={charging} onClick={handlePurchase} className="w-full bg-blue-600 text-white text-xs font-black uppercase py-3 rounded-lg disabled:opacity-60">
               {charging ? '...' : t.chargeTicket}
             </button>
@@ -682,52 +632,16 @@ export default function PatientProfileModal({
         </div>
       </div>
 
-      {receipt && (
-        <div className="fixed inset-0 bg-slate-900/80 flex items-center justify-center p-4 z-[200]">
-          <div className="bg-slate-100 rounded-xl max-w-sm w-full p-4 max-h-[90vh] overflow-y-auto">
-            <p className="text-center text-xs font-black text-slate-800 mb-3 uppercase">{t.receiptGenerated}</p>
-            <p className="text-center text-[9px] font-bold text-slate-500 mb-3 normal-case">{t.receiptChooseDelivery}</p>
-            {printResult === 'error' && (
-              <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 mb-4">
-                <p className="text-xs font-black text-red-800 uppercase mb-2">⚠️ {locale === 'en' ? 'Print error' : 'Error de impresión'}</p>
-                <p className="text-[11px] font-bold text-red-700 leading-relaxed normal-case">{t.receiptPrintError}</p>
-              </div>
-            )}
-            {printResult === 'printing' && (
-              <p className="text-center text-[10px] font-black text-slate-500 mb-3 uppercase">{t.receiptPrinting}</p>
-            )}
-            {printResult === 'ok' && (
-              <p className="text-center text-[10px] font-black text-emerald-700 mb-3 uppercase">{t.receiptPrintSent}</p>
-            )}
-            {smsResult === 'sending' && (
-              <p className="text-center text-[10px] font-black text-slate-500 mb-3 uppercase">{t.receiptSmsSending}</p>
-            )}
-            {smsResult === 'ok' && (
-              <p className="text-center text-[10px] font-black text-emerald-700 mb-3 uppercase">{t.receiptSmsSent}</p>
-            )}
-            {smsResult === 'error' && (
-              <p className="text-center text-[10px] font-black text-red-700 mb-3 uppercase normal-case">{t.receiptSmsError}</p>
-            )}
-            <div className="bg-white p-4 font-mono text-sm mb-4 uppercase overflow-x-auto" dangerouslySetInnerHTML={{ __html: buildReceiptHtml(receipt) }} />
-            <div className="text-center text-[10px] font-bold text-slate-500 mb-3 normal-case">
-              {receipt.sessions} {t.sessionsShort} · {t.receiptSubtotal} ${((receipt.unitPrice || 0) * receipt.sessions).toFixed(2)} {currency} · {t.receiptTotal} ${receipt.price.toFixed(2)} {currency}
-            </div>
-            <p className="text-[9px] text-slate-400 text-center mb-3 normal-case leading-relaxed">{t.receiptBtHint}</p>
-            <div className="flex flex-col gap-2">
-              <button type="button" onClick={() => runPrint(receipt)} className="w-full bg-slate-900 text-white font-black py-3 rounded uppercase text-xs">{t.printTicket}</button>
-              <button
-                type="button"
-                disabled={smsBusy || !String(receipt.phone || formData.phone || '').trim()}
-                onClick={() => runSms(receipt)}
-                className="w-full bg-blue-600 text-white font-black py-3 rounded uppercase text-xs disabled:opacity-50"
-              >
-                {t.receiptSendSms}
-              </button>
-              <button type="button" onClick={dismissReceipt} className="w-full bg-emerald-600 text-white font-black py-3 rounded uppercase text-xs">{t.receiptPrintAccept}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PosReceiptModal
+        open={Boolean(receipt)}
+        receipt={receipt}
+        phone={formData.phone}
+        companyConfig={companyConfig}
+        activeClinic={activeClinic}
+        locale={locale}
+        labels={t}
+        onClose={() => setReceipt(null)}
+      />
     </div>
   );
 }

@@ -44,6 +44,7 @@ import { StaffLocaleProvider } from '../components/StaffLocaleContext';
 import StaffBookingOverrides from '../components/StaffBookingOverrides';
 import DemoOccupancyPanel from '../components/DemoOccupancyPanel';
 import AppSymbolLegend from '../components/AppSymbolLegend';
+import PosReceiptModal from '../components/PosReceiptModal';
 import StaffTabErrorBoundary from '../components/StaffTabErrorBoundary';
 import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
 import { canManageDemoOccupancy } from '../lib/demoOccupancyAccess.js';
@@ -90,8 +91,6 @@ import {
 } from '../lib/calendarFeed';
 import { buildPromoterBookingUrl, normalizePromoCode, resolvePromoterContext } from '../lib/promoters';
 import { resolveNextTicketNumber } from '../lib/ticketNumber';
-import { buildPosTicketHtml } from '../lib/posTicket';
-import { printThermalHtml } from '../lib/printReceipt';
 import { formatSaleAuditDetail, formatSaleCancelAuditDetail } from '../lib/saleAudit';
 import {
   applyPurchaseSessions,
@@ -277,6 +276,8 @@ export default function AppLayout() {
   const [reportStartDate, setReportStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [reportEndDate, setReportEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedPatientReport, setSelectedPatientReport] = useState('');
+  const [reportReceipt, setReportReceipt] = useState(null);
+  const [reportReceiptPhone, setReportReceiptPhone] = useState('');
 
   const locale = localeForClinic(activeClinic);
   const L = useMemo(() => staffStrings(locale), [locale]);
@@ -1857,24 +1858,9 @@ export default function AppLayout() {
     return pName.includes(term) || pPhone.includes(term);
   });
 
-  // --- CANCELACIÓN GLOBAL DE VENTAS DESDE REPORTES ---
-  const reprintSaleTicket = async (tx, patientName) => {
-    const receipt = { ...tx, patient: patientName || tx.patient };
-    const html = buildPosTicketHtml({
-      receipt,
-      companyConfig: dbCompanyConfig,
-      clinicName: activeClinic,
-      locale,
-      labels: L.modals.patient,
-      origin: typeof window !== 'undefined' ? window.location.origin : '',
-    });
-    const result = await printThermalHtml(html, locale === 'en' ? 'POS receipt' : 'Ticket POS');
-    if (!result.ok) {
-      alert(locale === 'en'
-        ? L.modals.patient.receiptPrintError
-        : L.modals.patient.receiptPrintError);
-    }
-    await logAudit(null, patientName || tx.patient, 'REIMPRESIÓN TICKET', formatSaleAuditDetail(tx, currencyStr));
+  const openSaleReceiptModal = (tx, patientName, patientPhone = '') => {
+    setReportReceipt({ ...tx, patient: patientName || tx.patient });
+    setReportReceiptPhone(patientPhone || '');
   };
 
   const handleCancelGlobalTransaction = async (tx, patientId, patientName) => {
@@ -3755,8 +3741,11 @@ export default function AppLayout() {
                                  </td>
                                  <td className="p-4 text-center">
                                    <div className="flex flex-col gap-1 items-center">
-                                     <button type="button" onClick={() => reprintSaleTicket(tx, tx.patientName)} className="bg-slate-100 border border-slate-300 text-slate-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-slate-200 transition shadow-sm w-full max-w-[8rem]">
-                                       {L.modals.patient.receiptReprint}
+                                     <button type="button" onClick={() => {
+                                       const pat = dbPatients.find((p) => String(p.id) === String(tx.patientId));
+                                       openSaleReceiptModal(tx, tx.patientName, pat?.phone || '');
+                                     }} className="bg-slate-100 border border-slate-300 text-slate-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-slate-200 transition shadow-sm w-full max-w-[8rem]">
+                                       {L.modals.patient.receiptGenerated}
                                      </button>
                                      {currentUserLevel <= 2 && (
                                        <button type="button" onClick={() => handleCancelGlobalTransaction(tx, tx.patientId, tx.patientName)} className="bg-red-50 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-100 transition shadow-sm w-full max-w-[8rem]">
@@ -5820,6 +5809,19 @@ export default function AppLayout() {
       )}
     </div>
     <AppSymbolLegend open={showSymbolLegend} onClose={() => setShowSymbolLegend(false)} />
+    <PosReceiptModal
+      open={Boolean(reportReceipt)}
+      receipt={reportReceipt}
+      phone={reportReceiptPhone}
+      companyConfig={dbCompanyConfig}
+      activeClinic={activeClinic}
+      locale={locale}
+      labels={L.modals.patient}
+      onClose={() => {
+        setReportReceipt(null);
+        setReportReceiptPhone('');
+      }}
+    />
     </StaffLocaleProvider>
   );
 }
