@@ -42,19 +42,11 @@ import { InstallGuideLink } from '../components/InstallGuide';
 import PatientSearchInput from '../components/PatientSearchInput';
 import { StaffLocaleProvider } from '../components/StaffLocaleContext';
 import StaffBookingOverrides from '../components/StaffBookingOverrides';
-import dynamic from 'next/dynamic';
+import DemoOccupancyPanel from '../components/DemoOccupancyPanel';
 import AppSymbolLegend from '../components/AppSymbolLegend';
 import StaffTabErrorBoundary from '../components/StaffTabErrorBoundary';
 import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
-
-const DemoOccupancyPanel = dynamic(() => import('../components/DemoOccupancyPanel'), {
-  ssr: false,
-  loading: () => (
-    <div className="mb-6 p-4 rounded-2xl border border-violet-200 bg-violet-50 text-[10px] font-bold uppercase text-violet-700">
-      …
-    </div>
-  ),
-});
+import { canManageDemoOccupancy } from '../lib/demoOccupancyAccess.js';
 
 const STAFF_TAB_PANEL = 'flex-1 min-h-0 overflow-y-auto overscroll-y-contain flex flex-col z-10 p-3 pb-20 lg:p-6 lg:pb-6';
 import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
@@ -4189,7 +4181,9 @@ export default function AppLayout() {
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Horas previas (recordatorio automático por correo — próximamente)</label>
                   <input type="number" value={dbCompanyConfig.reminder_hours} onChange={e => setDbCompanyConfig({...dbCompanyConfig, reminder_hours: Number(e.target.value)})} className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm" />
                 </div>
-                <DemoOccupancyPanel clinicName={activeClinic} locale={locale} />
+                {canManageDemoOccupancy(currentUser) && (
+                  <DemoOccupancyPanel clinicName={activeClinic} locale={locale} />
+                )}
                 <div className="mt-6 mb-4 p-4 rounded-xl bg-indigo-50 border-2 border-indigo-200">
                   <h4 className="text-xs font-black uppercase text-indigo-900 mb-2">Alertas al equipo — cita nueva</h4>
                   <p className="text-[10px] font-bold text-indigo-800/90 mb-3 leading-relaxed">
@@ -4421,7 +4415,7 @@ export default function AppLayout() {
               <div className="mb-4">
                 <h3 className="font-black text-slate-800 uppercase text-sm">{L.p.admin.promotersTitle}</h3>
                 <p className="text-[10px] font-bold text-slate-500 mt-1">{L.p.admin.promotersHint}</p>
-                <p className="text-[10px] font-black text-blue-600 mt-1 uppercase">{activeClinicLabel}</p>
+                <p className="text-[10px] font-black text-blue-600 mt-1 uppercase">{activeClinicDisplayName}</p>
               </div>
 
               {promotersLoadError ? (

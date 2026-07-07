@@ -5,7 +5,7 @@ import React from 'react';
 export default class StaffTabErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { error: null };
+    this.state = { error: null, errorMessage: '' };
   }
 
   static getDerivedStateFromError(error) {
@@ -14,6 +14,7 @@ export default class StaffTabErrorBoundary extends React.Component {
 
   componentDidCatch(error) {
     console.error('[StaffTabErrorBoundary]', error);
+    this.setState({ errorMessage: error?.message || String(error) });
   }
 
   render() {
@@ -31,10 +32,13 @@ export default class StaffTabErrorBoundary extends React.Component {
                 ? 'Hubo un error al mostrar la pantalla. Prueba recargar o vuelve a Agenda.'
                 : 'Something went wrong displaying this screen. Try reload or return to Schedule.'}
             </p>
+            {this.state.errorMessage && (
+              <p className="text-[9px] font-mono text-red-600/80 mb-3 break-all normal-case">{this.state.errorMessage}</p>
+            )}
             <button
               type="button"
               onClick={() => {
-                this.setState({ error: null });
+                this.setState({ error: null, errorMessage: '' });
                 this.props.onRetry?.();
               }}
               className="w-full bg-red-700 text-white font-black py-3 rounded-xl uppercase text-xs mb-2"
@@ -44,7 +48,7 @@ export default class StaffTabErrorBoundary extends React.Component {
             <button
               type="button"
               onClick={() => {
-                this.setState({ error: null });
+                this.setState({ error: null, errorMessage: '' });
                 this.props.onGoAgenda?.();
               }}
               className="w-full bg-slate-200 text-slate-800 font-black py-3 rounded-xl uppercase text-xs"
