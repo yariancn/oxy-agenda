@@ -30,6 +30,7 @@ export async function POST(request) {
       sessionInstructionsUrl = '',
       durationMins = 60,
       bufferMins = 0,
+      smsIntros = {},
     } = body;
 
     let emailStatus = locale === 'en' ? 'Not requested' : 'No solicitado';
@@ -55,6 +56,7 @@ export async function POST(request) {
       sessionInstructionsUrl,
       durationMins,
       bufferMins,
+      smsIntros,
     });
 
     if (email && prefers_email !== false && (type === 'both' || type === 'email')) {

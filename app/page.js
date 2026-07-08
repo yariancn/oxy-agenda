@@ -356,6 +356,13 @@ export default function AppLayout() {
     return picked;
   };
 
+  const pickSmsIntros = (config = dbCompanyConfig) => ({
+    first: config.notify_sms_first,
+    booking: config.notify_sms_booking,
+    reschedule: config.notify_sms_reschedule,
+    cancel: config.notify_sms_cancel,
+  });
+
   const pickGoogleCalendarSettings = (config = dbCompanyConfig) => ({
     google_calendar_enabled: config.google_calendar_enabled === true,
     google_calendar_id: String(config.google_calendar_id || 'primary').trim() || 'primary',
@@ -855,6 +862,10 @@ export default function AppLayout() {
           notify_session_label: resC.data.notify_session_label || defaultNotifySettings(clinicLocale).notify_session_label,
           notify_session_default: resC.data.notify_session_default ?? defaultNotifySettings(clinicLocale).notify_session_default,
           notify_session_url: resC.data.notify_session_url || defaultNotifySettings(clinicLocale).notify_session_url,
+          notify_sms_first: resC.data.notify_sms_first || defaultNotifySettings(clinicLocale).notify_sms_first,
+          notify_sms_booking: resC.data.notify_sms_booking || defaultNotifySettings(clinicLocale).notify_sms_booking,
+          notify_sms_reschedule: resC.data.notify_sms_reschedule || defaultNotifySettings(clinicLocale).notify_sms_reschedule,
+          notify_sms_cancel: resC.data.notify_sms_cancel || defaultNotifySettings(clinicLocale).notify_sms_cancel,
           notify_auto_first: resC.data.notify_auto_first !== false,
           notify_auto_booking: resC.data.notify_auto_booking !== false,
           notify_auto_reschedule: resC.data.notify_auto_reschedule !== false,
@@ -1871,6 +1882,7 @@ export default function AppLayout() {
         notifyEnabled: true,
         notifyType,
         emailTemplates: pickEmailTemplates(),
+        smsIntros: pickSmsIntros(),
         sendEmail,
         sendSms,
       });
@@ -3990,19 +4002,45 @@ export default function AppLayout() {
                   onClick={() => setAdminSubTab('mensajes')}
                   className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase transition ${adminSubTab === 'mensajes' ? 'bg-emerald-600 text-white shadow' : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'}`}
                 >
-                  ✉️ Mensajes de correo
+                  🔔 Notificaciones
                 </button>
               </div>
             </div>
 
             {adminSubTab === 'mensajes' && (
               <div className="bg-emerald-50/50 p-4 sm:p-8 rounded-2xl border-2 border-emerald-200 shadow-sm mb-8">
-                <h3 className="font-black text-emerald-900 uppercase text-lg mb-1">Mensajes que se envían al paciente</h3>
-                <p className="text-xs font-bold text-emerald-800/80 mb-6 leading-relaxed max-w-3xl">
-                  Edita el texto de cada tipo de aviso. Cada clínica (GDL y Houston) tiene sus propios mensajes.
-                  Al agendar, reprogramar o cancelar se usa la plantilla correspondiente. Los datos de fecha, hora y servicio se agregan solos.
+                <h3 className="font-black text-emerald-900 uppercase text-lg mb-1">Notificaciones al paciente</h3>
+                <p className="text-xs font-bold text-emerald-800/80 mb-5 leading-relaxed max-w-3xl">
+                  Todo en un solo lugar: qué avisos se envían, por qué canal (correo/SMS) y qué dice cada uno.
+                  La fecha, hora, servicio y ubicación se agregan solos. Cada clínica (GDL y Houston) tiene sus propios textos.
+                  A nivel de cada paciente puedes activar o desactivar correo/SMS en su perfil.
                 </p>
 
+                {/* AJUSTES GENERALES DE ENVÍO */}
+                <div className="bg-white p-4 sm:p-5 rounded-xl border border-emerald-100 shadow-sm mb-6 space-y-3">
+                  <h4 className="text-xs font-black uppercase text-emerald-900">Ajustes generales de envío</h4>
+                  <label className="flex items-center gap-2 bg-emerald-50 p-3 rounded-lg border border-emerald-200 cursor-pointer">
+                    <input type="checkbox" checked={dbCompanyConfig.notify_on_booking !== false} onChange={e => setDbCompanyConfig({ ...dbCompanyConfig, notify_on_booking: e.target.checked })} className="w-4 h-4" />
+                    <span className="text-[10px] font-black text-emerald-900 uppercase">Interruptor maestro: notificaciones automáticas activas</span>
+                  </label>
+                  <p className="text-[9px] font-bold text-slate-500 uppercase">Canales que usa la clínica por defecto</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="flex items-center gap-2 bg-blue-50 p-3 rounded-lg border border-blue-200 cursor-pointer">
+                      <input type="checkbox" checked={dbCompanyConfig.notify_channel_email !== false} onChange={e => setDbCompanyConfig({ ...dbCompanyConfig, notify_channel_email: e.target.checked })} className="w-4 h-4" />
+                      <span className="text-[10px] font-black text-blue-900 uppercase">Correo electrónico</span>
+                    </label>
+                    <label className="flex items-center gap-2 bg-violet-50 p-3 rounded-lg border border-violet-200 cursor-pointer">
+                      <input type="checkbox" checked={dbCompanyConfig.notify_channel_sms !== false} onChange={e => setDbCompanyConfig({ ...dbCompanyConfig, notify_channel_sms: e.target.checked })} className="w-4 h-4" />
+                      <span className="text-[10px] font-black text-violet-900 uppercase">{isShenandoah(activeClinic) ? 'SMS (Twilio — USA)' : 'SMS (México)'}</span>
+                    </label>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Horas previas (recordatorio automático por correo — próximamente)</label>
+                    <input type="number" value={dbCompanyConfig.reminder_hours} onChange={e => setDbCompanyConfig({ ...dbCompanyConfig, reminder_hours: Number(e.target.value) })} className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm" />
+                  </div>
+                </div>
+
+                <h4 className="text-xs font-black uppercase text-emerald-900 mb-2">Contenido por tipo de aviso</h4>
                 <div className="flex flex-wrap gap-2 mb-4">
                   {[
                     { id: 'first', label: locale === 'en' ? 'First visit' : 'Primera cita' },
@@ -4021,8 +4059,19 @@ export default function AppLayout() {
                   ))}
                 </div>
 
+                <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-emerald-100 shadow-sm mb-4 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={dbCompanyConfig[`notify_auto_${emailTemplateTab}`] !== false}
+                    onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_auto_${emailTemplateTab}`]: e.target.checked })}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-[10px] font-black text-emerald-900 uppercase">Enviar este aviso automáticamente</span>
+                </label>
+
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
                   <div className="space-y-3 bg-white p-4 sm:p-5 rounded-xl border border-emerald-100 shadow-sm">
+                    <p className="text-[10px] font-black uppercase text-emerald-800 border-b border-emerald-100 pb-2">📧 Correo</p>
                     <div>
                       <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Asunto del correo</label>
                       <input
@@ -4051,11 +4100,26 @@ export default function AppLayout() {
                   </div>
 
                   <div className="space-y-3">
+                    <div className="bg-white p-4 sm:p-5 rounded-xl border border-violet-100 shadow-sm">
+                      <p className="text-[10px] font-black uppercase text-violet-800 border-b border-violet-100 pb-2 mb-2">💬 SMS</p>
+                      <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Saludo del SMS</label>
+                      <textarea
+                        rows={3}
+                        value={dbCompanyConfig[`notify_sms_${emailTemplateTab}`] || ''}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_sms_${emailTemplateTab}`]: e.target.value })}
+                        className="w-full p-3 border border-violet-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
+                        placeholder="Hola {{nombre}}, cita confirmada en {{clinica}}."
+                      />
+                      <p className="text-[9px] font-bold text-violet-700/90 mt-1 leading-relaxed">
+                        El SMS agrega solo fecha, hora, servicio, ubicación y teléfono de la clínica. Puedes usar {'{{nombre}}'} y {'{{clinica}}'}.
+                        {emailTemplateTab === 'first' ? ' En la primera cita también incluye la liga de indicaciones (abajo).' : ''}
+                      </p>
+                    </div>
                     <div className="bg-white p-4 sm:p-5 rounded-xl border border-emerald-100 shadow-sm">
                       <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Datos relevantes (en todos los correos)</label>
                       <p className="text-[9px] font-bold text-slate-400 mb-2">Estacionamiento, qué traer, políticas, maps, etc.</p>
                       <textarea
-                        rows={8}
+                        rows={5}
                         value={dbCompanyConfig.notify_extra_info || ''}
                         onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_extra_info: e.target.value })}
                         className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white text-sm leading-relaxed"
@@ -4069,49 +4133,98 @@ export default function AppLayout() {
                   </div>
                 </div>
 
-                <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 sm:p-5 mb-4">
-                  <h4 className="text-xs font-black uppercase text-amber-900 mb-1">Notas de primera sesión (bloque amarillo del correo)</h4>
-                  <p className="text-[10px] font-bold text-amber-800/90 mb-4 leading-relaxed">
-                    Estas notas se envían SOLO en la primera cita del paciente (nuevo en la clínica o en un tratamiento distinto). El resto de mensajes (programación, reprogramación, cancelación) van sin notas.
-                    Un equipo puede usar sus propias notas de primera sesión si activas la casilla en Catálogo → editar equipo (útil p. ej. para Red Light).
-                    Usa {'{{instrucciones}}'} en el mensaje principal si quieres insertarlo ahí también.
+                {emailTemplateTab === 'first' && (
+                  <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 sm:p-5 mb-4">
+                    <h4 className="text-xs font-black uppercase text-amber-900 mb-1">Indicaciones de primera sesión</h4>
+                    <p className="text-[10px] font-bold text-amber-800/90 mb-4 leading-relaxed">
+                      Estas indicaciones son parte del mensaje de PRIMERA CITA (paciente nuevo en la clínica o en un tratamiento distinto). El resto de avisos van sin indicaciones.
+                      Un equipo puede usar sus propias indicaciones si activas la casilla en Catálogo → editar equipo (útil p. ej. para Red Light).
+                      Usa {'{{instrucciones}}'} en el mensaje principal del correo si quieres insertarlo ahí también.
+                    </p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Título del bloque</label>
+                        <input
+                          type="text"
+                          value={dbCompanyConfig.notify_session_label || ''}
+                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_label: e.target.value })}
+                          className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1"
+                          placeholder="Indicaciones para tu sesión"
+                        />
+                      </div>
+                      <div className="lg:col-span-2">
+                        <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Texto de indicaciones (completo — se envía por CORREO)</label>
+                        <textarea
+                          rows={4}
+                          value={dbCompanyConfig.notify_session_default || ''}
+                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_default: e.target.value })}
+                          className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
+                          placeholder="Evitar comidas pesadas 2 horas antes de la sesión."
+                        />
+                      </div>
+                      <div className="lg:col-span-2">
+                        <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Liga a la página de indicaciones (se envía por SMS)</label>
+                        <input
+                          type="url"
+                          value={dbCompanyConfig.notify_session_url || ''}
+                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_url: e.target.value.trim() })}
+                          className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm"
+                          placeholder="https://oxygengdl.com/indicaciones-para-sesiones/"
+                        />
+                        <p className="text-[9px] font-bold text-amber-700/90 mt-1 leading-relaxed">
+                          En la primera cita, el SMS incluye esta liga (el correo lleva el texto completo). GDL: oxygengdl.com · Houston: oxyhyperbaric.com
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ALERTAS AL EQUIPO */}
+                <div className="mb-4 p-4 rounded-xl bg-indigo-50 border-2 border-indigo-200">
+                  <h4 className="text-xs font-black uppercase text-indigo-900 mb-2">Alertas al equipo — cita nueva</h4>
+                  <p className="text-[10px] font-bold text-indigo-800/90 mb-3 leading-relaxed">
+                    Cuando un cliente o promotor agenda (web o staff), avisa por SMS y/o correo.
+                    Puedes poner números extra abajo <strong>o</strong> agregar celular y correo en cada empleado (Admin → Personal autorizado).
+                    Requiere {isShenandoah(activeClinic) ? 'Twilio (SMS)' : 'LabsMobile (SMS México)'} y Resend (correo) en Vercel.
                   </p>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-indigo-200 shadow-sm cursor-pointer mb-3">
+                    <input
+                      type="checkbox"
+                      checked={dbCompanyConfig.notify_staff_on_booking === true}
+                      onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_staff_on_booking: e.target.checked })}
+                      className="w-4 h-4"
+                    />
+                    <span className="text-[10px] font-black text-indigo-900 uppercase">Avisar al equipo cuando hay cita nueva</span>
+                  </label>
+                  <div className="space-y-3">
                     <div>
-                      <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Título del bloque</label>
-                      <input
-                        type="text"
-                        value={dbCompanyConfig.notify_session_label || ''}
-                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_label: e.target.value })}
-                        className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1"
-                        placeholder="Indicaciones para tu sesión"
-                      />
-                    </div>
-                    <div className="lg:col-span-2">
-                      <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Texto de indicaciones (completo — se envía por CORREO)</label>
+                      <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">
+                        Teléfonos del equipo (SMS)
+                      </label>
                       <textarea
-                        rows={4}
-                        value={dbCompanyConfig.notify_session_default || ''}
-                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_default: e.target.value })}
-                        className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
-                        placeholder="Evitar comidas pesadas 2 horas antes de la sesión."
+                        rows={2}
+                        value={dbCompanyConfig.staff_alert_phones || ''}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, staff_alert_phones: e.target.value })}
+                        placeholder="3312345678, 3398765432"
+                        className="w-full p-2.5 border border-indigo-200 rounded-lg font-bold text-sm outline-none bg-white mt-1"
                       />
                     </div>
-                    <div className="lg:col-span-2">
-                      <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Liga a la página de indicaciones (se envía por SMS)</label>
-                      <input
-                        type="url"
-                        value={dbCompanyConfig.notify_session_url || ''}
-                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_url: e.target.value.trim() })}
-                        className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm"
-                        placeholder="https://oxygengdl.com/indicaciones-para-sesiones/"
+                    <div>
+                      <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">Correos del equipo</label>
+                      <textarea
+                        rows={2}
+                        value={dbCompanyConfig.staff_alert_emails || ''}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, staff_alert_emails: e.target.value })}
+                        placeholder="recepcion@oxygengdl.com, gerencia@oxygengdl.com"
+                        className="w-full p-2.5 border border-indigo-200 rounded-lg font-bold text-sm outline-none bg-white mt-1"
                       />
-                      <p className="text-[9px] font-bold text-amber-700/90 mt-1 leading-relaxed">
-                        En la primera cita, el SMS incluye esta liga (el correo lleva el texto completo). GDL: oxygengdl.com · Houston: oxyhyperbaric.com
-                      </p>
                     </div>
                   </div>
                 </div>
+
+                {canManageDemoOccupancy(currentUser) && (
+                  <DemoOccupancyPanel clinicName={activeClinic} locale={locale} />
+                )}
 
                 <button
                   onClick={async () => {
@@ -4123,7 +4236,7 @@ export default function AppLayout() {
                   }}
                   className="w-full sm:w-auto sm:min-w-[280px] bg-emerald-600 text-white font-black py-4 px-8 rounded-xl uppercase shadow-lg hover:bg-emerald-700 transition"
                 >
-                  Guardar mensajes de correo
+                  Guardar notificaciones
                 </button>
               </div>
             )}
@@ -4406,104 +4519,15 @@ export default function AppLayout() {
                   </p>
                 </div>
 
-                {/* CONFIGURACIÓN DE NOTIFICACIONES */}
-                <h3 className="font-black text-slate-800 uppercase text-sm mb-4 pb-2 border-b mt-6">Motor de Notificaciones (Email y SMS)</h3>
-                <p className="text-[10px] font-bold text-slate-500 mb-3 leading-relaxed">
-                  Elige qué eventos envían correo/SMS automáticamente. El botón manual &quot;Enviar indicaciones&quot; en la cita sigue funcionando aunque desactives un tipo.
-                </p>
-                <div className="flex items-center gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm mb-4">
-                  <input type="checkbox" checked={dbCompanyConfig.notify_on_booking !== false} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_on_booking: e.target.checked})} className="w-4 h-4 cursor-pointer" />
-                  <label className="text-[10px] font-black text-slate-700 uppercase cursor-pointer">Master: notificaciones automáticas activas</label>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-                  {[
-                    { key: 'notify_auto_first', label: locale === 'en' ? 'First appointment' : 'Primera cita' },
-                    { key: 'notify_auto_booking', label: locale === 'en' ? 'Recurring / scheduling' : 'Programación (recurrente)' },
-                    { key: 'notify_auto_reschedule', label: locale === 'en' ? 'Reschedule' : 'Reprogramación' },
-                    { key: 'notify_auto_cancel', label: locale === 'en' ? 'Cancellation' : 'Cancelación' },
-                  ].map((item) => (
-                    <label key={item.key} className="flex items-center gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={dbCompanyConfig[item.key] !== false}
-                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [item.key]: e.target.checked })}
-                        className="w-4 h-4"
-                      />
-                      <span className="text-[10px] font-black text-slate-700 uppercase">{item.label}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-                  <label className="flex items-center gap-2 bg-blue-50 p-3 rounded-lg border border-blue-200 cursor-pointer">
-                    <input type="checkbox" checked={dbCompanyConfig.notify_channel_email !== false} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_channel_email: e.target.checked})} className="w-4 h-4" />
-                    <span className="text-[10px] font-black text-blue-900 uppercase">Canal: correo electrónico</span>
-                  </label>
-                  <label className="flex items-center gap-2 bg-violet-50 p-3 rounded-lg border border-violet-200 cursor-pointer">
-                    <input type="checkbox" checked={dbCompanyConfig.notify_channel_sms !== false} onChange={e => setDbCompanyConfig({...dbCompanyConfig, notify_channel_sms: e.target.checked})} className="w-4 h-4" />
-                    <span className="text-[10px] font-black text-violet-900 uppercase">
-                      {isShenandoah(activeClinic) ? 'Canal: SMS (Twilio — USA)' : 'Canal: SMS (México)'}
-                    </span>
-                  </label>
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Horas previas (recordatorio automático por correo — próximamente)</label>
-                  <input type="number" value={dbCompanyConfig.reminder_hours} onChange={e => setDbCompanyConfig({...dbCompanyConfig, reminder_hours: Number(e.target.value)})} className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm" />
-                </div>
-                {canManageDemoOccupancy(currentUser) && (
-                  <DemoOccupancyPanel clinicName={activeClinic} locale={locale} />
-                )}
-                <div className="mt-6 mb-4 p-4 rounded-xl bg-indigo-50 border-2 border-indigo-200">
-                  <h4 className="text-xs font-black uppercase text-indigo-900 mb-2">Alertas al equipo — cita nueva</h4>
-                  <p className="text-[10px] font-bold text-indigo-800/90 mb-3 leading-relaxed">
-                    Cuando un cliente o promotor agenda (web o staff), avisa por SMS y/o correo.
-                    Puedes poner números extra abajo <strong>o</strong> agregar celular y correo en cada empleado (Admin → Personal autorizado).
-                    Requiere {isShenandoah(activeClinic) ? 'Twilio (SMS)' : 'LabsMobile (SMS México)'} y Resend (correo) en Vercel.
-                  </p>
-                  <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-indigo-200 shadow-sm cursor-pointer mb-3">
-                    <input
-                      type="checkbox"
-                      checked={dbCompanyConfig.notify_staff_on_booking === true}
-                      onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_staff_on_booking: e.target.checked })}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-[10px] font-black text-indigo-900 uppercase">Avisar al equipo cuando hay cita nueva</span>
-                  </label>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">
-                        Teléfonos del equipo (SMS)
-                      </label>
-                      <textarea
-                        rows={2}
-                        value={dbCompanyConfig.staff_alert_phones || ''}
-                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, staff_alert_phones: e.target.value })}
-                        placeholder="3312345678, 3398765432"
-                        className="w-full p-2.5 border border-indigo-200 rounded-lg font-bold text-sm outline-none bg-white mt-1"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">Correos del equipo</label>
-                      <textarea
-                        rows={2}
-                        value={dbCompanyConfig.staff_alert_emails || ''}
-                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, staff_alert_emails: e.target.value })}
-                        placeholder="recepcion@oxygengdl.com, gerencia@oxygengdl.com"
-                        className="w-full p-2.5 border border-indigo-200 rounded-lg font-bold text-sm outline-none bg-white mt-1"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-4 mb-4 p-3 rounded-lg bg-slate-100 border border-slate-200 text-[10px] font-bold text-slate-600 leading-relaxed">
-                  <span className="font-black uppercase text-slate-500 block mb-1">Notificaciones push en el teléfono (icono de la app)</span>
-                  Aún no disponibles. Las alertas al equipo funcionan por SMS al número de arriba (llega como mensaje de texto) o por correo. Push nativo requiere desarrollo adicional.
-                </div>
+                {/* ACCESO A NOTIFICACIONES (todo se configura en su propia pestaña) */}
+                <h3 className="font-black text-slate-800 uppercase text-sm mb-3 pb-2 border-b mt-6">Notificaciones (correo y SMS)</h3>
                 <button
                   type="button"
                   onClick={() => setAdminSubTab('mensajes')}
                   className="w-full mb-6 p-4 rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50 text-left hover:bg-emerald-100 transition group"
                 >
-                  <span className="block text-[10px] font-black uppercase text-emerald-800">✉️ Editar textos de correo y SMS</span>
-                  <span className="block text-xs font-bold text-emerald-700 mt-1">Primera cita · Programación · Reprogramación · Cancelación · Datos relevantes</span>
+                  <span className="block text-[10px] font-black uppercase text-emerald-800">🔔 Ir a Notificaciones</span>
+                  <span className="block text-xs font-bold text-emerald-700 mt-1">Interruptor maestro, canales, textos de correo y SMS, indicaciones de primera sesión y alertas al equipo — todo en un solo lugar.</span>
                 </button>
                 <details className="mb-6 text-[10px] font-bold text-slate-500">
                   <summary className="cursor-pointer uppercase text-slate-400 font-black">Configuración técnica (Vercel / Resend / Twilio / SMS MX)</summary>
