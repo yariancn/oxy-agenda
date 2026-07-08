@@ -128,7 +128,11 @@ export async function POST(request) {
       smsIntros,
     };
 
-    const types = ['first', 'booking', 'reschedule', 'cancel'];
+    const types = body.onlyPosReceipt === true
+      ? []
+      : (Array.isArray(body.patientTypes) && body.patientTypes.length
+        ? body.patientTypes.filter((t) => ['first', 'booking', 'reschedule', 'cancel'].includes(t))
+        : ['first', 'booking', 'reschedule', 'cancel']);
     const results = [];
 
     for (const notifyType of types) {
@@ -166,7 +170,7 @@ export async function POST(request) {
     }
 
     let staff = null;
-    if (body.includeStaff !== false) {
+    if (body.includeStaff !== false && body.onlyPosReceipt !== true) {
       const staffCfg = {
         ...cfg,
         notify_staff_on_booking: true,
