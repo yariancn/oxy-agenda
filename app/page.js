@@ -120,6 +120,7 @@ import {
 import {
   EMAIL_PLACEHOLDER_HINT,
   emptyEmailTemplateState,
+  isFirstSessionAppointment,
   resolveAppointmentNotifyType,
 } from '../lib/emailTemplates';
 import {
@@ -349,9 +350,10 @@ export default function AppLayout() {
     const dateStr = sampleDate.toISOString().split('T')[0];
     const sampleService = dbServices.find((s) => s.is_active)?.name
       || (locale === 'en' ? 'Hyperbaric Chamber' : 'Cámara Hiperbárica');
-    const previewInstructions = resolveSessionInstructions('', dbCompanyConfig, locale, {
+    const previewInstructions = resolveSessionInstructions(dbCompanyConfig, locale, {
       equipment: sampleService,
       services: dbServices,
+      isFirstSession: emailTemplateTab === 'first',
     });
     const previewTimes = resolveSessionTimes({ duration: 60, buffer: 30 });
     const preview = buildNotifyContent({
@@ -1654,6 +1656,20 @@ export default function AppLayout() {
       normalize: normalizeStr,
     });
 
+    // Notas de primera sesión: solo al programar (nueva cita) cuando el
+    // paciente es nuevo para la clínica o para este equipo/tratamiento.
+    // Reprogramaciones y cancelaciones nunca llevan notas.
+    const includeFirstSessionNotes =
+      (notifyType === 'first' || notifyType === 'booking') &&
+      isFirstSessionAppointment({
+        isNewPatient: slot.is_new_patient,
+        patientName: slot.patient,
+        equipment: slot.equipment,
+        appointments: dbAppointments,
+        excludeAppointmentId: slot.id,
+        normalize: normalizeStr,
+      });
+
     const isManual = showSuccess;
     const blockReason = forceNotify ? null : getAutoNotifyBlockReason(dbCompanyConfig, notifyType, locale);
     if (!isManual && blockReason) {
@@ -1698,10 +1714,10 @@ export default function AppLayout() {
         equipment: slot.equipment,
         clinicName: activeClinic,
         clinicDisplayName: dbCompanyConfig.name,
-        instructions: resolveSessionInstructions(slot.notes, dbCompanyConfig, locale, {
+        instructions: resolveSessionInstructions(dbCompanyConfig, locale, {
           equipment: slot.equipment,
-          notifyType,
           services: dbServices,
+          isFirstSession: includeFirstSessionNotes,
         }),
         instructionsLabel: getSessionInstructionsLabel(dbCompanyConfig, locale),
         address: dbCompanyConfig.address,
@@ -3883,10 +3899,10 @@ export default function AppLayout() {
                 </div>
 
                 <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 sm:p-5 mb-4">
-                  <h4 className="text-xs font-black uppercase text-amber-900 mb-1">Indicaciones para tu sesión (bloque amarillo del correo)</h4>
+                  <h4 className="text-xs font-black uppercase text-amber-900 mb-1">Notas de primera sesión (bloque amarillo del correo)</h4>
                   <p className="text-[10px] font-bold text-amber-800/90 mb-4 leading-relaxed">
-                    Indicaciones principales para todos los equipos. Un equipo puede sobreescribirlas si activas «Usar estas notas para este equipo» (Catálogo → editar equipo), útil p. ej. para Red Light.
-                    Si al agendar escribes instrucciones en la cita, esas tienen prioridad.
+                    Estas notas se envían SOLO en la primera cita del paciente (nuevo en la clínica o en un tratamiento distinto). El resto de mensajes (programación, reprogramación, cancelación) van sin notas.
+                    Un equipo puede usar sus propias notas de primera sesión si activas la casilla en Catálogo → editar equipo (útil p. ej. para Red Light).
                     Usa {'{{instrucciones}}'} en el mensaje principal si quieres insertarlo ahí también.
                   </p>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

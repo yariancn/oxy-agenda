@@ -16,7 +16,7 @@ import {
   sendAppointmentNotification,
   summarizeNotifyReport,
 } from '../lib/appointmentNotify';
-import { resolveAppointmentNotifyType } from '../lib/emailTemplates';
+import { isFirstSessionAppointment, resolveAppointmentNotifyType } from '../lib/emailTemplates';
 import {
   getSessionInstructionsLabel,
   isAutoNotifyEnabled,
@@ -233,6 +233,13 @@ export default function PublicBookingPortal({
         appointments: dbAppointments,
       });
 
+      const includeFirstSessionNotes = isFirstSessionAppointment({
+        isNewPatient: result.patient.isNew,
+        patientName: result.patient.displayName,
+        equipment: selectedService.name,
+        appointments: dbAppointments,
+      });
+
       if (isAutoNotifyEnabled(dbConfig || {}, notifyType)) {
         try {
           const notifyData = await sendAppointmentNotification({
@@ -244,10 +251,10 @@ export default function PublicBookingPortal({
             equipment: selectedService.name,
             clinicName,
             clinicDisplayName: dbConfig?.name || branding.title,
-            instructions: resolveSessionInstructions(formData.notes, dbConfig || {}, locale, {
+            instructions: resolveSessionInstructions(dbConfig || {}, locale, {
               equipment: selectedService.name,
-              notifyType,
               services: dbServices,
+              isFirstSession: includeFirstSessionNotes,
             }),
             instructionsLabel: getSessionInstructionsLabel(dbConfig || {}, locale),
             address: dbConfig?.address || '',
