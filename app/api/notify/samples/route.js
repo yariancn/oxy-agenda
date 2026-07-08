@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { buildNotifyContent } from '../../../../lib/appointmentNotify.js';
-import { mergeEmailTemplates } from '../../../../lib/emailTemplates.js';
 import { getResendApiKey, getResendFromAddress } from '../../../../lib/resendConfig.js';
 import { sendPatientTextMessage, sendTwilioSms, textChannelLabel } from '../../../../lib/clinicMessaging.js';
 import { buildPosTicketSmsText } from '../../../../lib/posTicket.js';
@@ -97,7 +96,6 @@ export async function POST(request) {
     const cfg = companyConfig || {};
     const emailTemplates = pickEmailTemplates(cfg);
     const smsIntros = pickSmsIntros(cfg, locale);
-    const merged = mergeEmailTemplates(emailTemplates, locale);
 
     const sampleDate = body.date || '2026-07-15';
     const sampleTime = body.time || '10:00 AM';
@@ -120,7 +118,7 @@ export async function POST(request) {
       mapsUrl: cfg.maps_url,
       clinicPhone: cfg.phone,
       ticketMessage: cfg.ticket_message,
-      emailTemplates: merged,
+      emailTemplates,
       instructionsLabel: getSessionInstructionsLabel(cfg, locale),
       sessionInstructionsUrl: getSessionInstructionsUrl(cfg, clinicName),
       durationMins: 60,

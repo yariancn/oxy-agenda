@@ -47,7 +47,6 @@ import AppSymbolLegend from '../components/AppSymbolLegend';
 import PosReceiptModal from '../components/PosReceiptModal';
 import StaffTabErrorBoundary from '../components/StaffTabErrorBoundary';
 import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
-import { canManageDemoOccupancy } from '../lib/demoOccupancyAccess.js';
 
 const STAFF_TAB_PANEL = 'flex-1 min-h-0 overflow-y-auto overscroll-y-contain flex flex-col z-10 p-3 pb-20 lg:p-6 lg:pb-6';
 import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
@@ -4230,10 +4229,6 @@ export default function AppLayout() {
                   </div>
                 </div>
 
-                {canManageDemoOccupancy(currentUser) && (
-                  <DemoOccupancyPanel clinicName={activeClinic} locale={locale} />
-                )}
-
                 <button
                   onClick={async () => {
                     try {
@@ -4537,6 +4532,10 @@ export default function AppLayout() {
                   <span className="block text-[10px] font-black uppercase text-emerald-800">🔔 Ir a Notificaciones</span>
                   <span className="block text-xs font-bold text-emerald-700 mt-1">Interruptor maestro, canales, textos de correo y SMS, indicaciones de primera sesión y alertas al equipo — todo en un solo lugar.</span>
                 </button>
+
+                {currentUserLevel <= 1 && (
+                  <DemoOccupancyPanel clinicName={activeClinic} locale={locale} />
+                )}
                 <details className="mb-6 text-[10px] font-bold text-slate-500">
                   <summary className="cursor-pointer uppercase text-slate-400 font-black">Configuración técnica (Vercel / Resend / Twilio / SMS MX)</summary>
                   <p className="mt-2 leading-relaxed pl-2 border-l-2 border-slate-200">

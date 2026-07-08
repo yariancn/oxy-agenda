@@ -19,6 +19,7 @@ export default function DemoOccupancyPanel({ clinicName, locale = 'es' }) {
   const [busy, setBusy] = useState(false);
   const [previewDate, setPreviewDate] = useState('');
   const [forbidden, setForbidden] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   const bookingPath = useMemo(() => getClinicMeta(clinicName).bookingPath, [clinicName]);
 
@@ -32,15 +33,19 @@ export default function DemoOccupancyPanel({ clinicName, locale = 'es' }) {
       if (res.status === 403) {
         setForbidden(true);
         setState(null);
+        setLoadError('');
         return;
       }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Load failed');
       setForbidden(false);
+      setLoadError('');
       setState(data);
       if (data.previewDate) setPreviewDate(data.previewDate);
     } catch (error) {
       console.error(error);
+      setLoadError(error.message || String(error));
+      setState(null);
     } finally {
       setLoading(false);
     }
@@ -81,6 +86,15 @@ export default function DemoOccupancyPanel({ clinicName, locale = 'es' }) {
   };
 
   if (forbidden) return null;
+  if (loadError) {
+    return (
+      <div className="mb-6 p-4 rounded-2xl border-2 border-amber-300 bg-amber-50 text-[10px] font-bold text-amber-900 leading-relaxed">
+        <p className="font-black uppercase text-amber-800 mb-1">{t.title}</p>
+        <p>{loadError}</p>
+        <p className="mt-2">{t.sqlHint}</p>
+      </div>
+    );
+  }
   if (loading && !state) {
     return (
       <div className="mb-6 p-4 rounded-2xl border border-violet-200 bg-violet-50 text-[10px] font-bold uppercase text-violet-700">
@@ -208,6 +222,7 @@ const COPY = {
     refresh: 'Actualizar vista',
     overrideHint: 'Horarios violeta = simulados. Clic para liberar o volver a ocupar en el portal.',
     stats: (slots, overrides, pct) => `${slots} huecos simulados · ${overrides} liberados manualmente · ${pct}% objetivo`,
+    sqlHint: 'Si ves error de columnas, ejecuta en SQL Editor (GDL y TX): scripts/supabase-demo-occupancy.sql',
     kind: (k) => ({
       available: 'Libre (real)',
       occupied: 'Ocupado (real)',
@@ -231,6 +246,7 @@ const COPY = {
     refresh: 'Refresh view',
     overrideHint: 'Purple = simulated. Click to free or re-occupy on the portal.',
     stats: (slots, overrides, pct) => `${slots} simulated slots · ${overrides} manual overrides · ${pct}% target`,
+    sqlHint: 'If you see a column error, run in SQL Editor (GDL and TX): scripts/supabase-demo-occupancy.sql',
     kind: (k) => ({
       available: 'Open (real)',
       occupied: 'Booked (real)',
