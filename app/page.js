@@ -2081,14 +2081,20 @@ export default function AppLayout() {
 
   const canRescheduleAppointment = selectedSlot?.id && !['Finalizado', 'Devuelto', 'No Asistió', 'Falta Justificada'].includes(selectedSlot.check_in_status);
 
-  const tryRequestMove = (app, newTime, newEquipment, newDay, newFullDate) => {
-    const stored = app?.id ? dbAppointments.find((a) => a.id === app.id) : null;
-    const baseline = stored || app;
-    const baselineDate = baseline?.full_date || baseline?.fullDate;
+  const tryRequestMove = (app, newTime, newEquipment, newDay, newFullDate, options = {}) => {
+    // La cita original SIEMPRE proviene de la base de datos; `app` puede venir
+    // del panel de reprogramación con la hora ya editada en pantalla.
+    const original = (app?.id ? dbAppointments.find((x) => x.id === app.id) : null) || app;
+    const originalDate = original?.full_date || original?.fullDate;
+
+    const outsideNormalHours = options.outsideNormalHours ?? !!app?.outside_normal_hours;
+    const extendedSession = options.extendedSession ?? isExtendedSession(app);
+
     const unchanged =
-      baselineDate === newFullDate &&
-      getMinutes(baseline?.time) === getMinutes(newTime) &&
-      baseline?.equipment === newEquipment;
+      originalDate === newFullDate &&
+      getMinutes(original?.time) === getMinutes(newTime) &&
+      original?.equipment === newEquipment &&
+      !!original?.outside_normal_hours === !!outsideNormalHours;
     if (unchanged) {
       alert(a('alreadyAtTime'));
       return false;
@@ -2099,30 +2105,39 @@ export default function AppLayout() {
       return false;
     }
 
-    const pInfo = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(app.patient));
+    const pInfo = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(original.patient));
     if (pInfo && pInfo.is_blocked) {
       alert(a('patientBlockedMove'));
       return false;
     }
 
-    const srv = dbServices.find(s => s.name === newEquipment);
-    const times = resolveSessionTimes(app);
+    const times = resolveSessionTimes({ ...original, extended_session: extendedSession, is_extended_block: extendedSession });
     const dur = times.duration;
     const buf = times.buffer;
 
-    if (checkOverlap(newEquipment, newFullDate, newTime, dur, buf, app.id)) {
+    if (checkOverlap(newEquipment, newFullDate, newTime, dur, buf, original.id)) {
       alert(a('overlapLong'));
       return false;
     }
 
-    setMoveConfirmation({ app, newTime, newEquipment, newDay, newFullDate });
+    setMoveConfirmation({
+      app: original,
+      newTime,
+      newEquipment,
+      newDay,
+      newFullDate,
+      outsideNormalHours,
+      extendedSession,
+    });
     return true;
   };
 
-  const handleDrop = (e, newTime, newEquipment, newDay, newFullDate) => {
+  const handleDrop = (e, newTime, newEquipment, newDay, newFullDate, outsideHours = false) => {
     e.preventDefault();
     if (!draggedApp) return;
-    tryRequestMove(draggedApp, newTime, newEquipment, newDay, newFullDate);
+    tryRequestMove(draggedApp, newTime, newEquipment, newDay, newFullDate, {
+      outsideNormalHours: outsideHours,
+    });
     setDraggedApp(null);
   };
 
@@ -2141,14 +2156,23 @@ export default function AppLayout() {
     const d = new Date(targetDate + 'T12:00:00');
     const dayName = getDayNameFromDate(locale, d);
 
-    if (tryRequestMove(selectedSlot, targetTime, targetEquipment, dayName, targetDate)) {
+    if (tryRequestMove(selectedSlot, targetTime, targetEquipment, dayName, targetDate, {
+      outsideNormalHours: !!selectedSlot.outside_normal_hours,
+      extendedSession: isExtendedSession(selectedSlot),
+    })) {
       setIsRescheduling(false);
     }
   };
 
   const confirmMove = async () => {
     try {
-      const times = resolveSessionTimes(moveConfirmation.app);
+      const extended = !!moveConfirmation.extendedSession;
+      const outside = !!moveConfirmation.outsideNormalHours;
+      const times = resolveSessionTimes({
+        ...moveConfirmation.app,
+        extended_session: extended,
+        is_extended_block: extended,
+      });
       const { error } = await updateStaffAppointment(activeSupabase, moveConfirmation.app.id, { 
         time: moveConfirmation.newTime, 
         appointment_time: moveConfirmation.newTime,
@@ -2158,8 +2182,8 @@ export default function AppLayout() {
         appointment_date: moveConfirmation.newFullDate,
         duration: times.duration,
         buffer: times.buffer,
-        outside_normal_hours: !!moveConfirmation.app.outside_normal_hours,
-        is_extended_block: isExtendedSession(moveConfirmation.app),
+        outside_normal_hours: outside,
+        is_extended_block: extended,
       });
       
       if (error) {
@@ -2420,6 +2444,8 @@ export default function AppLayout() {
                   outside_normal_hours: true,
                 });
               }}
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, timeStr, equipment, day, fullDate, true)}
               className="absolute left-0 right-0 bg-slate-200/60 hover:bg-amber-100/80 active:bg-amber-200/90 cursor-pointer border-b border-slate-300 box-border z-0 transition-all hover:ring-2 hover:ring-inset hover:ring-amber-400/50"
               style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}
               title={`${L.clickToBook} · ${L.p.legendOutsideHours}`}
@@ -5807,6 +5833,12 @@ export default function AppLayout() {
                 <p className="text-xs font-black text-blue-600 uppercase">{moveConfirmation.newEquipment}</p>
               </div>
             </div>
+            {moveConfirmation.outsideNormalHours && (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-6 text-center">
+                <p className="text-xs font-black text-amber-700 uppercase">🟡 Fuera de horario definido</p>
+                <p className="text-[10px] font-bold text-amber-600 mt-1">Esta cita quedará marcada como fuera del horario normal del equipo.</p>
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row gap-2 sm:space-x-3 sm:gap-0">
               <button onClick={() => setMoveConfirmation(null)} className="w-full sm:flex-1 bg-slate-100 font-black py-3 sm:py-4 rounded-2xl uppercase text-xs hover:bg-slate-200">Cancelar</button>
               <button onClick={confirmMove} className="w-full sm:flex-1 bg-blue-600 text-white font-black py-3 sm:py-4 rounded-2xl uppercase text-xs shadow-lg hover:bg-blue-700">Confirmar</button>
