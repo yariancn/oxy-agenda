@@ -363,10 +363,18 @@ export default function AppLayout() {
     cancel: config.notify_sms_cancel,
   });
 
-  const pickGoogleCalendarSettings = (config = dbCompanyConfig) => ({
-    google_calendar_enabled: config.google_calendar_enabled === true,
-    google_calendar_id: String(config.google_calendar_id || 'primary').trim() || 'primary',
-  });
+  const pickGoogleCalendarSettings = (config = dbCompanyConfig) => {
+    // Solo incluimos columnas de Google Calendar si la función ya está en uso
+    // (conectada o activada). Evita el aviso de "faltan columnas" cuando aún
+    // no se ha corrido el SQL de Google Calendar (feature opcional).
+    const inUse = config.google_calendar_enabled === true
+      || config.google_calendar_connected === true;
+    if (!inUse) return {};
+    return {
+      google_calendar_enabled: config.google_calendar_enabled === true,
+      google_calendar_id: String(config.google_calendar_id || 'primary').trim() || 'primary',
+    };
+  };
 
   const openEmailPreview = () => {
     const sampleDate = new Date();
