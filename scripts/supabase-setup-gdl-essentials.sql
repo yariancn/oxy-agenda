@@ -31,6 +31,10 @@ ALTER TABLE company_config
   ADD COLUMN IF NOT EXISTS notify_session_label text,
   ADD COLUMN IF NOT EXISTS notify_session_default text,
   ADD COLUMN IF NOT EXISTS notify_session_url text,
+  ADD COLUMN IF NOT EXISTS google_calendar_enabled boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS google_calendar_refresh_token text,
+  ADD COLUMN IF NOT EXISTS google_calendar_id text DEFAULT 'primary',
+  ADD COLUMN IF NOT EXISTS google_calendar_email text;
   ADD COLUMN IF NOT EXISTS notify_auto_first boolean DEFAULT true,
   ADD COLUMN IF NOT EXISTS notify_auto_booking boolean DEFAULT true,
   ADD COLUMN IF NOT EXISTS notify_auto_reschedule boolean DEFAULT true,
@@ -113,7 +117,8 @@ ALTER TABLE services
 ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS outside_normal_hours boolean DEFAULT false,
   ADD COLUMN IF NOT EXISTS is_extended_block boolean DEFAULT false,
-  ADD COLUMN IF NOT EXISTS promoter_code text;
+  ADD COLUMN IF NOT EXISTS promoter_code text,
+  ADD COLUMN IF NOT EXISTS google_calendar_event_id text;
 
 -- ─── 5) Carteras compartidas ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS session_groups (

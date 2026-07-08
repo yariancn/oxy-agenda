@@ -86,6 +86,7 @@ import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
 import { formatClinicDateIso, getClinicNow } from '../lib/clinicClock';
 import {
   buildCalendarFeedUrl,
+  buildGoogleCalendarSubscribeUrl,
   buildWebcalFeedUrl,
   generateCalendarFeedToken,
 } from '../lib/calendarFeed';
@@ -230,6 +231,10 @@ export default function AppLayout() {
     reminder_hours: 24,
     calendar_feed_enabled: false,
     calendar_feed_token: '',
+    google_calendar_enabled: false,
+    google_calendar_email: '',
+    google_calendar_id: 'primary',
+    google_calendar_connected: false,
     ticket_counter: 793,
     ...defaultNotifySettings('es'),
     ...emptyEmailTemplateState('es'),
@@ -237,6 +242,12 @@ export default function AppLayout() {
   
   const [emailTemplateTab, setEmailTemplateTab] = useState('first');
   const [emailPreview, setEmailPreview] = useState(null);
+  const [googleCalendarApiStatus, setGoogleCalendarApiStatus] = useState({
+    configured: false,
+    connected: false,
+    sqlRequired: false,
+    email: '',
+  });
   const [adminSubTab, setAdminSubTab] = useState('general');
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -345,6 +356,11 @@ export default function AppLayout() {
     return picked;
   };
 
+  const pickGoogleCalendarSettings = (config = dbCompanyConfig) => ({
+    google_calendar_enabled: config.google_calendar_enabled === true,
+    google_calendar_id: String(config.google_calendar_id || 'primary').trim() || 'primary',
+  });
+
   const openEmailPreview = () => {
     const sampleDate = new Date();
     sampleDate.setDate(sampleDate.getDate() + 3);
@@ -403,6 +419,7 @@ export default function AppLayout() {
     calendar_feed_token: String(dbCompanyConfig.calendar_feed_token || '').trim(),
     ...pickEmailTemplates(),
     ...pickNotifySettings(),
+    ...pickGoogleCalendarSettings(),
     ...pickStaffAlertSettings(),
   });
 
@@ -856,6 +873,10 @@ export default function AppLayout() {
           }),
           calendar_feed_enabled: resC.data.calendar_feed_enabled === true,
           calendar_feed_token: String(resC.data.calendar_feed_token || '').trim(),
+          google_calendar_enabled: resC.data.google_calendar_enabled === true,
+          google_calendar_email: resC.data.google_calendar_email || '',
+          google_calendar_id: resC.data.google_calendar_id || 'primary',
+          google_calendar_connected: Boolean(resC.data.google_calendar_refresh_token),
           ticket_counter: Number(resC.data.ticket_counter) || 793,
         });
       } else {
@@ -1224,6 +1245,120 @@ export default function AppLayout() {
       window.prompt(L.p.admin.calendarFeedClinicUrl, value);
     }
   };
+
+  const openGoogleCalendarSubscribe = () => {
+    if (!calendarFeedUrl) {
+      alert(L.p.admin.calendarFeedSaveFirst);
+      return;
+    }
+    window.open(buildGoogleCalendarSubscribeUrl(calendarFeedUrl), '_blank', 'noopener,noreferrer');
+  };
+
+  const fetchGoogleCalendarApiStatus = async () => {
+    try {
+      const res = await fetch(`/api/staff/google-calendar/status?clinic=${encodeURIComponent(activeClinic)}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      setGoogleCalendarApiStatus({
+        configured: data.configured === true,
+        connected: data.connected === true,
+        sqlRequired: data.sqlRequired === true,
+        email: data.email || '',
+      });
+      setDbCompanyConfig((prev) => ({
+        ...prev,
+        google_calendar_connected: data.connected === true,
+        google_calendar_email: data.email || prev.google_calendar_email,
+        google_calendar_enabled: data.enabled === true,
+      }));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const pushGoogleCalendarSync = (appointmentId, action = 'upsert') => {
+    if (!appointmentId) return;
+    fetch('/api/staff/google-calendar/sync-appointment', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clinic: activeClinic, appointmentId, action }),
+    }).catch(() => {});
+  };
+
+  const connectGoogleCalendar = () => {
+    window.location.href = `/api/staff/google-calendar/auth?clinic=${encodeURIComponent(activeClinic)}`;
+  };
+
+  const disconnectGoogleCalendar = async () => {
+    if (!window.confirm(locale === 'en' ? 'Disconnect Google Calendar for this clinic?' : '¿Desconectar Google Calendar de esta clínica?')) return;
+    try {
+      const res = await fetch('/api/staff/google-calendar/disconnect', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clinic: activeClinic }),
+      });
+      if (!res.ok) throw new Error('disconnect_failed');
+      setDbCompanyConfig((prev) => ({
+        ...prev,
+        google_calendar_enabled: false,
+        google_calendar_connected: false,
+        google_calendar_email: '',
+      }));
+      await fetchGoogleCalendarApiStatus();
+    } catch {
+      alert(L.p.admin.googleCalendarConnectError);
+    }
+  };
+
+  const bulkSyncGoogleCalendar = async () => {
+    try {
+      const res = await fetch('/api/staff/google-calendar/sync-appointment', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clinic: activeClinic, bulkSync: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'sync_failed');
+      alert(L.p.admin.googleCalendarBulkDone(data.synced || 0));
+    } catch {
+      alert(L.p.admin.googleCalendarConnectError);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const gc = params.get('googleCalendar');
+    if (!gc) return;
+    if (gc === 'connected') {
+      alert(L.p.admin.googleCalendarConnectedOk);
+      fetchGoogleCalendarApiStatus();
+    } else if (gc === 'error') {
+      const reason = params.get('reason') || '';
+      if (reason === 'sql_required') alert(L.p.admin.googleCalendarSqlRequired);
+      else alert(L.p.admin.googleCalendarConnectError);
+    }
+    params.delete('googleCalendar');
+    params.delete('reason');
+    params.delete('clinic');
+    const qs = params.toString();
+    const next = `${window.location.pathname}${qs ? `?${qs}` : ''}`;
+    window.history.replaceState({}, '', next);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'Admin' && currentUserLevel <= 2) {
+      fetchGoogleCalendarApiStatus();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, activeClinic, currentUserLevel]);
 
   const buildPromoterCalendarFeedUrl = (promoter) => {
     const token = String(promoter?.calendar_feed_token || '').trim();
@@ -1947,11 +2082,14 @@ export default function AppLayout() {
   const canRescheduleAppointment = selectedSlot?.id && !['Finalizado', 'Devuelto', 'No Asistió', 'Falta Justificada'].includes(selectedSlot.check_in_status);
 
   const tryRequestMove = (app, newTime, newEquipment, newDay, newFullDate) => {
-    if (
-      app.full_date === newFullDate &&
-      app.time === newTime &&
-      app.equipment === newEquipment
-    ) {
+    const stored = app?.id ? dbAppointments.find((a) => a.id === app.id) : null;
+    const baseline = stored || app;
+    const baselineDate = baseline?.full_date || baseline?.fullDate;
+    const unchanged =
+      baselineDate === newFullDate &&
+      getMinutes(baseline?.time) === getMinutes(newTime) &&
+      baseline?.equipment === newEquipment;
+    if (unchanged) {
       alert(a('alreadyAtTime'));
       return false;
     }
@@ -2037,6 +2175,7 @@ export default function AppLayout() {
           time: moveConfirmation.newTime,
           equipment: moveConfirmation.newEquipment,
         }, { notifyReason: 'reschedule' });
+        pushGoogleCalendarSync(moveConfirmation.app.id, 'upsert');
       }
       
       setMoveConfirmation(null);
@@ -2134,6 +2273,7 @@ export default function AppLayout() {
 
       await logAudit(app.id, patientName, 'CITA CANCELADA', auditDetail);
       await notifyPatientFromSlot(app, { notifyReason: 'cancel' });
+      pushGoogleCalendarSync(app.id, 'delete');
       setShowCancelModal(false);
       setCancelDeductSession(false);
       closeAppointmentPanel();
@@ -2505,6 +2645,7 @@ export default function AppLayout() {
             isExtendedSession(selectedSlot) ? L.p.appt.badgeExtended : '',
           ].filter(Boolean).join(' · ');
           await logAudit(na[0].id, payload.patient, 'CREACIÓN', `${payload.time} · ${dateIso}${flags ? ` (${flags})` : ''}`);
+          pushGoogleCalendarSync(na[0].id, 'upsert');
         }
       }
 
@@ -4142,6 +4283,13 @@ export default function AppLayout() {
                             </button>
                             <button
                               type="button"
+                              onClick={openGoogleCalendarSubscribe}
+                              className="bg-blue-600 text-white text-[10px] font-black uppercase px-3 py-2 rounded-lg hover:bg-blue-700"
+                            >
+                              {L.p.admin.calendarFeedOpenGoogle}
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => {
                                 if (!window.confirm(L.p.admin.calendarFeedRegenerateConfirm)) return;
                                 setDbCompanyConfig((prev) => ({
@@ -4167,6 +4315,69 @@ export default function AppLayout() {
                       )}
                     </div>
                   )}
+                </div>
+
+                <h3 className="font-black text-slate-800 uppercase text-sm mb-2 pb-2 border-b mt-6">{L.p.admin.googleCalendarLiveTitle}</h3>
+                <p className="text-[10px] font-bold text-slate-500 mb-3 leading-relaxed">{L.p.admin.googleCalendarLiveHint}</p>
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-3 shadow-sm mb-6">
+                  {!googleCalendarApiStatus.configured && (
+                    <p className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-200 rounded-lg px-3 py-2">
+                      {L.p.admin.googleCalendarNotConfigured}
+                    </p>
+                  )}
+                  {googleCalendarApiStatus.sqlRequired && (
+                    <p className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-200 rounded-lg px-3 py-2">
+                      {L.p.admin.googleCalendarSqlRequired}
+                    </p>
+                  )}
+                  {googleCalendarApiStatus.connected && googleCalendarApiStatus.email && (
+                    <p className="text-[10px] font-black text-emerald-800 uppercase">
+                      {L.p.admin.googleCalendarConnectedAs(googleCalendarApiStatus.email)}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {googleCalendarApiStatus.connected ? (
+                      <>
+                        <label className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-emerald-200 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={dbCompanyConfig.google_calendar_enabled === true}
+                            onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, google_calendar_enabled: e.target.checked })}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-[10px] font-black uppercase text-emerald-900">{L.p.admin.googleCalendarSyncEnable}</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={bulkSyncGoogleCalendar}
+                          className="bg-emerald-600 text-white text-[10px] font-black uppercase px-3 py-2 rounded-lg hover:bg-emerald-700"
+                        >
+                          {L.p.admin.googleCalendarBulkSync}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={disconnectGoogleCalendar}
+                          className="bg-white text-red-700 border border-red-200 text-[10px] font-black uppercase px-3 py-2 rounded-lg hover:bg-red-50"
+                        >
+                          {L.p.admin.googleCalendarDisconnect}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!googleCalendarApiStatus.configured || googleCalendarApiStatus.sqlRequired}
+                        onClick={connectGoogleCalendar}
+                        className="bg-emerald-600 text-white text-[10px] font-black uppercase px-4 py-2.5 rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        {L.p.admin.googleCalendarConnect}
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[9px] font-bold text-emerald-800/80 leading-relaxed">
+                    {locale === 'en'
+                      ? 'After connecting, save Admin settings if you toggled sync. New appointments sync automatically.'
+                      : 'Tras conectar, guarda Ajustes si activaste la sincronización. Las citas nuevas se sincronizan solas.'}
+                  </p>
                 </div>
 
                 {/* CONFIGURACIÓN DE NOTIFICACIONES */}
