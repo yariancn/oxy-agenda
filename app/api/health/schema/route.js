@@ -40,7 +40,7 @@ async function auditDatabase(clinicName, { includeGdlLocations = false } = {}) {
     set('staff_login_attempts_table', loginTable.ok, loginTable.error);
   }
 
-  const firstNotes = await probeSelect(supabase, 'services', 'id, first_session_notes');
+  const firstNotes = await probeSelect(supabase, 'services', 'id, first_session_notes, use_custom_notes');
   set('services_first_session_notes', firstNotes.ok, firstNotes.error);
 
   const sessionGroups = await probeTable(supabase, 'session_groups');

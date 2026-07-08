@@ -243,7 +243,7 @@ export default function AppLayout() {
   const fetchGenRef = useRef(0);
 
   // --- FORMULARIOS GLOBALES ---
-  const [newSrv, setNewSrv] = useState({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '' });
+  const [newSrv, setNewSrv] = useState({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '', use_custom_notes: false });
   const [isEditingSrv, setIsEditingSrv] = useState(false);
   const [editingSrvOriginalName, setEditingSrvOriginalName] = useState('');
   const [editingSrvOriginalSchedule, setEditingSrvOriginalSchedule] = useState({ duration: 60, buffer: 30 });
@@ -351,7 +351,6 @@ export default function AppLayout() {
       || (locale === 'en' ? 'Hyperbaric Chamber' : 'Cámara Hiperbárica');
     const previewInstructions = resolveSessionInstructions('', dbCompanyConfig, locale, {
       equipment: sampleService,
-      notifyType: emailTemplateTab === 'first' ? 'first' : 'booking',
       services: dbServices,
     });
     const previewTimes = resolveSessionTimes({ duration: 60, buffer: 30 });
@@ -3333,6 +3332,15 @@ export default function AppLayout() {
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
                     <p className="text-[9px] font-black text-amber-900 uppercase">{L.p.services.firstSessionNotes}</p>
                     <p className="text-[8px] font-bold text-amber-800/90 leading-relaxed">{L.p.services.firstSessionNotesHint}</p>
+                    <label className="flex items-start gap-2 bg-white p-2.5 rounded-lg border border-amber-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!newSrv.use_custom_notes}
+                        onChange={(e) => setNewSrv({ ...newSrv, use_custom_notes: e.target.checked })}
+                        className="w-4 h-4 mt-0.5 shrink-0"
+                      />
+                      <span className="text-[10px] font-black uppercase text-amber-900 leading-snug">{L.p.services.useCustomNotes}</span>
+                    </label>
                     <textarea
                       rows={4}
                       className="w-full p-3 rounded-xl border border-amber-200 font-bold text-sm outline-none text-slate-900 bg-white leading-relaxed"
@@ -3342,7 +3350,7 @@ export default function AppLayout() {
                     />
                   </div>
                   <div className="flex gap-2 pt-1">
-                    {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setEditingSrvOriginalName(''); setEditingSrvOriginalSchedule({ duration: 60, buffer: 30 }); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '' });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
+                    {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setEditingSrvOriginalName(''); setEditingSrvOriginalSchedule({ duration: 60, buffer: 30 }); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '', use_custom_notes: false });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
                     <button onClick={async () => {
                       if(!newSrv.name) return alert(L.p.services.missingName);
                       const duration = Math.max(5, Number(newSrv.duration) || 60);
@@ -3363,6 +3371,7 @@ export default function AppLayout() {
                         end_time: endTrim || null,
                         clinic: normalizeClinicId(activeClinic),
                         first_session_notes: String(newSrv.first_session_notes || '').trim() || null,
+                        use_custom_notes: !!newSrv.use_custom_notes,
                       };
                       const saveServiceRow = async (payload, id) => {
                         let row = { ...payload };
@@ -3371,10 +3380,10 @@ export default function AppLayout() {
                             ? await activeSupabase.from('services').update(row).eq('id', id)
                             : await activeSupabase.from('services').insert([row]);
                           if (!res.error) return res;
-                          if (!/first_session_notes|column|schema cache/i.test(res.error.message || '')) {
+                          if (!/first_session_notes|use_custom_notes|column|schema cache/i.test(res.error.message || '')) {
                             return res;
                           }
-                          const { first_session_notes, ...rest } = row;
+                          const { first_session_notes, use_custom_notes, ...rest } = row;
                           row = rest;
                         }
                         return { error: { message: 'Ejecuta scripts/supabase-service-first-session-notes.sql en Supabase.' } };
@@ -3405,7 +3414,7 @@ export default function AppLayout() {
                         setIsEditingSrv(false);
                         setEditingSrvOriginalName('');
                         setEditingSrvOriginalSchedule({ duration: 60, buffer: 30 });
-                        setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '' });
+                        setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '', use_custom_notes: false });
                         await fetchAllData();
                       } catch (e) {
                         alert(`${L.p.services.saveError}: ${e.message}`);
@@ -3442,7 +3451,7 @@ export default function AppLayout() {
                           </td>
                           <td className="px-5 py-4 font-bold text-slate-600 text-sm whitespace-nowrap">${s.price} {currencyStr}</td>
                           <td className="px-5 py-4">
-                            {String(s.first_session_notes || '').trim() ? (
+                            {s.use_custom_notes && String(s.first_session_notes || '').trim() ? (
                               <span className="inline-block px-2 py-1 rounded-md text-[9px] font-black uppercase bg-amber-100 text-amber-800" title={String(s.first_session_notes).slice(0, 120)}>
                                 {L.p.services.hasFirstSessionNotes}
                               </span>
@@ -3876,7 +3885,7 @@ export default function AppLayout() {
                 <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 sm:p-5 mb-4">
                   <h4 className="text-xs font-black uppercase text-amber-900 mb-1">Indicaciones para tu sesión (bloque amarillo del correo)</h4>
                   <p className="text-[10px] font-bold text-amber-800/90 mb-4 leading-relaxed">
-                    Texto por defecto si la cita no trae notas del día ni indicaciones propias del equipo (Catálogo → editar equipo → «Primera sesión»).
+                    Indicaciones principales para todos los equipos. Un equipo puede sobreescribirlas si activas «Usar estas notas para este equipo» (Catálogo → editar equipo), útil p. ej. para Red Light.
                     Si al agendar escribes instrucciones en la cita, esas tienen prioridad.
                     Usa {'{{instrucciones}}'} en el mensaje principal si quieres insertarlo ahí también.
                   </p>

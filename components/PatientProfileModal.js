@@ -84,7 +84,6 @@ export default function PatientProfileModal({
       ];
 
   const currency = activeClinic === 'Shenandoah' ? 'USD' : 'MXN';
-  const hasPhoneForSms = Boolean(String(formData.phone || '').trim());
 
   const handleChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -528,7 +527,7 @@ export default function PatientProfileModal({
                         <p className="text-[8px] text-slate-400 uppercase">{tx.date} · ${tx.price}</p>
                       </div>
                       <div className="flex flex-col gap-1 shrink-0">
-                        <button type="button" onClick={() => setReceipt(tx)} className="text-[9px] font-black text-slate-700 uppercase px-2 py-1 border border-slate-200 rounded bg-slate-50">
+                        <button type="button" onClick={() => setReceipt({ ...tx, phone: tx.phone || formData.phone })} className="text-[9px] font-black text-slate-700 uppercase px-2 py-1 border border-slate-200 rounded bg-slate-50">
                           {t.receiptGenerated}
                         </button>
                         {canCancelSales && (
@@ -604,22 +603,9 @@ export default function PatientProfileModal({
               className="w-full p-2 border border-blue-200 rounded-lg text-xs font-bold bg-white text-blue-900 mb-3"
               rows={2}
             />
-            <div className="mb-3 p-3 rounded-xl border-2 border-blue-300 bg-white">
-              <p className="text-[9px] font-black uppercase text-blue-900 mb-2">{t.receiptChooseDelivery}</p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex items-center justify-center gap-1.5 bg-slate-900 text-white font-black py-2.5 rounded-lg text-[10px] uppercase">
-                  {t.printTicket}
-                </div>
-                <div className={`flex items-center justify-center gap-1.5 font-black py-2.5 rounded-lg text-[10px] uppercase ${hasPhoneForSms ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
-                  📱 {locale === 'en' ? 'SMS' : 'SMS'}
-                </div>
-              </div>
-              <p className="text-[8px] font-bold text-blue-700/90 mt-2 normal-case leading-snug">
-                {hasPhoneForSms
-                  ? (locale === 'en' ? 'After charging you choose print or SMS.' : 'Al cobrar podrás elegir imprimir o enviar por SMS.')
-                  : t.receiptNoPhone}
-              </p>
-            </div>
+            <p className="text-[9px] font-bold text-blue-700/90 mb-3 normal-case leading-snug">
+              {t.receiptAfterChargeHint}
+            </p>
             <button type="button" disabled={charging} onClick={handlePurchase} className="w-full bg-blue-600 text-white text-xs font-black uppercase py-3 rounded-lg disabled:opacity-60">
               {charging ? '...' : t.chargeTicket}
             </button>

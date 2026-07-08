@@ -106,7 +106,8 @@ ALTER TABLE users_staff
 ALTER TABLE services
   ADD COLUMN IF NOT EXISTS start_time text,
   ADD COLUMN IF NOT EXISTS end_time text,
-  ADD COLUMN IF NOT EXISTS first_session_notes text;
+  ADD COLUMN IF NOT EXISTS first_session_notes text,
+  ADD COLUMN IF NOT EXISTS use_custom_notes boolean DEFAULT false;
 
 ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS outside_normal_hours boolean DEFAULT false,

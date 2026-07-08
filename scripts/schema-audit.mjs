@@ -99,10 +99,10 @@ const CHECKS = [
   },
   {
     id: 'first_session_notes',
-    label: 'Indicaciones primera sesión (services.first_session_notes)',
+    label: 'Notas propias por equipo (services.first_session_notes, use_custom_notes)',
     only: 'both',
     async run(client) {
-      const r = await probeSelect(client, 'services', 'id, first_session_notes');
+      const r = await probeSelect(client, 'services', 'id, first_session_notes, use_custom_notes');
       return r.ok ? { status: 'ok' } : { status: 'missing', detail: r.error };
     },
   },
