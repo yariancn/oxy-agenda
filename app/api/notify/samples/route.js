@@ -54,9 +54,9 @@ async function sendEmail({ clinicName, locale, to, subject, html }) {
     },
     body: JSON.stringify({ from: fromEmail, to: [to], subject, html }),
   });
-  if (res.ok) return { channel: 'email', ok: true, status: 'Enviado correctamente' };
-  const errBody = await res.text().catch(() => '');
-  return { channel: 'email', ok: false, status: `Error Resend: ${errBody.slice(0, 120)}` };
+  const okBody = await res.json().catch(() => ({}));
+  if (res.ok) return { channel: 'email', ok: true, status: 'Enviado correctamente', id: okBody?.id || null, from: fromEmail };
+  return { channel: 'email', ok: false, status: `Error Resend: ${JSON.stringify(okBody).slice(0, 160)}`, from: fromEmail };
 }
 
 async function sendSms({ clinicName, locale, phone, smsBody, notifyType, whatsappBodyParams }) {
