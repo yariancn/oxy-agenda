@@ -127,6 +127,7 @@ import {
   defaultNotifySettings,
   getAutoNotifyBlockReason,
   getSessionInstructionsLabel,
+  getSessionInstructionsUrl,
   isAutoNotifyEnabled,
   NOTIFY_SETTING_FIELDS,
   resolveSessionInstructions,
@@ -367,6 +368,7 @@ export default function AppLayout() {
       equipment: sampleService,
       instructions: previewInstructions,
       instructionsLabel: getSessionInstructionsLabel(dbCompanyConfig, locale),
+      sessionInstructionsUrl: getSessionInstructionsUrl(dbCompanyConfig, activeClinic),
       address: dbCompanyConfig.address || (locale === 'en' ? '123 Medical Center Dr, Houston TX' : 'Av. Patria 123, Guadalajara'),
       mapsUrl: dbCompanyConfig.maps_url || '',
       clinicPhone: dbCompanyConfig.phone || (locale === 'en' ? '7135913379' : '3321664083'),
@@ -835,6 +837,7 @@ export default function AppLayout() {
           ticket_message: formatClinicField(resC.data.ticket_message),
           notify_session_label: resC.data.notify_session_label || defaultNotifySettings(clinicLocale).notify_session_label,
           notify_session_default: resC.data.notify_session_default ?? defaultNotifySettings(clinicLocale).notify_session_default,
+          notify_session_url: resC.data.notify_session_url || defaultNotifySettings(clinicLocale).notify_session_url,
           notify_auto_first: resC.data.notify_auto_first !== false,
           notify_auto_booking: resC.data.notify_auto_booking !== false,
           notify_auto_reschedule: resC.data.notify_auto_reschedule !== false,
@@ -1720,6 +1723,7 @@ export default function AppLayout() {
           isFirstSession: includeFirstSessionNotes,
         }),
         instructionsLabel: getSessionInstructionsLabel(dbCompanyConfig, locale),
+        sessionInstructionsUrl: getSessionInstructionsUrl(dbCompanyConfig, activeClinic),
         address: dbCompanyConfig.address,
         mapsUrl: dbCompanyConfig.maps_url,
         clinicPhone: dbCompanyConfig.phone,
@@ -3917,7 +3921,7 @@ export default function AppLayout() {
                       />
                     </div>
                     <div className="lg:col-span-2">
-                      <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Texto de indicaciones</label>
+                      <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Texto de indicaciones (completo — se envía por CORREO)</label>
                       <textarea
                         rows={4}
                         value={dbCompanyConfig.notify_session_default || ''}
@@ -3925,6 +3929,19 @@ export default function AppLayout() {
                         className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
                         placeholder="Evitar comidas pesadas 2 horas antes de la sesión."
                       />
+                    </div>
+                    <div className="lg:col-span-2">
+                      <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Liga a la página de indicaciones (se envía por SMS)</label>
+                      <input
+                        type="url"
+                        value={dbCompanyConfig.notify_session_url || ''}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_url: e.target.value.trim() })}
+                        className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm"
+                        placeholder="https://oxygengdl.com/indicaciones-para-sesiones/"
+                      />
+                      <p className="text-[9px] font-bold text-amber-700/90 mt-1 leading-relaxed">
+                        En la primera cita, el SMS incluye esta liga (el correo lleva el texto completo). GDL: oxygengdl.com · Houston: oxyhyperbaric.com
+                      </p>
                     </div>
                   </div>
                 </div>

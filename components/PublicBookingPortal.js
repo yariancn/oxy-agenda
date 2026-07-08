@@ -19,6 +19,7 @@ import {
 import { isFirstSessionAppointment, resolveAppointmentNotifyType } from '../lib/emailTemplates';
 import {
   getSessionInstructionsLabel,
+  getSessionInstructionsUrl,
   isAutoNotifyEnabled,
   resolveSessionInstructions,
 } from '../lib/notifySettings';
@@ -257,6 +258,7 @@ export default function PublicBookingPortal({
               isFirstSession: includeFirstSessionNotes,
             }),
             instructionsLabel: getSessionInstructionsLabel(dbConfig || {}, locale),
+            sessionInstructionsUrl: getSessionInstructionsUrl(dbConfig || {}, clinicName),
             address: dbConfig?.address || '',
             mapsUrl: dbConfig?.maps_url || '',
             clinicPhone: dbConfig?.phone || '',

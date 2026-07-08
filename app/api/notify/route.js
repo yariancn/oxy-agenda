@@ -27,6 +27,7 @@ export async function POST(request) {
       notifyType = 'booking',
       emailTemplates = {},
       instructionsLabel = '',
+      sessionInstructionsUrl = '',
       durationMins = 60,
       bufferMins = 0,
     } = body;
@@ -51,6 +52,7 @@ export async function POST(request) {
       ticketMessage,
       emailTemplates,
       instructionsLabel,
+      sessionInstructionsUrl,
       durationMins,
       bufferMins,
     });

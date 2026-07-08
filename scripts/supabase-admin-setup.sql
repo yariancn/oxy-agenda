@@ -47,6 +47,7 @@ ALTER TABLE company_config
 ALTER TABLE company_config
   ADD COLUMN IF NOT EXISTS notify_session_label text,
   ADD COLUMN IF NOT EXISTS notify_session_default text,
+  ADD COLUMN IF NOT EXISTS notify_session_url text,
   ADD COLUMN IF NOT EXISTS notify_auto_first boolean DEFAULT true,
   ADD COLUMN IF NOT EXISTS notify_auto_booking boolean DEFAULT true,
   ADD COLUMN IF NOT EXISTS notify_auto_reschedule boolean DEFAULT true,

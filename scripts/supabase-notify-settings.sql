@@ -4,6 +4,7 @@
 ALTER TABLE company_config
   ADD COLUMN IF NOT EXISTS notify_session_label text,
   ADD COLUMN IF NOT EXISTS notify_session_default text,
+  ADD COLUMN IF NOT EXISTS notify_session_url text,
   ADD COLUMN IF NOT EXISTS notify_auto_first boolean DEFAULT true,
   ADD COLUMN IF NOT EXISTS notify_auto_booking boolean DEFAULT true,
   ADD COLUMN IF NOT EXISTS notify_auto_reschedule boolean DEFAULT true,
@@ -12,4 +13,5 @@ ALTER TABLE company_config
   ADD COLUMN IF NOT EXISTS notify_channel_sms boolean DEFAULT true;
 
 COMMENT ON COLUMN company_config.notify_session_default IS 'Indicaciones estándar si la cita no tiene notas. Placeholder {{instrucciones}} en plantillas.';
+COMMENT ON COLUMN company_config.notify_session_url IS 'Liga editable a la página de indicaciones; se envía por SMS en la primera cita. Default GDL: oxygengdl.com, Houston: oxyhyperbaric.com.';
 COMMENT ON COLUMN company_config.notify_auto_first IS 'Enviar correo/SMS automático en primera cita';
