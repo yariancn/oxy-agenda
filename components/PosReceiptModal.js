@@ -133,7 +133,7 @@ export default function PosReceiptModal({
               setSmsPhone(e.target.value);
               setSmsResult(null);
             }}
-            placeholder={t.receiptSmsPhonePlaceholder || (locale === 'en' ? '+1 713 555 1234' : '33 1234 5678')}
+            placeholder={t.receiptSmsPhonePlaceholder || ''}
             className="w-full p-2.5 border-2 border-blue-300 rounded-lg text-sm font-bold text-slate-900"
           />
           {!hasSmsPhone && (

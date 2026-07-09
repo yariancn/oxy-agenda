@@ -268,7 +268,7 @@ export default function PatientProfileModal({
       return;
     }
 
-    const reversed = reversePurchaseSessions(formData.wallets, formData.adeudo, txToCancel);
+    const reversed = reversePurchaseSessions(formData.wallets, formData.adeudo, txToCancel, formData.packageHistory);
     const nextHistory = (formData.packageHistory || []).filter((tx) => tx.id !== txToCancel.id);
     setFormData((prev) => ({
       ...prev,

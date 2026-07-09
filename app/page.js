@@ -97,6 +97,7 @@ import { formatSaleAuditDetail, formatSaleCancelAuditDetail } from '../lib/saleA
 import {
   applyPurchaseSessions,
   consumeSessionFromWallet,
+  creditSessionToWallet,
   hasPaidSessionBalance,
   persistWalletAfterConsume,
   repairLegacyWalletKeys,
@@ -882,7 +883,12 @@ export default function AppLayout() {
       try {
         const resGroups = await clinicDb.from('session_groups').select('*');
         if (!resGroups.error) {
-          setDbSessionGroups((resGroups.data || []).map(normalizeGroup));
+          const safeGroups = (resGroups.data || []).map(normalizeGroup);
+          setDbSessionGroups(safeGroups);
+          const groupRepairs = safeGroups.filter((g) => g._walletRepairPending);
+          if (groupRepairs.length && clinicDb) {
+            await Promise.all(groupRepairs.map((g) => clinicDb.from('session_groups').update({ wallets: g.wallets }).eq('id', g.id)));
+          }
           setSessionGroupsEnabled(true);
         } else {
           setDbSessionGroups([]);
@@ -1934,9 +1940,17 @@ export default function AppLayout() {
   const openAppointmentDetails = (app) => {
     const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(app.patient));
     const patInfo = matchingPatients.find(x => x.notes && x.notes.trim() !== '') || matchingPatients[0];
-    const repairedWallets = patInfo
-      ? repairLegacyWalletKeys(patInfo.wallets || {}, patInfo.packageHistory || []).wallets
-      : {};
+    let repairedWallets = {};
+    if (patInfo) {
+      const repaired = repairLegacyWalletKeys(patInfo.wallets || {}, patInfo.packageHistory || []);
+      repairedWallets = repaired.wallets;
+      if (repaired.changed && patInfo.id && activeSupabase) {
+        activeSupabase.from('patients').update({ wallets: repaired.wallets }).eq('id', patInfo.id);
+        setDbPatients((prev) => prev.map((p) => (
+          String(p.id) === String(patInfo.id) ? { ...p, wallets: repaired.wallets } : p
+        )));
+      }
+    }
     setSelectedSlot(attachSessionContext({
       ...app,
       status: 'booked',
@@ -2206,8 +2220,7 @@ export default function AppLayout() {
       const p = dbPatients.find(x => String(x.id) === String(patientId));
       if (!p) return alert(a('patientNotFound'));
 
-      const eqName = tx.equipment || tx.serviceName;
-      const reversed = reversePurchaseSessions(p.wallets, p.adeudo, tx);
+      const reversed = reversePurchaseSessions(p.wallets, p.adeudo, tx, p.packageHistory);
       const newHistory = (p.packageHistory || []).filter(t => String(t.id) !== String(tx.id));
 
       let res = await activeSupabase.from('patients').update({
@@ -2429,9 +2442,23 @@ export default function AppLayout() {
     if (window.confirm(a('refundConfirm'))) {
       const p = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(app.patient));
       if (p) {
-        const currentWallets = p.wallets || {};
-        currentWallets[app.equipment] = (currentWallets[app.equipment] || 0) + 1;
-        await activeSupabase.from('patients').update({ wallets: currentWallets }).eq('id', p.id);
+        const servicePrice = getServicePrice(dbServices, app.equipment);
+        const walletContext = resolveWalletContext({
+          patient: p,
+          sessionGroup: getPatientSessionGroup(p),
+          equipment: app.equipment,
+          servicePrice,
+        });
+        const nextWallets = creditSessionToWallet(walletContext.wallets, {
+          equipment: app.equipment,
+          servicePrice,
+          packageHistory: walletContext.packageHistory,
+        });
+        if (walletContext.source === 'group' && walletContext.groupId) {
+          await activeSupabase.from('session_groups').update({ wallets: nextWallets }).eq('id', walletContext.groupId);
+        } else {
+          await activeSupabase.from('patients').update({ wallets: nextWallets }).eq('id', p.id);
+        }
       }
       await activeSupabase.from('appointments').update({ check_in_status: 'Devuelto' }).eq('id', app.id);
       await logAudit(app.id, app.patient, 'DEVOLUCIÓN DE SESIÓN', `Sesión devuelta a cartera por cancelación de cobro.`);
@@ -6187,21 +6214,22 @@ export default function AppLayout() {
             onPersistPurchase={async ({ patientId, wallets, adeudo, packageHistory }) => {
               const id = patientId || selectedSlot.patientId;
               if (!id) throw new Error(locale === 'en' ? 'Save the patient profile first (missing ID).' : 'Guarda el expediente del paciente primero (falta ID).');
+              const repaired = repairLegacyWalletKeys(wallets, packageHistory);
               let res = await activeSupabase.from('patients').update({
-                wallets,
+                wallets: repaired.wallets,
                 adeudo: adeudo ?? 0,
                 package_history: packageHistory,
               }).eq('id', id);
               if (res.error && /column|adeudo/i.test(res.error.message || '')) {
                 res = await activeSupabase.from('patients').update({
-                  wallets,
+                  wallets: repaired.wallets,
                   package_history: packageHistory,
                 }).eq('id', id);
               }
               if (res.error) throw new Error(res.error.message);
               setDbPatients((prev) => prev.map((p) => (
                 String(p.id) === String(id)
-                  ? { ...p, wallets, adeudo: adeudo ?? 0, packageHistory }
+                  ? { ...p, wallets: repaired.wallets, adeudo: adeudo ?? 0, packageHistory }
                   : p
               )));
               broadcastLiveDataUpdated(activeClinic);
@@ -6212,6 +6240,7 @@ export default function AppLayout() {
             onSave={async (ud) => {
               const activeSupabase = createStaffDb(activeClinic);
               const patientDbId = ud.id || selectedSlot.patientId;
+              const repairedWallets = repairLegacyWalletKeys(ud.wallets, ud.packageHistory).wallets;
               if (patientDbId) {
                 let p = { 
                   Name: ud.patient, 
@@ -6222,7 +6251,7 @@ export default function AppLayout() {
                   is_blocked: ud.is_blocked, 
                   prefers_email: ud.prefers_email,
                   prefers_sms: ud.prefers_sms,
-                  wallets: ud.wallets, 
+                  wallets: repairedWallets, 
                   package_history: ud.packageHistory, 
                   historico_sesiones: ud.historicoSesiones,
                   adeudo: ud.adeudo ?? 0,
@@ -6239,7 +6268,7 @@ export default function AppLayout() {
                     is_blocked: ud.is_blocked, 
                     prefers_email: ud.prefers_email,
                     prefers_sms: ud.prefers_sms,
-                    wallets: ud.wallets, 
+                    wallets: repairedWallets, 
                     package_history: ud.packageHistory, 
                     historico_sesiones: ud.historicoSesiones,
                   }).eq('id', patientDbId);
