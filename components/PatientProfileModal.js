@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useStaffLocale } from './StaffLocaleContext';
 import PosReceiptModal from './PosReceiptModal';
-import { applyPurchaseSessions, priceWalletKey, reversePurchaseSessions, sumWalletBalance } from '../lib/sessionWallet';
+import { applyPurchaseSessions, priceWalletKey, reversePurchaseSessions, sumWalletBalance, resolveWalletStorageKey, formatWalletKeyLabel, repairLegacyWalletKeys } from '../lib/sessionWallet';
 import { sumPurchasedSessions } from '../lib/sessionSummary';
 import { canCreateSessionGroup, canJoinSessionGroup, isGroupTitular } from '../lib/sessionGroup';
 import PatientSessionHistory from './PatientSessionHistory';
@@ -33,7 +33,9 @@ export default function PatientProfileModal({
   const t = L.modals.patient;
   const canCancelSales = currentUserLevel <= 2;
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState(() => {
+    const repaired = repairLegacyWalletKeys(initialData.wallets || {}, initialData.packageHistory || []);
+    return {
     id: initialData.patientId || initialData.patient_id || null,
     patient: initialData.patient || '',
     phone: initialData.phone || '',
@@ -44,10 +46,11 @@ export default function PatientProfileModal({
     is_blocked: initialData.is_blocked || false,
     prefers_email: initialData.prefers_email !== false,
     prefers_sms: initialData.prefers_sms !== false,
-    wallets: initialData.wallets || {},
+    wallets: repaired.wallets,
     packageHistory: initialData.packageHistory || [],
     historicoSesiones: initialData.historicoSesiones || 0,
     adeudo: Number(initialData.adeudo) || 0,
+  };
   });
 
   const [posService, setPosService] = useState('');
@@ -177,7 +180,7 @@ export default function PatientProfileModal({
         minute: '2-digit',
       }),
       serviceName: posService,
-      equipment: baseService,
+      equipment: resolveWalletStorageKey({ serviceName: posService, equipment: baseService, unitPrice }),
       sessions,
       unitPrice,
       price: total,
@@ -194,7 +197,9 @@ export default function PatientProfileModal({
     };
 
     const useGroup = isTitular && sessionGroup?.id && onGroupPurchase;
-    const walletKey = useGroup ? priceWalletKey(unitPrice) : baseService;
+    const walletKey = useGroup
+      ? priceWalletKey(unitPrice)
+      : resolveWalletStorageKey({ serviceName: posService, equipment: baseService, unitPrice });
     const applied = applyPurchaseSessions(
       useGroup ? (sessionGroup.wallets || {}) : formData.wallets,
       useGroup ? (sessionGroup.adeudo || 0) : formData.adeudo,
@@ -528,7 +533,7 @@ export default function PatientProfileModal({
               Object.keys(sessionGroup.wallets || {}).length ? (
                 Object.entries(sessionGroup.wallets).map(([eq, qty]) => (
                   <div key={eq} className={`flex justify-between p-2 rounded border mb-1 text-[10px] font-black ${qty > 0 ? 'bg-emerald-50' : 'bg-red-50'}`}>
-                    <span className="uppercase">{eq.replace(/^price_/, '$')}</span>
+                    <span className="uppercase">{formatWalletKeyLabel(eq.replace(/^price_/, ''), sessionGroup?.packageHistory)}</span>
                     <span>{qty} {t.availableShort}</span>
                   </div>
                 ))
@@ -540,7 +545,7 @@ export default function PatientProfileModal({
             ) : Object.keys(formData.wallets || {}).length ? (
               Object.entries(formData.wallets).map(([eq, qty]) => (
                 <div key={eq} className={`flex justify-between p-2 rounded border mb-1 text-[10px] font-black ${qty > 0 ? 'bg-emerald-50' : 'bg-red-50'}`}>
-                  <span className="uppercase">{eq}</span>
+                  <span className="uppercase">{formatWalletKeyLabel(eq, formData.packageHistory)}</span>
                   <span>{qty} {t.availableShort}</span>
                 </div>
               ))

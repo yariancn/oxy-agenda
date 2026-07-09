@@ -99,6 +99,7 @@ import {
   consumeSessionFromWallet,
   hasPaidSessionBalance,
   persistWalletAfterConsume,
+  repairLegacyWalletKeys,
   resolveWalletContext,
   reversePurchaseSessions,
 } from '../lib/sessionWallet';
@@ -849,7 +850,10 @@ export default function AppLayout() {
       assertDbResult('protocols', resProt);
       assertDbResult('user_roles', resRoles);
 
-      const safePatients = (patientsData || []).map(p => ({
+      const safePatients = (patientsData || []).map(p => {
+        const packageHistory = p.package_history || [];
+        const repaired = repairLegacyWalletKeys(p.wallets || {}, packageHistory);
+        return {
         id: p.id,
         patient: String(p.Name || p.name || p.Nombre || 'Sin Nombre'),
         phone: String(p.Phone || p.phone || ''),
@@ -859,14 +863,21 @@ export default function AppLayout() {
         is_blocked: p.is_blocked || false,
         prefers_email: p.prefers_email !== false,
         prefers_sms: p.prefers_sms !== false,
-        wallets: p.wallets || {},
-        packageHistory: p.package_history || [],
+        wallets: repaired.wallets,
+        packageHistory,
         historicoSesiones: p.historico_sesiones || 0,
         adeudo: Number(p.adeudo) || 0,
         sessionGroupId: p.session_group_id || null,
-      }));
+        _walletRepairPending: repaired.changed,
+      };
+      });
 
       setDbPatients(safePatients.sort((a, b) => a.patient.localeCompare(b.patient)));
+
+      const walletRepairs = safePatients.filter((p) => p._walletRepairPending);
+      if (walletRepairs.length && clinicDb) {
+        await Promise.all(walletRepairs.map((p) => clinicDb.from('patients').update({ wallets: p.wallets }).eq('id', p.id)));
+      }
 
       try {
         const resGroups = await clinicDb.from('session_groups').select('*');
@@ -1923,6 +1934,9 @@ export default function AppLayout() {
   const openAppointmentDetails = (app) => {
     const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(app.patient));
     const patInfo = matchingPatients.find(x => x.notes && x.notes.trim() !== '') || matchingPatients[0];
+    const repairedWallets = patInfo
+      ? repairLegacyWalletKeys(patInfo.wallets || {}, patInfo.packageHistory || []).wallets
+      : {};
     setSelectedSlot(attachSessionContext({
       ...app,
       status: 'booked',
@@ -1930,7 +1944,7 @@ export default function AppLayout() {
       phone: patInfo?.phone || app.phone,
       email: patInfo?.email,
       protocol: patInfo?.protocol || app.protocol,
-      wallets: patInfo?.wallets || {},
+      wallets: patInfo ? repairedWallets : {},
       historicoSesiones: patInfo?.historicoSesiones || 0,
       adeudo: patInfo?.adeudo || 0,
       packageHistory: patInfo?.packageHistory || [],
