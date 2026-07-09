@@ -14,7 +14,10 @@
     "seed-demo:gdl:clear": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs --clear",
     "seed-demo:gdl:next": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs --week=next",
     "seed-demo:gdl:next:dry": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs --week=next --dry-run",
-    "seed-demo:gdl:both": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs --both"
+    "seed-demo:gdl:both": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs --both",
+    "import-setmore:gdl": "node --env-file=.env.local scripts/import-setmore-gdl.mjs",
+    "import-setmore:gdl:dry": "node --env-file=.env.local scripts/import-setmore-gdl.mjs --dry-run",
+    "import-setmore:gdl:no-clear": "node --env-file=.env.local scripts/import-setmore-gdl.mjs --no-clear"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1",
