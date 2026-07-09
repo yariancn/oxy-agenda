@@ -3441,7 +3441,7 @@ export default function AppLayout() {
                   </div>
                   <div className="relative pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
                     {timeOptions.map((timeStr) => (
-                      <div key={timeStr} className="absolute w-full text-right pr-2 border-b border-slate-300" style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}>
+                      <div key={timeStr} className="absolute w-full text-right pr-2 border-b border-slate-400/70" style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}>
                         <span className="text-[9px] font-black text-slate-500 relative inline-block top-0 translate-y-[-50%] bg-slate-50 px-0.5">{timeStr}</span>
                       </div>
                     ))}
@@ -3454,7 +3454,7 @@ export default function AppLayout() {
                       {displayedEquipments.map((eqName) => {
                         const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                         return (
-                        <div key={eqName} className={`flex-1 border-r border-slate-300 ${getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth * 2}px` }}>
+                        <div key={eqName} className={`flex-1 border-r-2 border-slate-400 last:border-r-0 ${getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth * 2}px` }}>
                           <div className={`h-12 border-b border-slate-200 flex flex-col items-center justify-center sticky top-0 z-40 ${getEquipmentHeaderColor(srvColor)}`}>
                             <span className="text-[10px] font-black uppercase leading-none">{eqName}</span>
                             <span className="text-[11px] font-bold opacity-80">{currentDayInfo.date}</span>
@@ -3507,7 +3507,7 @@ export default function AppLayout() {
                         const dayLayout = weekDayLayouts[dayInfo.fullDate] || weekDayLayout(true, displayedEquipments.length, currentColWidth);
                         const { dayWidth, equipWidth, compactDay } = dayLayout;
                         return (
-                        <div key={dayInfo.fullDate} data-cal-day={dayInfo.fullDate} className={`shrink-0 border-r-2 ${dayInfo.fullDate === clinicNow.dateStr ? 'border-blue-500 ring-2 ring-inset ring-blue-400/60' : 'border-slate-300'} ${!dayOpen ? 'opacity-60' : ''}`} style={{ width: `${dayWidth}px`, minWidth: `${dayWidth}px` }}>
+                        <div key={dayInfo.fullDate} data-cal-day={dayInfo.fullDate} className={`${compactDay ? 'shrink-0' : 'flex-1 shrink-0'} border-r-[3px] ${dayInfo.fullDate === clinicNow.dateStr ? 'border-blue-600 ring-2 ring-inset ring-blue-400/60' : 'border-slate-500'} ${!dayOpen ? 'opacity-60' : ''}`} style={compactDay ? { width: `${dayWidth}px`, minWidth: `${dayWidth}px`, flex: '0 0 auto' } : { minWidth: `${dayWidth}px` }}>
                           <div className={`sticky top-0 z-40 border-b border-slate-200 ${dayInfo.fullDate === clinicNow.dateStr ? 'bg-blue-50' : dayOpen ? 'bg-slate-50' : 'bg-slate-200'}`}>
                             <div className={`flex flex-col items-center justify-center ${compactDay ? 'h-8 px-0.5' : 'h-8'}`}>
                               <span className={`font-black text-slate-800 uppercase leading-none ${compactDay ? 'text-[7px] [writing-mode:vertical-rl] rotate-180 max-h-8 truncate' : 'text-[9px]'}`}>{dayInfo.name}</span>
@@ -3526,12 +3526,15 @@ export default function AppLayout() {
                                 return (
                                   <div
                                     key={`${dayInfo.fullDate}-hdr-${eqName}`}
-                                    className={`flex-1 flex items-center justify-center border-r border-slate-300/80 last:border-r-0 ${getEquipmentHeaderColor(srvColor)}`}
-                                    style={{ minWidth: `${equipWidth}px`, width: `${equipWidth}px` }}
+                                    className={`flex-1 flex items-center justify-center border-r-2 border-slate-400 last:border-r-0 ${getEquipmentHeaderColor(srvColor)}`}
+                                    style={compactDay
+                                      ? { minWidth: `${equipWidth}px`, width: `${equipWidth}px`, flex: `0 0 ${equipWidth}px` }
+                                      : { minWidth: `${currentColWidth}px`, flex: '1 1 0' }}
                                     title={eqName}
                                   >
                                     <span className="text-[7px] sm:text-[8px] font-black uppercase truncate px-0.5 text-center w-full leading-none">
-                                      {equipWidth >= 104 ? eqName : getEquipmentShortLabel(eqName)}
+                                      {!compactDay && (currentColWidth >= 96 ? eqName : getEquipmentShortLabel(eqName))}
+                                      {compactDay && getEquipmentShortLabel(eqName).slice(0, 1)}
                                     </span>
                                   </div>
                                 );
@@ -3543,7 +3546,7 @@ export default function AppLayout() {
                             {displayedEquipments.map(eqName => {
                               const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                               return (
-                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`relative border-r border-slate-300 ${getEquipmentBgColor(srvColor)} ${compactDay ? 'overflow-hidden' : ''}`} style={{ width: `${equipWidth}px`, minWidth: `${equipWidth}px`, flex: `0 0 ${equipWidth}px` }}>
+                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`relative border-r-2 border-slate-400 last:border-r-0 ${getEquipmentBgColor(srvColor)} ${compactDay ? 'overflow-hidden' : 'flex-1'}`} style={compactDay ? { width: `${equipWidth}px`, minWidth: `${equipWidth}px`, flex: `0 0 ${equipWidth}px` } : { minWidth: `${currentColWidth}px` }}>
                                 
                                 <div className="absolute inset-0 z-0">{renderBackgroundSlots(eqName, dayInfo.name, dayInfo.fullDate)}</div>
                                 
@@ -3565,7 +3568,7 @@ export default function AppLayout() {
                                   <CalendarAppointmentBlock
                                     key={app.id}
                                     app={app}
-                                    colWidth={equipWidth}
+                                    colWidth={compactDay ? equipWidth : currentColWidth}
                                     locale={locale}
                                     L={L}
                                     isSelected={selectedSlot?.id === app.id}

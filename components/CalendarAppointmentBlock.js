@@ -99,7 +99,7 @@ export default function CalendarAppointmentBlock({
       onClick={onSelect}
       draggable={draggable}
       onDragStart={onDragStart}
-      className={`absolute ${paddingClass} p-0.5 sm:p-1 ${roundedClass} border-l-4 shadow-md cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-105 hover:ring-1 hover:ring-black/20 hover:z-30 ${colorClasses} ${isSelected ? 'ring-2 ring-blue-600 ring-offset-1 z-30' : ''}`}
+      className={`absolute ${paddingClass} p-0.5 sm:p-1 ${roundedClass} border-2 border-l-[6px] shadow-md cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-105 hover:ring-1 hover:ring-black/20 hover:z-30 ${colorClasses} ${isSelected ? 'ring-2 ring-blue-600 ring-offset-1 z-30' : ''}`}
       style={{ top: `${topPx}px`, height: `${heightPx}px`, zIndex: 10 }}
     >
       {ultra ? (
