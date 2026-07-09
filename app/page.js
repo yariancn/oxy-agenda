@@ -285,7 +285,7 @@ export default function AppLayout() {
   const [newPatientData, setNewPatientData] = useState({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true });
   
   const [showOOOModal, setShowOOOModal] = useState(false);
-  const [oooData, setOOOData] = useState({ date: '', start_time: '07:00', end_time: '19:00', is_global: true, equipment: 'Todos', reason: 'Festivo / Mantenimiento' });
+  const [oooData, setOOOData] = useState({ date: '', start_time: '07:00', end_time: '19:00', is_global: true, equipment: '', reason: 'Festivo / Mantenimiento' });
 
   // --- REPORTES Y SEGURIDAD ---
   const [isReportsUnlocked, setIsReportsUnlocked] = useState(false);
@@ -1738,6 +1738,16 @@ export default function AppLayout() {
     }
     return slots;
   }, [calendarStartMins, calendarEndMins, intervalMins]);
+
+  const openBlockSlotModal = () => {
+    const defaultEquip = dynamicColumns[0] || dbServices.find((s) => s.is_active)?.name || '';
+    setOOOData((prev) => ({
+      ...prev,
+      date: clinicNow.dateStr || formatClinicDateIso(currentDate, activeClinic),
+      equipment: prev.equipment && dynamicColumns.includes(prev.equipment) ? prev.equipment : defaultEquip,
+    }));
+    setShowOOOModal(true);
+  };
 
   const createEmptyAppointmentDraft = () => {
     const firstSrv = dbServices.find(s => s.is_active);
@@ -3295,7 +3305,7 @@ export default function AppLayout() {
 
               <div className="flex items-center gap-1.5 lg:gap-3 bg-slate-50 p-1 lg:p-1.5 rounded-lg lg:rounded-xl border border-slate-200 flex-wrap">
                 {currentUserLevel <= 2 && (
-                  <button onClick={() => setShowOOOModal(true)} className="bg-red-100 text-red-700 border-2 border-red-300 px-2.5 sm:px-3 py-1.5 text-[9px] sm:text-[10px] font-black rounded-lg hover:bg-red-200 transition uppercase shadow-sm shrink-0 flex items-center gap-1" title={L.blockSlot}>
+                  <button onClick={openBlockSlotModal} className="bg-red-100 text-red-700 border-2 border-red-300 px-2.5 sm:px-3 py-1.5 text-[9px] sm:text-[10px] font-black rounded-lg hover:bg-red-200 transition uppercase shadow-sm shrink-0 flex items-center gap-1" title={L.blockSlot}>
                     <span>🚫</span>
                     <span className="sm:inline">{L.blockSlot}</span>
                   </button>
@@ -5992,15 +6002,34 @@ export default function AppLayout() {
                   <input type="time" value={oooData.end_time} onChange={e => setOOOData({...oooData, end_time: e.target.value})} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm" />
                 </div>
               </div>
-              <div className="flex items-center gap-3 bg-red-50 p-3 rounded-xl border border-red-100 cursor-pointer" onClick={() => setOOOData({...oooData, is_global: !oooData.is_global})}>
-                <div className={`w-5 h-5 rounded flex items-center justify-center ${oooData.is_global ? 'bg-red-500' : 'bg-white border-2 border-slate-300'}`}>
-                  {oooData.is_global && <span className="text-white text-xs">✓</span>}
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-2 block">{L.blockScopeLabel}</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setOOOData({ ...oooData, is_global: true })}
+                    className={`text-left p-3 rounded-xl border-2 transition ${oooData.is_global ? 'border-red-500 bg-red-50 shadow-sm' : 'border-slate-200 bg-white hover:border-red-200'}`}
+                  >
+                    <span className="block text-xs font-black uppercase text-red-900">{L.blockScopeClinic}</span>
+                    <span className="block text-[10px] font-bold text-slate-500 mt-1 normal-case leading-snug">{L.blockScopeClinicHint}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOOOData({
+                      ...oooData,
+                      is_global: false,
+                      equipment: oooData.equipment || dynamicColumns[0] || '',
+                    })}
+                    className={`text-left p-3 rounded-xl border-2 transition ${!oooData.is_global ? 'border-red-500 bg-red-50 shadow-sm' : 'border-slate-200 bg-white hover:border-red-200'}`}
+                  >
+                    <span className="block text-xs font-black uppercase text-red-900">{L.blockScopeEquipment}</span>
+                    <span className="block text-[10px] font-bold text-slate-500 mt-1 normal-case leading-snug">{L.blockScopeEquipmentHint}</span>
+                  </button>
                 </div>
-                <label className="text-xs font-black uppercase text-red-900 cursor-pointer">Cerrar Toda la Clínica</label>
               </div>
               {!oooData.is_global && (
                 <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Equipo a Bloquear</label>
+                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">{L.blockSelectEquipment}</label>
                   <select value={oooData.equipment} onChange={e => setOOOData({...oooData, equipment: e.target.value})} className="w-full p-3 border rounded-xl font-bold text-sm uppercase outline-none text-slate-900 bg-white">
                     {dynamicColumns.map(e => <option key={e} value={e}>{e}</option>)}
                   </select>
@@ -6016,6 +6045,7 @@ export default function AppLayout() {
               <button onClick={() => setShowOOOModal(false)} className="w-full sm:w-1/3 bg-white border border-slate-300 font-black py-3 sm:py-4 rounded-xl uppercase text-xs hover:bg-slate-50">Cancelar</button>
               <button onClick={async () => {
                 if (!oooData.date) return alert(a('selectDate'));
+                if (!oooData.is_global && !oooData.equipment) return alert(L.blockSelectEquipmentRequired);
                 await activeSupabase.from('blocked_slots').insert([{ 
                   date: oooData.date, 
                   start_time: oooData.start_time, 
