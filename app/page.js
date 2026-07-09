@@ -5603,7 +5603,7 @@ export default function AppLayout() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <label className="text-[9px] font-black uppercase text-slate-500">{L.p.appt.phone}</label>
-                      <input type="tel" value={selectedSlot?.phone || ''} onChange={e => setSelectedSlot({...selectedSlot, phone: e.target.value})} placeholder="7135913379" className="w-full p-2 border border-slate-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white mt-0.5" />
+                      <input type="tel" value={selectedSlot?.phone || ''} onChange={e => setSelectedSlot({...selectedSlot, phone: e.target.value})} className="w-full p-2 border border-slate-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white mt-0.5" />
                     </div>
                     <div>
                       <label className="text-[9px] font-black uppercase text-slate-500">{L.p.appt.email}</label>
@@ -5853,7 +5853,7 @@ export default function AppLayout() {
               </div>
               <div>
                 <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Teléfono</label>
-                <input type="text" placeholder="Ej. 3312345678" value={newPatientData.phone} onChange={e => setNewPatientData({...newPatientData, phone: e.target.value})} className="w-full p-3 border rounded-xl font-bold text-sm outline-none focus:border-emerald-500 text-slate-900 bg-white" />
+                <input type="text" value={newPatientData.phone} onChange={e => setNewPatientData({...newPatientData, phone: e.target.value})} className="w-full p-3 border rounded-xl font-bold text-sm outline-none focus:border-emerald-500 text-slate-900 bg-white" />
               </div>
               <div>
                 <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Correo (Opcional)</label>
@@ -6150,6 +6150,28 @@ export default function AppLayout() {
             onClose={() => setShowPatientProfile(false)}
             onLogSale={(tx, patientName) => {
               logAudit(null, patientName, 'VENTA POS', formatSaleAuditDetail(tx, currencyStr));
+            }}
+            onPersistPurchase={async ({ patientId, wallets, adeudo, packageHistory }) => {
+              const id = patientId || selectedSlot.patientId;
+              if (!id) throw new Error(locale === 'en' ? 'Save the patient profile first (missing ID).' : 'Guarda el expediente del paciente primero (falta ID).');
+              let res = await activeSupabase.from('patients').update({
+                wallets,
+                adeudo: adeudo ?? 0,
+                package_history: packageHistory,
+              }).eq('id', id);
+              if (res.error && /column|adeudo/i.test(res.error.message || '')) {
+                res = await activeSupabase.from('patients').update({
+                  wallets,
+                  package_history: packageHistory,
+                }).eq('id', id);
+              }
+              if (res.error) throw new Error(res.error.message);
+              setDbPatients((prev) => prev.map((p) => (
+                String(p.id) === String(id)
+                  ? { ...p, wallets, adeudo: adeudo ?? 0, packageHistory }
+                  : p
+              )));
+              broadcastLiveDataUpdated(activeClinic);
             }}
             onCancelSale={(tx, patientName) => {
               logAudit(null, patientName, 'REVERSIÓN DE VENTA', formatSaleCancelAuditDetail(tx, currencyStr));

@@ -27,6 +27,7 @@ export default function PatientProfileModal({
   onRemoveGroupMember,
   onGroupPurchase,
   onGroupCancelSale,
+  onPersistPurchase,
 }) {
   const { locale, L } = useStaffLocale();
   const t = L.modals.patient;
@@ -90,7 +91,7 @@ export default function PatientProfileModal({
   };
 
   const syncPosTotal = (qty, unit) => {
-    const q = Number(qty) || 0;
+    const q = typeof qty === 'number' ? qty : parseInt(qty, 10);
     const u = parseFloat(unit) || 0;
     if (q > 0 && u > 0) setPosPrice(String(Math.round(u * q * 100) / 100));
   };
@@ -101,15 +102,24 @@ export default function PatientProfileModal({
       const srv = servicios.find((s) => s.name === serviceName);
       if (srv) {
         const unit = String(srv.price || '');
-        setPosQty(1);
         setPosUnitPrice(unit);
-        setPosPrice(unit);
+        const q = typeof posQty === 'number' ? posQty : parseInt(posQty, 10);
+        if (q > 0) {
+          syncPosTotal(q, unit);
+        } else {
+          setPosPrice(unit);
+        }
       }
     }
   };
 
   const handleQtyChange = (rawQty) => {
-    const qty = parseInt(rawQty, 10) || 0;
+    if (rawQty === '') {
+      setPosQty('');
+      return;
+    }
+    const qty = parseInt(String(rawQty), 10);
+    if (Number.isNaN(qty)) return;
     setPosQty(qty);
     syncPosTotal(qty, posUnitPrice);
   };
@@ -124,7 +134,12 @@ export default function PatientProfileModal({
       alert(t.blockedCharge);
       return;
     }
-    if (!posService || posQty <= 0) {
+    if (!posService) {
+      alert(t.selectValidService);
+      return;
+    }
+    const qtyNum = typeof posQty === 'number' ? posQty : parseInt(posQty, 10);
+    if (!qtyNum || qtyNum <= 0) {
       alert(t.selectValidService);
       return;
     }
@@ -136,7 +151,7 @@ export default function PatientProfileModal({
     }
 
     const total = parseFloat(posPrice) || 0;
-    const sessions = posQty;
+    const sessions = qtyNum;
     const unitPrice = sessions > 0 ? total / sessions : (parseFloat(posUnitPrice) || 0);
 
     setCharging(true);
@@ -178,39 +193,50 @@ export default function PatientProfileModal({
       addedToWallet: 0,
     };
 
-    setFormData((prev) => {
-      const useGroup = isTitular && sessionGroup?.id && onGroupPurchase;
-      const walletKey = useGroup ? priceWalletKey(unitPrice) : baseService;
-      const applied = applyPurchaseSessions(
-        useGroup ? (sessionGroup.wallets || {}) : prev.wallets,
-        useGroup ? (sessionGroup.adeudo || 0) : prev.adeudo,
-        walletKey,
-        posQty,
-      );
-      newTransaction.debtCleared = applied.debtCleared;
-      newTransaction.addedToWallet = applied.addedToWallet;
-      newTransaction.unitPrice = unitPrice;
-      if (applied.debtCleared > 0 || applied.addedToWallet > 0) {
-        setLastPurchaseNote(t.purchaseDebtCleared(applied.debtCleared, applied.addedToWallet));
-      }
+    const useGroup = isTitular && sessionGroup?.id && onGroupPurchase;
+    const walletKey = useGroup ? priceWalletKey(unitPrice) : baseService;
+    const applied = applyPurchaseSessions(
+      useGroup ? (sessionGroup.wallets || {}) : formData.wallets,
+      useGroup ? (sessionGroup.adeudo || 0) : formData.adeudo,
+      walletKey,
+      sessions,
+    );
+    newTransaction.debtCleared = applied.debtCleared;
+    newTransaction.addedToWallet = applied.addedToWallet;
+    newTransaction.unitPrice = unitPrice;
+    if (applied.debtCleared > 0 || applied.addedToWallet > 0) {
+      setLastPurchaseNote(t.purchaseDebtCleared(applied.debtCleared, applied.addedToWallet));
+    }
 
-      if (useGroup) {
-        onGroupPurchase({
-          groupId: sessionGroup.id,
-          wallets: applied.wallets,
-          adeudo: applied.adeudo,
-          transaction: newTransaction,
-        });
-        return prev;
-      }
+    const nextPackageHistory = [newTransaction, ...(formData.packageHistory || [])];
 
-      return {
+    if (useGroup) {
+      onGroupPurchase({
+        groupId: sessionGroup.id,
+        wallets: applied.wallets,
+        adeudo: applied.adeudo,
+        transaction: newTransaction,
+      });
+    } else {
+      setFormData((prev) => ({
         ...prev,
         wallets: applied.wallets,
         adeudo: applied.adeudo,
-        packageHistory: [newTransaction, ...(prev.packageHistory || [])],
-      };
-    });
+        packageHistory: nextPackageHistory,
+      }));
+      try {
+        await onPersistPurchase?.({
+          patientId: formData.id,
+          wallets: applied.wallets,
+          adeudo: applied.adeudo,
+          packageHistory: nextPackageHistory,
+          transaction: newTransaction,
+        });
+      } catch (err) {
+        alert(err?.message || String(err));
+        return;
+      }
+    }
 
     onLogSale?.(newTransaction, formData.patient);
 
@@ -231,19 +257,26 @@ export default function PatientProfileModal({
 
     onCancelSale?.(txToCancel, formData.patient);
 
-    setFormData((prev) => {
-      if (isTitular && sessionGroup?.id && onGroupCancelSale) {
-        onGroupCancelSale({ groupId: sessionGroup.id, transaction: txToCancel });
-        return prev;
-      }
-      const reversed = reversePurchaseSessions(prev.wallets, prev.adeudo, txToCancel);
-      return {
-        ...prev,
-        wallets: reversed.wallets,
-        adeudo: reversed.adeudo,
-        packageHistory: prev.packageHistory.filter((tx) => tx.id !== txToCancel.id),
-      };
-    });
+    const useGroup = isTitular && sessionGroup?.id && onGroupCancelSale;
+    if (useGroup) {
+      onGroupCancelSale({ groupId: sessionGroup.id, transaction: txToCancel });
+      return;
+    }
+
+    const reversed = reversePurchaseSessions(formData.wallets, formData.adeudo, txToCancel);
+    const nextHistory = (formData.packageHistory || []).filter((tx) => tx.id !== txToCancel.id);
+    setFormData((prev) => ({
+      ...prev,
+      wallets: reversed.wallets,
+      adeudo: reversed.adeudo,
+      packageHistory: nextHistory,
+    }));
+    onPersistPurchase?.({
+      patientId: formData.id,
+      wallets: reversed.wallets,
+      adeudo: reversed.adeudo,
+      packageHistory: nextHistory,
+    })?.catch((err) => alert(err?.message || String(err)));
   };
 
   return (
@@ -559,7 +592,7 @@ export default function PatientProfileModal({
             <div className="grid grid-cols-3 gap-2 mb-2">
               <div>
                 <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.sessions}</label>
-                <input type="number" min={1} value={posQty} onChange={(e) => handleQtyChange(e.target.value)} className="w-full p-2 text-center font-black border rounded" />
+                <input type="number" value={posQty === '' ? '' : posQty} onChange={(e) => handleQtyChange(e.target.value)} className="w-full p-2 text-center font-black border rounded" />
               </div>
               <div>
                 <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.unitPrice}</label>
@@ -581,7 +614,7 @@ export default function PatientProfileModal({
                 onChange={(e) => setPosPrice(e.target.value)}
                 className="w-full p-2.5 font-black border-2 border-blue-400 rounded-lg bg-white text-blue-900 text-sm"
               />
-              {posQty > 0 && posUnitPrice && posPrice && (
+              {typeof posQty === 'number' && posQty > 0 && posUnitPrice && posPrice && (
                 <p className="text-[9px] font-bold text-blue-800 mt-1 uppercase">
                   {t.posTotalPreview(posQty, parseFloat(posUnitPrice).toFixed(2), parseFloat(posPrice).toFixed(2), currency)}
                 </p>
