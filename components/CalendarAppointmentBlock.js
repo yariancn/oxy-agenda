@@ -5,6 +5,7 @@ import {
   isCompactColumn,
   isUltraCompactColumn,
   getPatientInitials,
+  CALENDAR_PIXELS_PER_MINUTE,
 } from '../lib/calendarDisplay';
 import { translateCheckInStatus } from '../lib/i18n';
 
@@ -73,7 +74,7 @@ export default function CalendarAppointmentBlock({
   const duration = Number(app.duration) || 60;
   const buffer = Number(app.buffer) || 0;
   const blockMins = duration + buffer;
-  const heightPx = blockMins * 1.5;
+  const heightPx = blockMins * CALENDAR_PIXELS_PER_MINUTE;
   const ultra = isUltraCompactColumn(colWidth);
   const compact = isCompactColumn(colWidth);
   const shortBlock = blockMins <= 40;
@@ -87,7 +88,7 @@ export default function CalendarAppointmentBlock({
   });
 
   const timeLabel = duration >= 40 && !ultra
-    ? `${app.time} - ${calculateEndTime(app.time, app.duration)}`
+    ? `${app.time} - ${calculateEndTime(app.time, blockMins)}`
     : app.time;
 
   return (
@@ -135,7 +136,7 @@ export default function CalendarAppointmentBlock({
               </div>
               {blockMins > 45 && (
                 <div className="text-[7px] font-bold opacity-70 uppercase truncate mt-0.5">
-                  {duration}m + {buffer}m Lmpz.
+                  {duration}m sesión · {blockMins}m bloque
                 </div>
               )}
               {(app.outside_normal_hours || app.is_extended_block) && (

@@ -80,6 +80,7 @@ import {
   isCompactColumn,
   weekDayColumnWidths,
   WEEK_STICKY_HEADER_PX,
+  CALENDAR_PIXELS_PER_MINUTE,
 } from '../lib/calendarDisplay';
 import { getWeekScrollLeftForToday } from '../lib/calendarScroll';
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
@@ -538,10 +539,16 @@ export default function AppLayout() {
       return { duration: 90, buffer: 90 };
     }
     const srv = getServiceForSlot(slot);
-    return {
-      duration: Number(slot?.duration) || Number(srv?.duration) || 60,
-      buffer: Number(slot?.buffer ?? srv?.buffer ?? 30),
-    };
+    const duration = Number(slot?.duration ?? srv?.duration) || 60;
+    let buffer;
+    if (slot?.buffer != null && slot?.buffer !== '') {
+      buffer = Number(slot.buffer);
+    } else if (srv?.buffer != null && srv?.buffer !== '') {
+      buffer = Number(srv.buffer);
+    } else {
+      buffer = 30;
+    }
+    return { duration, buffer: Math.max(0, buffer) };
   };
 
   const applyExtendedSession = (slot, enabled) => {
@@ -1195,7 +1202,7 @@ export default function AppLayout() {
     return `${dispH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')} ${mod}`;
   };
 
-  const PIXELS_PER_MINUTE = 1.5;
+  const PIXELS_PER_MINUTE = CALENDAR_PIXELS_PER_MINUTE;
   const CALENDAR_PAD_MINS = 30;
   const CALENDAR_END_PAD_MINS = 60;
   const clinicGridBounds = useMemo(
@@ -2555,7 +2562,7 @@ export default function AppLayout() {
 
     const srv = dbServices.find(s => s.name === equipment) || { duration: 60, buffer: 30, id: null };
     const duration = Number(srv.duration) || 60;
-    const buffer = Number(srv.buffer ?? 30);
+    const buffer = srv.buffer != null && srv.buffer !== '' ? Number(srv.buffer) : 30;
     const blockMins = duration + buffer;
     const { startMins: svcStart, endMins: svcEnd } = getServiceScheduleBounds(srv, dbCompanyConfig, fullDate);
 
@@ -2577,6 +2584,18 @@ export default function AppLayout() {
 
     return (
       <>
+        {Array.from({ length: Math.ceil((calendarEndMins - calendarStartMins) / intervalMins) }, (_, i) => {
+          const m = calendarStartMins + i * intervalMins;
+          const top = (m - calendarStartMins) * PIXELS_PER_MINUTE;
+          const isHour = m % 60 === 0;
+          return (
+            <div
+              key={`grid-${m}`}
+              className={`absolute left-0 right-0 pointer-events-none border-t box-border ${isHour ? 'border-slate-400' : 'border-slate-300/90'}`}
+              style={{ top: `${top}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}
+            />
+          );
+        })}
         {offHourBands.map((m) => {
           const h = Math.floor(m / 60);
           const mins = m % 60;
@@ -2605,7 +2624,7 @@ export default function AppLayout() {
               }}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, timeStr, equipment, day, fullDate, true)}
-              className="absolute left-0 right-0 bg-slate-200/60 hover:bg-amber-100/80 active:bg-amber-200/90 cursor-pointer border-b border-slate-300 box-border z-0 transition-all hover:ring-2 hover:ring-inset hover:ring-amber-400/50"
+              className="absolute left-0 right-0 bg-slate-200/60 hover:bg-amber-100/80 active:bg-amber-200/90 cursor-pointer border-t border-slate-300 box-border z-[1] transition-all hover:ring-2 hover:ring-inset hover:ring-amber-400/50"
               style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}
               title={`${L.clickToBook} · ${L.p.legendOutsideHours}`}
             />
@@ -2649,9 +2668,9 @@ export default function AppLayout() {
             }}
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, time, equipment, day, fullDate)}
-            className="absolute left-0 right-0 border-b border-slate-300 hover:bg-white hover:shadow-[inset_0_0_0_2px_rgba(100,116,139,0.55)] active:bg-slate-50 cursor-pointer transition-all box-border z-0"
+            className="absolute left-0 right-0 border-t-2 border-b-2 border-slate-400/70 hover:bg-white hover:shadow-[inset_0_0_0_2px_rgba(100,116,139,0.55)] active:bg-slate-50 cursor-pointer transition-all box-border z-[1]"
             style={{ top: `${timeToPixels(time)}px`, height: `${blockMins * PIXELS_PER_MINUTE}px` }}
-            title={L.clickToBook}
+            title={`${L.clickToBook} · ${blockMins} min`}
           />
         ))}
       </>
@@ -3397,10 +3416,10 @@ export default function AppLayout() {
                   >
                     <span className="text-[9px] font-black text-slate-400 uppercase">{L.time}</span>
                   </div>
-                  <div className="relative pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
+                  <div className="relative" style={{ height: `${CALENDAR_HEIGHT}px` }}>
                     {timeOptions.map((timeStr) => (
-                      <div key={timeStr} className="absolute w-full text-right pr-2 border-b border-slate-400/70" style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}>
-                        <span className="text-[9px] font-black text-slate-500 relative inline-block top-0 translate-y-[-50%] bg-slate-50 px-0.5">{timeStr}</span>
+                      <div key={timeStr} className="absolute w-full border-t border-slate-400 box-border" style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}>
+                        <span className="block text-right pr-2 pt-0.5 text-[9px] font-black text-slate-600 leading-none bg-slate-50">{timeStr}</span>
                       </div>
                     ))}
                   </div>
@@ -3417,7 +3436,7 @@ export default function AppLayout() {
                             <span className="text-[10px] font-black uppercase leading-none">{eqName}</span>
                             <span className="text-[11px] font-bold opacity-80">{currentDayInfo.date}</span>
                           </div>
-                          <div className="relative w-full pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
+                          <div className="relative w-full" style={{ height: `${CALENDAR_HEIGHT}px` }}>
                             
                             <div className="absolute inset-0 z-0">{renderBackgroundSlots(eqName, currentDayInfo.name, currentDayInfo.fullDate)}</div>
                             
@@ -3508,7 +3527,7 @@ export default function AppLayout() {
                             </div>
                             )}
                           </div>
-                          <div className="flex w-full relative pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
+                          <div className="flex w-full relative" style={{ height: `${CALENDAR_HEIGHT}px` }}>
                             {displayedEquipments.map(eqName => {
                               const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                               const eqW = equipWidthFor(eqName);
@@ -5450,9 +5469,9 @@ export default function AppLayout() {
                         {getPresetFromTimes(selectedSlot.duration, selectedSlot.buffer).shortLabel} · {selectedSlot.equipment}
                       </span>
                       <span className="text-base font-black text-blue-600">
-                        {calculateEndTime(selectedSlot.time, selectedSlot.duration)}
+                        {calculateEndTime(selectedSlot.time, (Number(selectedSlot.duration) || 60) + (Number(selectedSlot.buffer) || 0))}
                         <span className="text-[9px] font-bold text-slate-400 ml-1">
-                          (bloque {(Number(selectedSlot.duration) || 60) + (Number(selectedSlot.buffer) || 0)} min)
+                          ({Number(selectedSlot.duration) || 60}m sesión · bloque {(Number(selectedSlot.duration) || 60) + (Number(selectedSlot.buffer) || 0)} min)
                         </span>
                       </span>
                     </div>
