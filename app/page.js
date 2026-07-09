@@ -1516,14 +1516,6 @@ export default function AppLayout() {
     fetchAllData();
   };
 
-  const showWeekFilterHint = (
-    activeTab === 'Agenda'
-    && viewMode === 'Semana'
-    && equipmentFilter === 'Todos'
-    && dynamicColumns.length > 1
-    && !weekFilterHintDismissed
-  );
-
   const agendaSummary = useMemo(() => {
     const active = dbAppointments.filter((a) => a.check_in_status !== 'Cancelado');
     const weekDates = new Set(weekDays.map((d) => d.fullDate));
@@ -3270,22 +3262,16 @@ export default function AppLayout() {
         {/* VISTA AGENDA */}
         {activeTab === 'Agenda' && (
           <div className="flex flex-col h-full relative z-10">
-            <header className="bg-white p-2 lg:p-3 border-b border-slate-200 flex flex-col gap-2 shrink-0 shadow-sm z-20">
-              <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-2 lg:gap-3">
-              <div className="flex items-center gap-2 lg:gap-3 min-w-0 flex-wrap">
-                <span
-                  className={`shrink-0 text-[9px] sm:text-[10px] font-black uppercase px-2 py-0.5 rounded-md border max-w-[10rem] sm:max-w-xs truncate ${activeClinicTheme.badge}`}
-                  title={activeClinicDisplayName}
-                >
-                  {activeClinicTheme.flag} {activeClinicDisplayName}
-                </span>
-                <div className="flex bg-slate-100 p-0.5 lg:p-1 rounded-lg lg:rounded-xl border border-slate-200 shrink-0">
-                  <button onClick={() => navigateDate(-1)} className="p-1.5 lg:p-2 hover:bg-white rounded-lg transition text-slate-600 text-sm">◀</button>
-                  <div className="px-2 lg:px-4 flex flex-col items-center justify-center min-w-0">
-                    <span className="text-[8px] lg:text-[10px] font-black text-blue-600 uppercase leading-none">{viewMode === 'Día' ? L.viewDay : L.viewWeek}</span>
-                    <span className="text-[10px] lg:text-xs font-bold text-slate-800 truncate max-w-[7rem] sm:max-w-none">{viewMode === 'Día' ? currentDayInfo.date : `${weekDays[0].date} - ${weekDays[6].date}`}</span>
+            <header className="bg-white border-b border-slate-200 shrink-0 shadow-sm z-20">
+              <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 lg:px-3">
+                <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 shrink-0">
+                  <button onClick={() => navigateDate(-1)} className="p-1.5 hover:bg-white rounded-lg transition text-slate-600 text-sm" aria-label={L.scrollLeft}>◀</button>
+                  <div className="px-2 sm:px-3 flex items-center justify-center min-w-0">
+                    <span className="text-[10px] sm:text-xs font-bold text-slate-800 truncate max-w-[9rem] sm:max-w-none">
+                      {viewMode === 'Día' ? currentDayInfo.date : `${weekDays[0].date} – ${weekDays[6].date}`}
+                    </span>
                   </div>
-                  <button onClick={() => navigateDate(1)} className="p-1.5 lg:p-2 hover:bg-white rounded-lg transition text-slate-600 text-sm">▶</button>
+                  <button onClick={() => navigateDate(1)} className="p-1.5 hover:bg-white rounded-lg transition text-slate-600 text-sm" aria-label={L.scrollRight}>▶</button>
                 </div>
                 <button
                   type="button"
@@ -3296,47 +3282,27 @@ export default function AppLayout() {
                     pendingScrollToNowRef.current = true;
                     window.setTimeout(() => scrollCalendarToNow('smooth'), 80);
                   }}
-                  className="text-[9px] lg:text-[10px] font-black uppercase text-slate-400 hover:text-blue-600 transition border px-2 py-1 rounded shrink-0"
+                  className="text-[9px] font-black uppercase text-slate-500 hover:text-blue-600 transition border border-slate-200 px-2 py-1 rounded shrink-0"
                 >
                   {L.today}
                 </button>
-                <div className="lg:hidden flex-1 min-w-0 text-[9px] font-bold text-slate-500 truncate">
-                  {L.agendaSummaryToday}: {agendaSummary.today} · {L.agendaSummaryView}: {agendaSummary.view}
+                <div className="flex items-center bg-slate-200/50 p-0.5 rounded-lg shrink-0">
+                  <button onClick={() => { setZoomManual(false); setViewMode('Día'); pendingScrollToNowRef.current = true; }} className={`px-2 py-0.5 rounded font-black text-[9px] uppercase transition ${viewMode === 'Día' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewDay}</button>
+                  <button onClick={() => { setZoomManual(false); setViewMode('Semana'); pendingScrollToNowRef.current = true; }} className={`px-2 py-0.5 rounded font-black text-[9px] uppercase transition ${viewMode === 'Semana' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewWeekShort}</button>
                 </div>
-              </div>
-
-              <div className="flex items-center gap-1.5 lg:gap-3 bg-slate-50 p-1 lg:p-1.5 rounded-lg lg:rounded-xl border border-slate-200 flex-wrap">
+                <span className="lg:hidden text-[9px] font-bold text-slate-500 shrink-0" title={`${L.agendaSummaryToday}: ${agendaSummary.today} · ${L.agendaSummaryView}: ${agendaSummary.view}`}>
+                  {agendaSummary.today}/{agendaSummary.view}
+                </span>
+                <div className="flex-1 min-w-[0.5rem]" />
                 {currentUserLevel <= 2 && (
-                  <button onClick={openBlockSlotModal} className="bg-red-100 text-red-700 border-2 border-red-300 px-2.5 sm:px-3 py-1.5 text-[9px] sm:text-[10px] font-black rounded-lg hover:bg-red-200 transition uppercase shadow-sm shrink-0 flex items-center gap-1" title={L.blockSlot}>
+                  <button onClick={openBlockSlotModal} className="bg-red-100 text-red-700 border border-red-300 px-2 py-1 text-[9px] font-black rounded-lg hover:bg-red-200 transition uppercase shrink-0 flex items-center gap-1" title={L.blockSlot}>
                     <span>🚫</span>
-                    <span className="sm:inline">{L.blockSlot}</span>
+                    <span className="hidden sm:inline">{L.blockSlot}</span>
                   </button>
                 )}
-                <div className="flex items-center gap-1 lg:gap-2 px-1 lg:px-2 border-l border-slate-200">
-                  <span className="text-[8px] lg:text-[9px] font-black text-slate-400 uppercase hidden sm:inline">{L.zoom}</span>
-                  <input type="range" min="20" max="300" value={zoomScale} onChange={(e) => { setZoomScale(Number(e.target.value)); setZoomManual(true); }} className="w-14 sm:w-20 lg:w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer" />
-                </div>
-                <select
-                  value={equipmentFilter}
-                  onChange={(e) => { setEquipmentFilter(e.target.value); setZoomManual(false); }}
-                  className="hidden lg:block bg-white border border-slate-300 text-slate-700 font-bold text-[10px] lg:text-xs rounded-md px-2 py-1 outline-none uppercase min-w-[5.5rem] max-w-[10rem]"
-                  aria-label={L.allEquipment}
-                >
-                  <option value="Todos">{L.allEquipment}</option>
-                  {dynamicColumns.map(e => <option key={e} value={e}>{e}</option>)}
-                </select>
-                {equipmentFilter !== 'Todos' && (
-                  <button
-                    type="button"
-                    onClick={() => { setEquipmentFilter('Todos'); setZoomManual(false); }}
-                    className="hidden lg:inline-flex shrink-0 text-[9px] font-black uppercase bg-blue-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-blue-700 shadow-sm"
-                  >
-                    {L.showAllEquipment}
-                  </button>
-                )}
-                <div className="flex items-center bg-slate-200/50 p-0.5 lg:p-1 rounded-lg shrink-0">
-                  <button onClick={() => { setZoomManual(false); setViewMode('Día'); pendingScrollToNowRef.current = true; }} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Día' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewDay}</button>
-                  <button onClick={() => { setZoomManual(false); setViewMode('Semana'); pendingScrollToNowRef.current = true; }} className={`px-2 lg:px-3 py-0.5 lg:py-1 rounded font-black text-[9px] lg:text-[10px] uppercase transition ${viewMode === 'Semana' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewWeekShort}</button>
+                <div className="flex items-center gap-1 px-1 border-l border-slate-200 shrink-0">
+                  <span className="text-[8px] font-black text-slate-400 uppercase hidden sm:inline">{L.zoom}</span>
+                  <input type="range" min="20" max="300" value={zoomScale} onChange={(e) => { setZoomScale(Number(e.target.value)); setZoomManual(true); }} className="w-14 sm:w-20 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer" aria-label={L.zoom} />
                 </div>
                 <button
                   type="button"
@@ -3347,51 +3313,13 @@ export default function AppLayout() {
                   ?
                 </button>
               </div>
-              </div>
 
-              {showCalendarLegend && (
-                <div className="flex flex-wrap gap-2 px-1 pb-1 text-[9px] font-bold text-slate-600">
-                  <span className="inline-flex items-center gap-1 bg-white border-2 border-slate-400 px-2 py-1 rounded-lg"><span className="w-3 h-3 bg-white border-2 border-slate-400 rounded" /> {L.legendAvailable}</span>
-                  <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg">🟡 {L.legendOutsideHours}</span>
-                  <span className="inline-flex items-center gap-1 bg-violet-50 border border-violet-200 px-2 py-1 rounded-lg">🟣 {L.legendExtended}</span>
-                  <span className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">⭐ {L.legendNewPatient}</span>
-                  <button type="button" onClick={() => setShowSymbolLegend(true)} className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 px-2 py-1 rounded-lg text-blue-700 font-black uppercase">
-                    ℹ️ {L.legendViewAll}
-                  </button>
-                  <span className="hidden lg:inline text-slate-400 self-center">{L.shortcutsHint}</span>
-                </div>
-              )}
-            </header>
-
-            {showWeekFilterHint && (
-              <div className="mx-1.5 lg:mx-4 mt-1 lg:mt-0 shrink-0 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 flex flex-col sm:flex-row sm:items-center gap-2 text-slate-800">
-                <p className="text-[10px] font-bold flex-1">{L.weekFilterHint}</p>
-                <div className="flex gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => { setZoomManual(false); setEquipmentFilter(dynamicColumns[0]); setWeekFilterHintDismissed(true); }}
-                    className="text-[9px] font-black uppercase bg-blue-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-blue-700"
-                  >
-                    {L.weekFilterApply}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setEquipmentFilter('Todos'); setZoomManual(false); setWeekFilterHintDismissed(true); }}
-                    className="text-[9px] font-black uppercase text-blue-700 px-2 py-1.5 border border-blue-300 rounded-lg hover:bg-blue-100"
-                  >
-                    {L.weekFilterDismiss}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="mx-1.5 lg:mx-4 shrink-0 flex flex-wrap items-center gap-2 px-2 py-1.5 bg-slate-100 border border-slate-200 rounded-lg">
-              <div className="flex items-center gap-1.5 shrink-0 w-full sm:w-auto">
-                <span className="text-[9px] font-black text-slate-500 uppercase">{L.filterEquipment}</span>
+              <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 lg:px-3 bg-slate-50 border-t border-slate-100">
+                <span className="text-[9px] font-black text-slate-500 uppercase shrink-0">{L.filterEquipment}</span>
                 <select
                   value={equipmentFilter}
-                  onChange={(e) => { setEquipmentFilter(e.target.value); setZoomManual(false); }}
-                  className="flex-1 min-w-0 sm:flex-none bg-white border border-slate-300 text-slate-700 font-bold text-[10px] rounded-md px-2 py-1.5 outline-none uppercase max-w-[11rem]"
+                  onChange={(e) => { setEquipmentFilter(e.target.value); setZoomManual(false); setWeekFilterHintDismissed(true); }}
+                  className="bg-white border border-slate-300 text-slate-700 font-bold text-[10px] rounded-md px-2 py-1 outline-none uppercase min-w-[5.5rem] max-w-[10rem]"
                   aria-label={L.allEquipment}
                 >
                   <option value="Todos">{L.allEquipment}</option>
@@ -3401,55 +3329,75 @@ export default function AppLayout() {
                   <button
                     type="button"
                     onClick={() => { setEquipmentFilter('Todos'); setZoomManual(false); }}
-                    className="shrink-0 text-[9px] font-black uppercase bg-blue-600 text-white px-2 py-1.5 rounded-lg hover:bg-blue-700 shadow-sm"
+                    className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-blue-600 text-white text-sm font-black hover:bg-blue-700"
+                    title={L.showAllEquipment}
+                    aria-label={L.clearEquipmentFilter}
                   >
-                    {L.showAllEquipment}
+                    ×
                   </button>
                 )}
+                {(calendarHScroll.max > 2 || viewMode === 'Semana') && (
+                  <>
+                    <div className="hidden sm:block w-px h-5 bg-slate-200 shrink-0" aria-hidden />
+                    <button
+                      type="button"
+                      aria-label={L.scrollLeft}
+                      disabled={calendarHScroll.left <= 0}
+                      onClick={() => scrollCalendarHorizontal(viewMode === 'Semana' ? -Math.max(120, currentColWidth) : -240)}
+                      className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-white border border-slate-300 text-slate-700 font-black hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      ◀
+                    </button>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(calendarHScroll.max, 1)}
+                      value={Math.min(calendarHScroll.left, calendarHScroll.max || 0)}
+                      onChange={(e) => setCalendarScrollLeft(Number(e.target.value))}
+                      className="flex-1 min-w-[4rem] max-w-[12rem] sm:max-w-none h-1.5 accent-blue-600 cursor-pointer"
+                      aria-label={L.scrollHorizontal}
+                    />
+                    <button
+                      type="button"
+                      aria-label={L.scrollRight}
+                      disabled={calendarHScroll.max <= 0 || calendarHScroll.left >= calendarHScroll.max - 2}
+                      onClick={() => scrollCalendarHorizontal(viewMode === 'Semana' ? Math.max(120, currentColWidth) : 240)}
+                      className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-white border border-slate-300 text-slate-700 font-black hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      ▶
+                    </button>
+                    {viewMode === 'Semana' && (
+                      <button
+                        type="button"
+                        title={L.scrollBackToToday}
+                        onClick={() => {
+                          const now = getClinicNow(activeClinic);
+                          setCurrentDate(now.date);
+                          pendingScrollToNowRef.current = true;
+                          window.setTimeout(() => scrollCalendarToNow('smooth'), 80);
+                        }}
+                        className="shrink-0 text-[9px] font-black uppercase text-blue-700 px-2 py-1 rounded-lg border border-blue-300 bg-white hover:bg-blue-50"
+                      >
+                        {L.scrollBackToToday}
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
-              <button
-                type="button"
-                aria-label={L.scrollLeft}
-                disabled={calendarHScroll.left <= 0}
-                onClick={() => scrollCalendarHorizontal(viewMode === 'Semana' ? -Math.max(120, currentColWidth) : -240)}
-                className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-slate-300 text-slate-700 font-black hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                ◀
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={Math.max(calendarHScroll.max, 1)}
-                value={Math.min(calendarHScroll.left, calendarHScroll.max || 0)}
-                onChange={(e) => setCalendarScrollLeft(Number(e.target.value))}
-                className="flex-1 min-w-0 h-2 accent-blue-600 cursor-pointer"
-                aria-label={L.scrollHorizontal}
-              />
-              <button
-                type="button"
-                aria-label={L.scrollRight}
-                disabled={calendarHScroll.max <= 0 || calendarHScroll.left >= calendarHScroll.max - 2}
-                onClick={() => scrollCalendarHorizontal(viewMode === 'Semana' ? Math.max(120, currentColWidth) : 240)}
-                className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-slate-300 text-slate-700 font-black hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                ▶
-              </button>
-              {viewMode === 'Semana' && (
-                <button
-                  type="button"
-                  title={L.scrollBackToToday}
-                  onClick={() => {
-                    const now = getClinicNow(activeClinic);
-                    setCurrentDate(now.date);
-                    pendingScrollToNowRef.current = true;
-                    window.setTimeout(() => scrollCalendarToNow('smooth'), 80);
-                  }}
-                  className="shrink-0 text-[9px] font-black uppercase text-blue-700 px-2.5 py-1.5 rounded-lg border border-blue-300 bg-white hover:bg-blue-50"
-                >
-                  {L.scrollBackToToday}
-                </button>
+
+              {showCalendarLegend && (
+                <div className="flex flex-wrap gap-1.5 px-2 py-1.5 lg:px-3 border-t border-slate-100 text-[9px] font-bold text-slate-600">
+                  <span className="inline-flex items-center gap-1 bg-white border-2 border-slate-400 px-2 py-0.5 rounded-lg"><span className="w-3 h-3 bg-white border-2 border-slate-400 rounded" /> {L.legendAvailable}</span>
+                  <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg">🟡 {L.legendOutsideHours}</span>
+                  <span className="inline-flex items-center gap-1 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded-lg">🟣 {L.legendExtended}</span>
+                  <span className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-lg">⭐ {L.legendNewPatient}</span>
+                  <button type="button" onClick={() => setShowSymbolLegend(true)} className="inline-flex items-center gap-1 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-lg text-blue-700 font-black uppercase">
+                    ℹ️ {L.legendViewAll}
+                  </button>
+                  <span className="hidden lg:inline text-slate-400 self-center">{L.shortcutsHint}</span>
+                </div>
               )}
-            </div>
+            </header>
 
             {/* --- CONTENEDOR DEL CALENDARIO: SCROLL UNIFICADO (CIRUGÍA CSS) --- */}
             <div ref={calendarScrollRef} className="calendar-h-scroll flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0 scroll-pb-16" style={{ scrollPaddingBottom: '4rem' }}>
