@@ -16,7 +16,7 @@ import {
   sendAppointmentNotification,
   summarizeNotifyReport,
 } from '../lib/appointmentNotify';
-import { isFirstSessionAppointment, resolveAppointmentNotifyType } from '../lib/emailTemplates';
+import { resolveEffectiveNotifyType } from '../lib/emailTemplates';
 import {
   getSessionInstructionsLabel,
   getSessionInstructionsUrl,
@@ -242,18 +242,14 @@ export default function PublicBookingPortal({
         throw new Error(result.error || t.genericError);
       }
 
-      const notifyType = resolveAppointmentNotifyType({
-        isNewPatient: result.patient.isNew,
-        patientName: result.patient.displayName,
-        appointments: dbAppointments,
-      });
-
-      const includeFirstSessionNotes = isFirstSessionAppointment({
+      const notifyType = resolveEffectiveNotifyType({
         isNewPatient: result.patient.isNew,
         patientName: result.patient.displayName,
         equipment: selectedService.name,
         appointments: dbAppointments,
       });
+
+      const includeFirstSessionNotes = notifyType === 'first';
 
       if (isAutoNotifyEnabled(dbConfig || {}, notifyType)) {
         try {

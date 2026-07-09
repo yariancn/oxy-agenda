@@ -92,8 +92,11 @@ export async function POST(request) {
     }
 
     const supabase = getSupabaseAdmin(clinicName);
-    const { data: companyConfig } = await selectCompanyConfigForClinic(supabase, clinicName);
-    const cfg = companyConfig || {};
+    const [configRes, servicesRes] = await Promise.all([
+      selectCompanyConfigForClinic(supabase, clinicName),
+      supabase.from('services').select('id, name, first_session_notes, use_custom_notes, is_active'),
+    ]);
+    const cfg = configRes.data || {};
     const emailTemplates = pickEmailTemplates(cfg);
     const smsIntros = pickSmsIntros(cfg, locale);
 
@@ -102,7 +105,7 @@ export async function POST(request) {
     const sampleEquipment = body.equipment || 'Cámara 1';
     const instructions = resolveSessionInstructions(cfg, locale, {
       equipment: sampleEquipment,
-      services: [],
+      services: servicesRes.data || [],
       isFirstSession: true,
     });
 

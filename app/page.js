@@ -120,8 +120,7 @@ import {
 import {
   EMAIL_PLACEHOLDER_HINT,
   emptyEmailTemplateState,
-  isFirstSessionAppointment,
-  resolveAppointmentNotifyType,
+  resolveEffectiveNotifyType,
 } from '../lib/emailTemplates';
 import {
   defaultNotifySettings,
@@ -1846,28 +1845,19 @@ export default function AppLayout() {
     const email = contact.email;
     const phone = contact.phone;
 
-    const notifyType = notifyTypeOverride || resolveAppointmentNotifyType({
+    const notifyType = notifyTypeOverride || resolveEffectiveNotifyType({
       notifyReason,
       isNewPatient: slot.is_new_patient,
       patientName: slot.patient,
+      equipment: slot.equipment,
       appointments: dbAppointments,
       excludeAppointmentId: slot.id,
       normalize: normalizeStr,
     });
 
-    // Notas de primera sesión: solo al programar (nueva cita) cuando el
-    // paciente es nuevo para la clínica o para este equipo/tratamiento.
+    // Notas de primera sesión: solo en primera cita (paciente o equipo nuevo).
     // Reprogramaciones y cancelaciones nunca llevan notas.
-    const includeFirstSessionNotes =
-      (notifyType === 'first' || notifyType === 'booking') &&
-      isFirstSessionAppointment({
-        isNewPatient: slot.is_new_patient,
-        patientName: slot.patient,
-        equipment: slot.equipment,
-        appointments: dbAppointments,
-        excludeAppointmentId: slot.id,
-        normalize: normalizeStr,
-      });
+    const includeFirstSessionNotes = notifyType === 'first';
 
     const isManual = showSuccess;
     const blockReason = forceNotify ? null : getAutoNotifyBlockReason(dbCompanyConfig, notifyType, locale);
