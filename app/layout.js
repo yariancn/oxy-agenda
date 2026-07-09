@@ -17,6 +17,7 @@ export const viewport = {
   themeColor: "#0f172a",
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
 };
 
 export const metadata = {
@@ -26,7 +27,7 @@ export const metadata = {
   appleWebApp: {
     capable: true,
     title: "OXY Agenda",
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "black",
   },
   icons: {
     apple: "/icons/apple-touch-icon.png",

@@ -2996,10 +2996,10 @@ export default function AppLayout() {
 
   return (
     <StaffLocaleProvider clinic={activeClinic}>
-    <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden relative">
+    <div className="flex app-shell-height lg:h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden relative">
 
       {wrongHostWarning && (
-        <div className="fixed top-0 inset-x-0 z-[100000] bg-amber-500 text-amber-950 px-3 py-2 text-center text-[10px] sm:text-xs font-black uppercase shadow-lg">
+        <div className="fixed inset-x-0 fixed-safe-top z-[100000] bg-amber-500 text-amber-950 px-3 py-2 text-center text-[10px] sm:text-xs font-black uppercase shadow-lg">
           Esta URL no es producción — abre{' '}
           <a href={`https://${canonicalHost}`} className="underline underline-offset-2">
             {canonicalHost}
@@ -3009,13 +3009,13 @@ export default function AppLayout() {
       )}
 
       {currentUser && dbStatus === 'cargando' && (
-        <div className={`fixed inset-x-0 z-[99998] bg-blue-600 text-white px-4 py-2 text-center text-[10px] sm:text-xs font-black uppercase shadow-lg ${wrongHostWarning ? 'top-9' : 'top-0'}`}>
+        <div className={`fixed inset-x-0 fixed-safe-top z-[99998] bg-blue-600 text-white px-4 py-2 text-center text-[10px] sm:text-xs font-black uppercase shadow-lg ${wrongHostWarning ? 'top-[calc(env(safe-area-inset-top,0px)+2.25rem)]' : ''}`}>
           {L.dbLoading}
         </div>
       )}
 
       {currentUser && dbStatus === 'error' && (
-        <div className={`fixed inset-x-0 z-[99998] bg-red-600 text-white px-3 py-3 shadow-lg ${wrongHostWarning ? 'top-9' : 'top-0'}`}>
+        <div className={`fixed inset-x-0 fixed-safe-top z-[99998] bg-red-600 text-white px-3 py-3 shadow-lg ${wrongHostWarning ? 'top-[calc(env(safe-area-inset-top,0px)+2.25rem)]' : ''}`}>
           <div className="max-w-3xl mx-auto text-center">
             <p className="text-[11px] sm:text-xs font-black uppercase">{L.dbErrorTitle}</p>
             <p className="text-[10px] sm:text-[11px] font-semibold mt-1 leading-snug opacity-95">{dbErrorHint}</p>
@@ -3043,7 +3043,7 @@ export default function AppLayout() {
         </div>
       )}
       {!currentUser && !authBootstrapping && (
-        <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md flex items-center justify-center z-[99999]">
+        <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md flex items-center justify-center z-[99999] safe-area-top safe-area-bottom">
            <div className="bg-white p-6 sm:p-10 rounded-3xl shadow-2xl w-full max-w-sm text-center border mx-4">
              <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" className="h-20 mx-auto mb-6 rounded-xl shadow-sm" alt="Logo"/>
              <h2 className="text-2xl font-black uppercase mb-2 text-slate-800">{L.loginTitle}</h2>
@@ -3213,11 +3213,11 @@ export default function AppLayout() {
       </aside>
 
       {/* CONTENIDO PRINCIPAL */}
-      <main className="flex-1 flex flex-col min-h-0 h-screen overflow-hidden relative min-w-0 pb-[calc(3.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+      <main className="flex-1 flex flex-col min-h-0 app-shell-height lg:h-screen overflow-hidden relative min-w-0 pb-[calc(3.5rem+env(safe-area-inset-bottom,0px))] lg:pb-0">
 
         {/* Barra superior móvil — compacta */}
         {currentUser && (
-          <div className="lg:hidden shrink-0 bg-slate-950 text-white px-2 py-2 flex items-center gap-2 border-b border-slate-800 z-20">
+          <div className="lg:hidden shrink-0 bg-slate-950 text-white px-2 py-2 flex items-center gap-2 border-b border-slate-800 z-20 safe-area-top">
             <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" alt="Logo" className="h-8 w-8 object-contain bg-white rounded p-0.5 shrink-0" />
             {allowedClinics.length > 1 ? (
               <div className="flex bg-slate-900 p-0.5 rounded-lg border border-slate-700 shrink-0">
@@ -6297,7 +6297,7 @@ export default function AppLayout() {
             <div className="lg:hidden fixed inset-0 z-[60] bg-slate-900/50" onClick={() => setMobileMoreOpen(false)} />
           )}
           {mobileMoreOpen && mobileAdminTabs.length > 0 && (
-            <div className="lg:hidden fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom))] inset-x-2 z-[70] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2">
+            <div className="lg:hidden fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] inset-x-2 z-[70] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2">
               {mobileAdminTabs.map(tab => (
                 <button
                   key={tab.id}
@@ -6310,7 +6310,7 @@ export default function AppLayout() {
               ))}
             </div>
           )}
-          <nav className="lg:hidden fixed bottom-0 inset-x-0 z-[65] bg-slate-950 border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
+          <nav className="lg:hidden fixed bottom-0 inset-x-0 z-[65] bg-slate-950 border-t border-slate-800 pb-[env(safe-area-inset-bottom,0px)]">
             <div className="flex items-stretch justify-around h-14">
               {mobilePrimaryTabs.map(tab => (
                 <button

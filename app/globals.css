@@ -26,12 +26,28 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
+/* PWA / notch: respetar barra de estado y gestos del sistema */
 .safe-area-top {
-  padding-top: max(1rem, env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 .safe-area-bottom {
-  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.fixed-safe-top {
+  top: env(safe-area-inset-top, 0px);
+}
+
+.app-shell-height {
+  height: 100dvh;
+  height: 100vh;
+}
+
+@supports (height: 100dvh) {
+  .app-shell-height {
+    height: 100dvh;
+  }
 }
 
 input[type="date"],
