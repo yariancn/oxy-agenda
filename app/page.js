@@ -78,6 +78,8 @@ import {
   computeDefaultZoomScale,
   getEquipmentShortLabel,
   isCompactColumn,
+  weekDayHasScheduledItems,
+  weekDayLayout,
   WEEK_STICKY_HEADER_PX,
 } from '../lib/calendarDisplay';
 import { getWeekScrollLeftForToday } from '../lib/calendarScroll';
@@ -171,11 +173,14 @@ export default function AppLayout() {
   const [weekFilterHintDismissed, setWeekFilterHintDismissed] = useState(false);
   const [showCalendarLegend, setShowCalendarLegend] = useState(false);
   const [showSymbolLegend, setShowSymbolLegend] = useState(false);
-  const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentDate, setCurrentDate] = useState(() => (
+    typeof window !== 'undefined' ? getClinicNow(CLINIC_OXYGENDGL).date : new Date()
+  ));
   const prefsHydratedRef = useRef(false);
   const skipAutoZoomRef = useRef(false);
   const calendarScrollRef = useRef(null);
   const pendingScrollToNowRef = useRef(false);
+  const [calendarHScroll, setCalendarHScroll] = useState({ left: 0, max: 0 });
   const prevActiveTabRef = useRef(null);
   const lastAgendaFocusRef = useRef('');
   
@@ -488,7 +493,7 @@ export default function AppLayout() {
     const enteredAgenda = activeTab === 'Agenda' && prevActiveTabRef.current !== 'Agenda';
     prevActiveTabRef.current = activeTab;
 
-    if (!currentUser || activeTab !== 'Agenda' || dbStatus !== 'ok') return;
+    if (!currentUser || activeTab !== 'Agenda' || dbStatus !== 'listo') return;
 
     const focusKey = `${activeClinic}:Agenda`;
     const shouldFocus = enteredAgenda || lastAgendaFocusRef.current !== focusKey;
@@ -975,6 +980,7 @@ export default function AppLayout() {
       setDbAppointments(appointmentsReady);
       setDbStatus('listo');
       setDbErrorMessage('');
+      if (!silent) pendingScrollToNowRef.current = true;
       broadcastLiveDataUpdated(activeClinic);
     } catch (err) {
       if (fetchGen !== fetchGenRef.current) return;
@@ -1243,6 +1249,31 @@ export default function AppLayout() {
     [dbServices],
   );
   const displayedEquipments = equipmentFilter === 'Todos' ? dynamicColumns : [equipmentFilter];
+
+  const weekDayLayouts = useMemo(() => {
+    if (viewMode !== 'Semana') return {};
+    const layouts = {};
+    for (const day of weekDays) {
+      const hasItems = weekDayHasScheduledItems({
+        fullDate: day.fullDate,
+        appointments: dbAppointments,
+        blockedSlots: dbBlockedSlots,
+        equipmentFilter,
+        resolveEquipment: appointmentEquipment,
+      });
+      layouts[day.fullDate] = weekDayLayout(hasItems, displayedEquipments.length, currentColWidth);
+    }
+    return layouts;
+  }, [
+    viewMode,
+    weekDays,
+    dbAppointments,
+    dbBlockedSlots,
+    equipmentFilter,
+    appointmentEquipment,
+    displayedEquipments.length,
+    currentColWidth,
+  ]);
 
   const activeClinicTheme = useMemo(() => getClinicTheme(activeClinic), [activeClinic]);
   const activeClinicShort = getClinicShortLabel(activeClinic);
@@ -1521,17 +1552,75 @@ export default function AppLayout() {
     }
 
     el.scrollTo({ top: verticalOffset, left: horizontalOffset, behavior });
+    window.requestAnimationFrame(() => {
+      setCalendarHScroll({
+        left: el.scrollLeft,
+        max: Math.max(0, el.scrollWidth - el.clientWidth),
+      });
+    });
     return true;
   }, [clinicNow.dateStr, clinicNow.mins, calendarStartMins, viewMode]);
 
+  const syncCalendarHScroll = useCallback(() => {
+    const el = calendarScrollRef.current;
+    if (!el) return;
+    setCalendarHScroll({
+      left: el.scrollLeft,
+      max: Math.max(0, el.scrollWidth - el.clientWidth),
+    });
+  }, []);
+
+  const scrollCalendarHorizontal = useCallback((delta, behavior = 'smooth') => {
+    const el = calendarScrollRef.current;
+    if (!el) return;
+    const max = Math.max(0, el.scrollWidth - el.clientWidth);
+    const next = Math.max(0, Math.min(el.scrollLeft + delta, max));
+    el.scrollTo({ left: next, behavior });
+  }, []);
+
+  const setCalendarScrollLeft = useCallback((left, behavior = 'auto') => {
+    const el = calendarScrollRef.current;
+    if (!el) return;
+    const max = Math.max(0, el.scrollWidth - el.clientWidth);
+    el.scrollTo({ left: Math.max(0, Math.min(left, max)), behavior });
+  }, []);
+
+  useEffect(() => {
+    const el = calendarScrollRef.current;
+    if (!el || activeTab !== 'Agenda') return undefined;
+
+    const onScroll = () => syncCalendarHScroll();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    const ro = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => syncCalendarHScroll())
+      : null;
+    ro?.observe(el);
+    syncCalendarHScroll();
+    const t = window.setTimeout(syncCalendarHScroll, 400);
+
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      ro?.disconnect();
+      window.clearTimeout(t);
+    };
+  }, [
+    activeTab,
+    syncCalendarHScroll,
+    viewMode,
+    dbAppointments.length,
+    weekDayLayouts,
+    zoomScale,
+    displayedEquipments.length,
+  ]);
+
   useEffect(() => {
     if (!pendingScrollToNowRef.current) return;
-    if (activeTab !== 'Agenda' || dbStatus !== 'ok' || !clinicNow.dateStr) return;
+    if (activeTab !== 'Agenda' || dbStatus !== 'listo' || !clinicNow.dateStr) return;
     if (viewMode === 'Semana' && displayedEquipments.length === 0) return;
 
     let attempts = 0;
     let timerId = null;
-    const maxAttempts = 15;
+    const maxAttempts = 30;
 
     const tryScroll = () => {
       attempts += 1;
@@ -1540,7 +1629,7 @@ export default function AppLayout() {
         el?.querySelector(`[data-cal-day="${clinicNow.dateStr}"]`),
       );
       if (!hasTodayCol) {
-        if (attempts < maxAttempts) timerId = window.setTimeout(tryScroll, 150);
+        if (attempts < maxAttempts) timerId = window.setTimeout(tryScroll, 120);
         else pendingScrollToNowRef.current = false;
         return;
       }
@@ -1550,17 +1639,17 @@ export default function AppLayout() {
       const targetLeft = viewMode === 'Semana' ? getWeekScrollLeftForToday(el, clinicNow.dateStr) : null;
 
       const scrolled = scrollCalendarToNow('auto');
-      const topOk = !el || Math.abs(el.scrollTop - targetTop) < 8;
-      const leftOk = viewMode === 'Día' || targetLeft === null || Math.abs(el.scrollLeft - targetLeft) < 8;
+      const topOk = !el || Math.abs(el.scrollTop - targetTop) < 12;
+      const leftOk = viewMode === 'Día' || targetLeft === null || Math.abs(el.scrollLeft - targetLeft) < 12;
 
       if ((scrolled && topOk && leftOk) || attempts >= maxAttempts) {
         pendingScrollToNowRef.current = false;
         return;
       }
-      timerId = window.setTimeout(tryScroll, 150);
+      timerId = window.setTimeout(tryScroll, 120);
     };
 
-    timerId = window.setTimeout(tryScroll, 200);
+    timerId = window.setTimeout(tryScroll, 100);
     return () => { if (timerId) window.clearTimeout(timerId); };
   }, [
     activeTab,
@@ -1572,7 +1661,21 @@ export default function AppLayout() {
     CALENDAR_HEIGHT,
     displayedEquipments.length,
     zoomScale,
+    dbAppointments.length,
+    weekDayLayouts,
   ]);
+
+  useEffect(() => {
+    const onPageShow = (event) => {
+      if (!currentUser || activeTab !== 'Agenda') return;
+      if (!event.persisted) return;
+      const now = getClinicNow(activeClinic);
+      setCurrentDate(now.date);
+      pendingScrollToNowRef.current = true;
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, [currentUser, activeTab, activeClinic]);
 
   useEffect(() => {
     prefsHydratedRef.current = false;
@@ -3270,8 +3373,53 @@ export default function AppLayout() {
               </div>
             )}
 
+            <div className="mx-1.5 lg:mx-4 shrink-0 flex items-center gap-2 px-2 py-1.5 bg-slate-100 border border-slate-200 rounded-lg">
+              <button
+                type="button"
+                aria-label={L.scrollLeft}
+                disabled={calendarHScroll.left <= 0}
+                onClick={() => scrollCalendarHorizontal(viewMode === 'Semana' ? -Math.max(120, currentColWidth) : -240)}
+                className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-slate-300 text-slate-700 font-black hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                ◀
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={Math.max(calendarHScroll.max, 1)}
+                value={Math.min(calendarHScroll.left, calendarHScroll.max || 0)}
+                onChange={(e) => setCalendarScrollLeft(Number(e.target.value))}
+                className="flex-1 min-w-0 h-2 accent-blue-600 cursor-pointer"
+                aria-label={L.scrollHorizontal}
+              />
+              <button
+                type="button"
+                aria-label={L.scrollRight}
+                disabled={calendarHScroll.max <= 0 || calendarHScroll.left >= calendarHScroll.max - 2}
+                onClick={() => scrollCalendarHorizontal(viewMode === 'Semana' ? Math.max(120, currentColWidth) : 240)}
+                className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-slate-300 text-slate-700 font-black hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                ▶
+              </button>
+              {viewMode === 'Semana' && (
+                <button
+                  type="button"
+                  title={L.scrollBackToToday}
+                  onClick={() => {
+                    const now = getClinicNow(activeClinic);
+                    setCurrentDate(now.date);
+                    pendingScrollToNowRef.current = true;
+                    window.setTimeout(() => scrollCalendarToNow('smooth'), 80);
+                  }}
+                  className="shrink-0 text-[9px] font-black uppercase text-blue-700 px-2.5 py-1.5 rounded-lg border border-blue-300 bg-white hover:bg-blue-50"
+                >
+                  {L.scrollBackToToday}
+                </button>
+              )}
+            </div>
+
             {/* --- CONTENEDOR DEL CALENDARIO: SCROLL UNIFICADO (CIRUGÍA CSS) --- */}
-            <div ref={calendarScrollRef} className="flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0 scroll-pb-16" style={{ scrollPaddingBottom: '4rem' }}>
+            <div ref={calendarScrollRef} className="calendar-h-scroll flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0 scroll-pb-16" style={{ scrollPaddingBottom: '4rem' }}>
               <div className="flex min-w-max pb-16">
                 
                 <div className="w-16 md:w-20 shrink-0 border-r border-slate-200 bg-slate-50 sticky left-0 z-50" data-cal-time-col>
@@ -3346,15 +3494,22 @@ export default function AppLayout() {
                     <div className="flex min-w-full">
                       {weekDays.map((dayInfo) => {
                         const dayOpen = getDaySchedule(dbCompanyConfig, dayInfo.fullDate).open;
+                        const dayLayout = weekDayLayouts[dayInfo.fullDate] || weekDayLayout(true, displayedEquipments.length, currentColWidth);
+                        const { dayWidth, equipWidth, compactDay } = dayLayout;
                         return (
-                        <div key={dayInfo.fullDate} data-cal-day={dayInfo.fullDate} className={`flex-1 shrink-0 border-r-2 ${dayInfo.fullDate === clinicNow.dateStr ? 'border-blue-500 ring-2 ring-inset ring-blue-400/60' : 'border-slate-300'} ${!dayOpen ? 'opacity-60' : ''}`} style={{ minWidth: `${displayedEquipments.length * currentColWidth}px` }}>
+                        <div key={dayInfo.fullDate} data-cal-day={dayInfo.fullDate} className={`shrink-0 border-r-2 ${dayInfo.fullDate === clinicNow.dateStr ? 'border-blue-500 ring-2 ring-inset ring-blue-400/60' : 'border-slate-300'} ${!dayOpen ? 'opacity-60' : ''}`} style={{ width: `${dayWidth}px`, minWidth: `${dayWidth}px` }}>
                           <div className={`sticky top-0 z-40 border-b border-slate-200 ${dayInfo.fullDate === clinicNow.dateStr ? 'bg-blue-50' : dayOpen ? 'bg-slate-50' : 'bg-slate-200'}`}>
-                            <div className="h-8 flex flex-col items-center justify-center">
-                              <span className="text-[9px] font-black text-slate-800 uppercase leading-none">{dayInfo.name}</span>
-                              <span className={`text-[10px] font-bold leading-none ${dayOpen ? 'text-blue-600' : 'text-slate-500'}`}>
-                                {dayInfo.date}{!dayOpen ? ` · ${L.p.admin.weeklyClosedShort}` : ''}
+                            <div className={`flex flex-col items-center justify-center ${compactDay ? 'h-8 px-0.5' : 'h-8'}`}>
+                              <span className={`font-black text-slate-800 uppercase leading-none ${compactDay ? 'text-[7px] [writing-mode:vertical-rl] rotate-180 max-h-8 truncate' : 'text-[9px]'}`}>{dayInfo.name}</span>
+                              <span className={`font-bold leading-none ${compactDay ? 'text-[8px] text-slate-500' : 'text-[10px]'} ${dayOpen ? 'text-blue-600' : 'text-slate-500'}`}>
+                                {compactDay ? dayInfo.date.split(' ')[0] : dayInfo.date}{!dayOpen && !compactDay ? ` · ${L.p.admin.weeklyClosedShort}` : ''}
                               </span>
                             </div>
+                            {compactDay ? (
+                              <div className="border-t border-slate-200 h-7 flex items-center justify-center bg-slate-100/80">
+                                <span className="text-[6px] font-black text-slate-300 uppercase">·</span>
+                              </div>
+                            ) : (
                             <div className="flex border-t border-slate-200 h-7">
                               {displayedEquipments.map((eqName) => {
                                 const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
@@ -3362,22 +3517,23 @@ export default function AppLayout() {
                                   <div
                                     key={`${dayInfo.fullDate}-hdr-${eqName}`}
                                     className={`flex-1 flex items-center justify-center border-r border-slate-300/80 last:border-r-0 ${getEquipmentHeaderColor(srvColor)}`}
-                                    style={{ minWidth: `${currentColWidth}px` }}
+                                    style={{ minWidth: `${equipWidth}px`, width: `${equipWidth}px` }}
                                     title={eqName}
                                   >
                                     <span className="text-[7px] sm:text-[8px] font-black uppercase truncate px-0.5 text-center w-full leading-none">
-                                      {currentColWidth >= 104 ? eqName : getEquipmentShortLabel(eqName)}
+                                      {equipWidth >= 104 ? eqName : getEquipmentShortLabel(eqName)}
                                     </span>
                                   </div>
                                 );
                               })}
                             </div>
+                            )}
                           </div>
                           <div className="flex w-full relative pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
                             {displayedEquipments.map(eqName => {
                               const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                               return (
-                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`flex-1 relative border-r border-slate-300 ${getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth}px` }}>
+                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`relative border-r border-slate-300 ${getEquipmentBgColor(srvColor)} ${compactDay ? 'overflow-hidden' : ''}`} style={{ width: `${equipWidth}px`, minWidth: `${equipWidth}px`, flex: `0 0 ${equipWidth}px` }}>
                                 
                                 <div className="absolute inset-0 z-0">{renderBackgroundSlots(eqName, dayInfo.name, dayInfo.fullDate)}</div>
                                 
@@ -3399,7 +3555,7 @@ export default function AppLayout() {
                                   <CalendarAppointmentBlock
                                     key={app.id}
                                     app={app}
-                                    colWidth={currentColWidth}
+                                    colWidth={equipWidth}
                                     locale={locale}
                                     L={L}
                                     isSelected={selectedSlot?.id === app.id}
