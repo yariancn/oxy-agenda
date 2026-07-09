@@ -136,6 +136,8 @@ import {
   notifyStaffNewBooking,
   STAFF_ALERT_FIELDS,
 } from '../lib/staffBookingAlert';
+import { broadcastLiveDataUpdated } from '../lib/liveSyncBroadcast';
+import { useLiveSyncPoll } from '../lib/useLiveSyncPoll';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -253,6 +255,7 @@ export default function AppLayout() {
   const [dbStatus, setDbStatus] = useState('cargando');
   const [dbErrorMessage, setDbErrorMessage] = useState('');
   const fetchGenRef = useRef(0);
+  const fetchAllDataRef = useRef(async () => {});
 
   // --- FORMULARIOS GLOBALES ---
   const [newSrv, setNewSrv] = useState({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '', use_custom_notes: false });
@@ -718,7 +721,7 @@ export default function AppLayout() {
   };
 
   // --- SINCRONIZACIÓN CON PAGINACIÓN INTELIGENTE ---
-  const fetchAllData = async () => {
+  const fetchAllData = async ({ silent = false, liveOnly = false } = {}) => {
     if (!currentUser) {
       setDbStatus('sin_sesion');
       return;
@@ -737,8 +740,10 @@ export default function AppLayout() {
     };
 
     try {
-      setDbStatus('cargando');
-      setDbErrorMessage('');
+      if (!silent) {
+        setDbStatus('cargando');
+        setDbErrorMessage('');
+      }
 
       // Motor de Paginación para evadir el límite de 1000 de Supabase
       const fetchPaginated = async (table, { clinicScoped = false } = {}) => {
@@ -768,6 +773,32 @@ export default function AppLayout() {
         }
         return allData;
       };
+
+      if (liveOnly) {
+        const [appointmentsData, resS, resB] = await Promise.all([
+          fetchPaginated('appointments', { clinicScoped: shouldScopeTableByClinic(clinicId) }),
+          shouldScopeTableByClinic(clinicId)
+            ? staffDbSelectByClinic(clinicDb, 'services', clinicId, (q) => q)
+            : clinicDb.from('services').select('*'),
+          shouldScopeTableByClinic(clinicId)
+            ? staffDbSelectByClinic(clinicDb, 'blocked_slots', clinicId, (q) => q)
+            : clinicDb.from('blocked_slots').select('*'),
+        ]);
+
+        if (fetchGen !== fetchGenRef.current) return;
+
+        assertDbResult('services', resS);
+        assertDbResult('blocked_slots', resB);
+
+        setDbServices((resS.data || []).sort((a, b) => (a.name || '').localeCompare(b.name || '')));
+        setDbBlockedSlots(resB.data || []);
+        setDbAppointments(appointmentsData || []);
+        if (dbStatus === 'error') {
+          setDbStatus('listo');
+          setDbErrorMessage('');
+        }
+        return;
+      }
 
       const fetchPromotersWithFallback = async () => {
         let res = await clinicDb
@@ -945,6 +976,7 @@ export default function AppLayout() {
       setDbAppointments(appointmentsReady);
       setDbStatus('listo');
       setDbErrorMessage('');
+      broadcastLiveDataUpdated(activeClinic);
     } catch (err) {
       if (fetchGen !== fetchGenRef.current) return;
       console.error(err);
@@ -953,6 +985,17 @@ export default function AppLayout() {
       setDbStatus('error');
     }
   };
+
+  fetchAllDataRef.current = fetchAllData;
+
+  useLiveSyncPoll({
+    enabled: Boolean(currentUser),
+    clinic: activeClinic,
+    endpoint: '/api/staff/live-sync',
+    onChange: async () => {
+      await fetchAllDataRef.current({ silent: true, liveOnly: true });
+    },
+  });
 
   const dbErrorHint = useMemo(() => {
     if (!dbErrorMessage) return L.dbErrorHint;

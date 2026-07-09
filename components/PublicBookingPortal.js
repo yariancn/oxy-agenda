@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildDaySlots, countAvailableSlots } from '../lib/publicBookingSlots';
 import { isClinicOpenOnDate } from '../lib/clinicWeeklySchedule';
 import { PUBLIC_SESSION } from '../lib/sessionPresets';
@@ -25,6 +25,8 @@ import {
 } from '../lib/notifySettings';
 import { notifyStaffNewBooking } from '../lib/staffBookingAlert';
 import { getLegalLinks } from '../lib/legalLinks';
+import { formatClinicPhone } from '../lib/clinicText';
+import { useLiveSyncPoll } from '../lib/useLiveSyncPoll';
 import AppointmentSavingOverlay from './AppointmentSavingOverlay';
 
 export default function PublicBookingPortal({
@@ -97,41 +99,53 @@ export default function PublicBookingPortal({
   const accentText = accent.text;
   const accentHover = accent.hover;
 
-  useEffect(() => {
-    const load = async () => {
-      setIsLoading(true);
-      try {
-        const res = await fetch(`/api/public/portal?clinic=${encodeURIComponent(clinicName)}`);
-        const payload = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(payload.error || 'Load failed');
+  const loadPortalData = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setIsLoading(true);
+    try {
+      const res = await fetch(`/api/public/portal?clinic=${encodeURIComponent(clinicName)}`, {
+        cache: 'no-store',
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.error || 'Load failed');
 
-        setDbServices((payload.services || []).sort((a, b) => a.name.length - b.name.length));
-        setDbAppointments(payload.appointments || []);
-        setDbBlockedSlots(payload.blockedSlots || []);
-        setDbConfig(payload.companyConfig || {
-          start_time: '08:00',
-          end_time: '20:00',
-          interval_mins: 30,
-          booking_limit_hours: 2,
-        });
-        const promoters = (payload.promoters || []).map((row) => ({
-          code: normalizePromoCode(row.code),
-          name: String(row.name || '').trim(),
-        }));
-        setPromoterList(promoters);
-        const promo = getPromoFromUrl();
-        if (promo) {
-          setPromoFromLink(true);
-          setFormData((prev) => ({ ...prev, promoterCode: promo }));
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setIsLoading(false);
+      setDbServices((payload.services || []).sort((a, b) => a.name.length - b.name.length));
+      setDbAppointments(payload.appointments || []);
+      setDbBlockedSlots(payload.blockedSlots || []);
+      setDbConfig(payload.companyConfig || {
+        start_time: '08:00',
+        end_time: '20:00',
+        interval_mins: 30,
+        booking_limit_hours: 2,
+      });
+      const promoters = (payload.promoters || []).map((row) => ({
+        code: normalizePromoCode(row.code),
+        name: String(row.name || '').trim(),
+      }));
+      setPromoterList(promoters);
+      const promo = getPromoFromUrl();
+      if (promo) {
+        setPromoFromLink(true);
+        setFormData((prev) => ({ ...prev, promoterCode: promo }));
       }
-    };
-    load();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      if (!silent) setIsLoading(false);
+    }
   }, [clinicName]);
+
+  useEffect(() => {
+    loadPortalData();
+  }, [loadPortalData]);
+
+  useLiveSyncPoll({
+    enabled: step < 4,
+    clinic: clinicName,
+    endpoint: '/api/public/live-sync',
+    onChange: async () => {
+      await loadPortalData({ silent: true });
+    },
+  });
 
   useEffect(() => {
     if (serviceFromLinkApplied.current || !dbServices.length || isLoading) return;
@@ -310,6 +324,39 @@ export default function PublicBookingPortal({
   const promoterDisplayName = activePromoter.name
     || (activePromoter.code ? t.promoterUnknown : null);
 
+  const clinicContactPhone = formatClinicPhone(dbConfig?.phone || '');
+  const clinicContactTel = useMemo(() => {
+    const digits = String(clinicContactPhone || '').replace(/\D/g, '');
+    const last10 = digits.slice(-10);
+    if (last10.length !== 10) return '';
+    return locale === 'en' ? `tel:+1${last10}` : `tel:+52${last10}`;
+  }, [clinicContactPhone, locale]);
+
+  const accentLink = branding.accent === 'blue'
+    ? 'text-blue-700'
+    : branding.accent === 'teal'
+      ? 'text-teal-700'
+      : 'text-emerald-700';
+
+  const contactAvailabilityNote = clinicContactPhone ? (
+    <div className="mt-6 p-4 rounded-xl border border-slate-200 bg-slate-50 text-center">
+      <p className="text-xs font-bold text-slate-600 leading-relaxed">
+        {t.contactNoSlotPrefix}{' '}
+        <span className="text-slate-500">{t.contactNoSlotAction}</span>
+      </p>
+      {clinicContactTel ? (
+        <a
+          href={clinicContactTel}
+          className={`inline-block mt-2 text-base font-black ${accentLink} hover:underline`}
+        >
+          {clinicContactPhone}
+        </a>
+      ) : (
+        <p className={`mt-2 text-base font-black ${accentLink}`}>{clinicContactPhone}</p>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div className="min-h-screen bg-slate-100 font-sans text-slate-900 flex flex-col">
       {activePromoter.code && (
@@ -394,6 +441,7 @@ export default function PublicBookingPortal({
                   </button>
                   ))
                 )}
+                {contactAvailabilityNote}
               </div>
             )}
 
@@ -489,6 +537,7 @@ export default function PublicBookingPortal({
                     )}
                   </>
                 )}
+                {contactAvailabilityNote}
               </div>
             )}
 
