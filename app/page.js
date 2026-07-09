@@ -78,8 +78,7 @@ import {
   computeDefaultZoomScale,
   getEquipmentShortLabel,
   isCompactColumn,
-  weekDayHasScheduledItems,
-  weekDayLayout,
+  weekDayColumnWidths,
   WEEK_STICKY_HEADER_PX,
 } from '../lib/calendarDisplay';
 import { getWeekScrollLeftForToday } from '../lib/calendarScroll';
@@ -1253,15 +1252,18 @@ export default function AppLayout() {
   const weekDayLayouts = useMemo(() => {
     if (viewMode !== 'Semana') return {};
     const layouts = {};
+    const names = equipmentFilter === 'Todos'
+      ? dynamicColumns
+      : dynamicColumns.filter((eq) => eq === equipmentFilter);
     for (const day of weekDays) {
-      const hasItems = weekDayHasScheduledItems({
+      layouts[day.fullDate] = weekDayColumnWidths({
         fullDate: day.fullDate,
+        equipmentNames: names.length ? names : dynamicColumns,
+        colWidth: currentColWidth,
         appointments: dbAppointments,
         blockedSlots: dbBlockedSlots,
-        equipmentFilter,
         resolveEquipment: appointmentEquipment,
       });
-      layouts[day.fullDate] = weekDayLayout(hasItems, displayedEquipments.length, currentColWidth);
     }
     return layouts;
   }, [
@@ -1270,8 +1272,8 @@ export default function AppLayout() {
     dbAppointments,
     dbBlockedSlots,
     equipmentFilter,
+    dynamicColumns,
     appointmentEquipment,
-    displayedEquipments.length,
     currentColWidth,
   ]);
 
@@ -3504,10 +3506,19 @@ export default function AppLayout() {
                     <div className="flex min-w-full">
                       {weekDays.map((dayInfo) => {
                         const dayOpen = getDaySchedule(dbCompanyConfig, dayInfo.fullDate).open;
-                        const dayLayout = weekDayLayouts[dayInfo.fullDate] || weekDayLayout(true, displayedEquipments.length, currentColWidth);
-                        const { dayWidth, equipWidth, compactDay } = dayLayout;
+                        const dayLayout = weekDayLayouts[dayInfo.fullDate] || weekDayColumnWidths({
+                          fullDate: dayInfo.fullDate,
+                          equipmentNames: displayedEquipments,
+                          colWidth: currentColWidth,
+                          appointments: dbAppointments,
+                          blockedSlots: dbBlockedSlots,
+                          resolveEquipment: appointmentEquipment,
+                        });
+                        const { dayWidth, byEquipment, compactDay } = dayLayout;
+                        const equipWidthFor = (eqName) => byEquipment[eqName] ?? currentColWidth;
+                        const isNarrowEquip = (eqName) => equipWidthFor(eqName) < currentColWidth * 0.99;
                         return (
-                        <div key={dayInfo.fullDate} data-cal-day={dayInfo.fullDate} className={`${compactDay ? 'shrink-0' : 'flex-1 shrink-0'} border-r-[3px] ${dayInfo.fullDate === clinicNow.dateStr ? 'border-blue-600 ring-2 ring-inset ring-blue-400/60' : 'border-slate-500'} ${!dayOpen ? 'opacity-60' : ''}`} style={compactDay ? { width: `${dayWidth}px`, minWidth: `${dayWidth}px`, flex: '0 0 auto' } : { minWidth: `${dayWidth}px` }}>
+                        <div key={dayInfo.fullDate} data-cal-day={dayInfo.fullDate} className={`shrink-0 border-r-[3px] ${dayInfo.fullDate === clinicNow.dateStr ? 'border-blue-600 ring-2 ring-inset ring-blue-400/60' : 'border-slate-500'} ${!dayOpen ? 'opacity-60' : ''}`} style={{ width: `${dayWidth}px`, minWidth: `${dayWidth}px`, flex: '0 0 auto' }}>
                           <div className={`sticky top-0 z-40 border-b border-slate-200 ${dayInfo.fullDate === clinicNow.dateStr ? 'bg-blue-50' : dayOpen ? 'bg-slate-50' : 'bg-slate-200'}`}>
                             <div className={`flex flex-col items-center justify-center ${compactDay ? 'h-8 px-0.5' : 'h-8'}`}>
                               <span className={`font-black text-slate-800 uppercase leading-none ${compactDay ? 'text-[7px] [writing-mode:vertical-rl] rotate-180 max-h-8 truncate' : 'text-[9px]'}`}>{dayInfo.name}</span>
@@ -3523,18 +3534,17 @@ export default function AppLayout() {
                             <div className="flex border-t border-slate-200 h-7">
                               {displayedEquipments.map((eqName) => {
                                 const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
+                                const eqW = equipWidthFor(eqName);
+                                const narrow = isNarrowEquip(eqName);
                                 return (
                                   <div
                                     key={`${dayInfo.fullDate}-hdr-${eqName}`}
-                                    className={`flex-1 flex items-center justify-center border-r-2 border-slate-400 last:border-r-0 ${getEquipmentHeaderColor(srvColor)}`}
-                                    style={compactDay
-                                      ? { minWidth: `${equipWidth}px`, width: `${equipWidth}px`, flex: `0 0 ${equipWidth}px` }
-                                      : { minWidth: `${currentColWidth}px`, flex: '1 1 0' }}
+                                    className={`flex items-center justify-center border-r-2 border-slate-400 last:border-r-0 ${getEquipmentHeaderColor(srvColor)} ${narrow ? 'overflow-hidden' : ''}`}
+                                    style={{ width: `${eqW}px`, minWidth: `${eqW}px`, flex: `0 0 ${eqW}px` }}
                                     title={eqName}
                                   >
                                     <span className="text-[7px] sm:text-[8px] font-black uppercase truncate px-0.5 text-center w-full leading-none">
-                                      {!compactDay && (currentColWidth >= 96 ? eqName : getEquipmentShortLabel(eqName))}
-                                      {compactDay && getEquipmentShortLabel(eqName).slice(0, 1)}
+                                      {narrow ? getEquipmentShortLabel(eqName).slice(0, 2) : (currentColWidth >= 96 ? eqName : getEquipmentShortLabel(eqName))}
                                     </span>
                                   </div>
                                 );
@@ -3545,8 +3555,10 @@ export default function AppLayout() {
                           <div className="flex w-full relative pt-2" style={{ height: `${CALENDAR_HEIGHT + 8}px` }}>
                             {displayedEquipments.map(eqName => {
                               const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
+                              const eqW = equipWidthFor(eqName);
+                              const narrow = isNarrowEquip(eqName);
                               return (
-                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`relative border-r-2 border-slate-400 last:border-r-0 ${getEquipmentBgColor(srvColor)} ${compactDay ? 'overflow-hidden' : 'flex-1'}`} style={compactDay ? { width: `${equipWidth}px`, minWidth: `${equipWidth}px`, flex: `0 0 ${equipWidth}px` } : { minWidth: `${currentColWidth}px` }}>
+                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`relative border-r-2 border-slate-400 last:border-r-0 ${getEquipmentBgColor(srvColor)} ${narrow ? 'overflow-hidden' : ''}`} style={{ width: `${eqW}px`, minWidth: `${eqW}px`, flex: `0 0 ${eqW}px` }}>
                                 
                                 <div className="absolute inset-0 z-0">{renderBackgroundSlots(eqName, dayInfo.name, dayInfo.fullDate)}</div>
                                 
@@ -3568,7 +3580,7 @@ export default function AppLayout() {
                                   <CalendarAppointmentBlock
                                     key={app.id}
                                     app={app}
-                                    colWidth={compactDay ? equipWidth : currentColWidth}
+                                    colWidth={narrow ? eqW : currentColWidth}
                                     locale={locale}
                                     L={L}
                                     isSelected={selectedSlot?.id === app.id}
