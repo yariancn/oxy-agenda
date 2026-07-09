@@ -3319,7 +3319,7 @@ export default function AppLayout() {
                 <select
                   value={equipmentFilter}
                   onChange={(e) => { setEquipmentFilter(e.target.value); setZoomManual(false); }}
-                  className="bg-white border border-slate-300 text-slate-700 font-bold text-[10px] lg:text-xs rounded-md px-2 py-1 outline-none uppercase min-w-[5.5rem] max-w-[10rem]"
+                  className="hidden lg:block bg-white border border-slate-300 text-slate-700 font-bold text-[10px] lg:text-xs rounded-md px-2 py-1 outline-none uppercase min-w-[5.5rem] max-w-[10rem]"
                   aria-label={L.allEquipment}
                 >
                   <option value="Todos">{L.allEquipment}</option>
@@ -3329,7 +3329,7 @@ export default function AppLayout() {
                   <button
                     type="button"
                     onClick={() => { setEquipmentFilter('Todos'); setZoomManual(false); }}
-                    className="shrink-0 text-[9px] font-black uppercase bg-blue-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-blue-700 shadow-sm"
+                    className="hidden lg:inline-flex shrink-0 text-[9px] font-black uppercase bg-blue-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-blue-700 shadow-sm"
                   >
                     {L.showAllEquipment}
                   </button>
@@ -3385,7 +3385,28 @@ export default function AppLayout() {
               </div>
             )}
 
-            <div className="mx-1.5 lg:mx-4 shrink-0 flex items-center gap-2 px-2 py-1.5 bg-slate-100 border border-slate-200 rounded-lg">
+            <div className="mx-1.5 lg:mx-4 shrink-0 flex flex-wrap items-center gap-2 px-2 py-1.5 bg-slate-100 border border-slate-200 rounded-lg">
+              <div className="flex items-center gap-1.5 shrink-0 w-full sm:w-auto">
+                <span className="text-[9px] font-black text-slate-500 uppercase">{L.filterEquipment}</span>
+                <select
+                  value={equipmentFilter}
+                  onChange={(e) => { setEquipmentFilter(e.target.value); setZoomManual(false); }}
+                  className="flex-1 min-w-0 sm:flex-none bg-white border border-slate-300 text-slate-700 font-bold text-[10px] rounded-md px-2 py-1.5 outline-none uppercase max-w-[11rem]"
+                  aria-label={L.allEquipment}
+                >
+                  <option value="Todos">{L.allEquipment}</option>
+                  {dynamicColumns.map(e => <option key={e} value={e}>{e}</option>)}
+                </select>
+                {equipmentFilter !== 'Todos' && (
+                  <button
+                    type="button"
+                    onClick={() => { setEquipmentFilter('Todos'); setZoomManual(false); }}
+                    className="shrink-0 text-[9px] font-black uppercase bg-blue-600 text-white px-2 py-1.5 rounded-lg hover:bg-blue-700 shadow-sm"
+                  >
+                    {L.showAllEquipment}
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 aria-label={L.scrollLeft}
