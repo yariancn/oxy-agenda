@@ -2655,7 +2655,7 @@ export default function AppLayout() {
             }}
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, time, equipment, day, fullDate)}
-            className="absolute left-0 right-0 border-b border-slate-300 hover:bg-emerald-50/90 active:bg-emerald-100/90 hover:shadow-[inset_0_0_0_2px_rgba(16,185,129,0.45)] cursor-pointer transition-all box-border z-0"
+            className="absolute left-0 right-0 border-b border-slate-300 hover:bg-white hover:shadow-[inset_0_0_0_2px_rgba(100,116,139,0.55)] active:bg-slate-50 cursor-pointer transition-all box-border z-0"
             style={{ top: `${timeToPixels(time)}px`, height: `${blockMins * PIXELS_PER_MINUTE}px` }}
             title={L.clickToBook}
           />
@@ -3349,7 +3349,7 @@ export default function AppLayout() {
 
               {showCalendarLegend && (
                 <div className="flex flex-wrap gap-2 px-1 pb-1 text-[9px] font-bold text-slate-600">
-                  <span className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg"><span className="w-3 h-3 bg-emerald-100 border border-emerald-300 rounded" /> {L.legendAvailable}</span>
+                  <span className="inline-flex items-center gap-1 bg-white border-2 border-slate-400 px-2 py-1 rounded-lg"><span className="w-3 h-3 bg-white border-2 border-slate-400 rounded" /> {L.legendAvailable}</span>
                   <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg">🟡 {L.legendOutsideHours}</span>
                   <span className="inline-flex items-center gap-1 bg-violet-50 border border-violet-200 px-2 py-1 rounded-lg">🟣 {L.legendExtended}</span>
                   <span className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg">⭐ {L.legendNewPatient}</span>
