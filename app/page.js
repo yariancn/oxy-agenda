@@ -3249,7 +3249,7 @@ export default function AppLayout() {
         )}
 
         {currentUser && (
-          <div className={`shrink-0 z-20 border-b ${activeClinicTheme.banner} text-white px-3 py-2 flex items-center justify-center gap-2 shadow-sm`}>
+          <div className={`lg:hidden shrink-0 z-20 border-b ${activeClinicTheme.banner} text-white px-3 py-1.5 flex items-center justify-center gap-2 shadow-sm`}>
             <span className="text-[11px] sm:text-sm font-black uppercase tracking-wide truncate max-w-full text-center">
               {activeClinicTheme.flag} {activeClinicDisplayName}
             </span>
@@ -3290,6 +3290,9 @@ export default function AppLayout() {
                   <button onClick={() => { setZoomManual(false); setViewMode('Día'); pendingScrollToNowRef.current = true; }} className={`px-2 py-0.5 rounded font-black text-[9px] uppercase transition ${viewMode === 'Día' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewDay}</button>
                   <button onClick={() => { setZoomManual(false); setViewMode('Semana'); pendingScrollToNowRef.current = true; }} className={`px-2 py-0.5 rounded font-black text-[9px] uppercase transition ${viewMode === 'Semana' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{L.viewWeekShort}</button>
                 </div>
+                <span className="hidden lg:inline text-[9px] font-bold text-slate-400 shrink-0 border-l border-slate-200 pl-2">
+                  {agendaSummary.view} {L.agendaSummaryAppts}
+                </span>
                 <span className="lg:hidden text-[9px] font-bold text-slate-500 shrink-0" title={`${L.agendaSummaryToday}: ${agendaSummary.today} · ${L.agendaSummaryView}: ${agendaSummary.view}`}>
                   {agendaSummary.today}/{agendaSummary.view}
                 </span>
@@ -3315,36 +3318,35 @@ export default function AppLayout() {
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 lg:px-3 bg-slate-50 border-t border-slate-100">
-                <span className="text-[9px] font-black text-slate-500 uppercase shrink-0">{L.filterEquipment}</span>
-                <select
-                  value={equipmentFilter}
-                  onChange={(e) => { setEquipmentFilter(e.target.value); setZoomManual(false); setWeekFilterHintDismissed(true); }}
-                  className="bg-white border border-slate-300 text-slate-700 font-bold text-[10px] rounded-md px-2 py-1 outline-none uppercase min-w-[5.5rem] max-w-[10rem]"
-                  aria-label={L.allEquipment}
-                >
-                  <option value="Todos">{L.allEquipment}</option>
-                  {dynamicColumns.map(e => <option key={e} value={e}>{e}</option>)}
-                </select>
-                {equipmentFilter !== 'Todos' && (
+                <div className="flex flex-wrap items-center gap-1 flex-1 min-w-0">
+                  <span className="text-[9px] font-black text-blue-700 uppercase shrink-0 mr-0.5">{L.filterEquipment}</span>
                   <button
                     type="button"
-                    onClick={() => { setEquipmentFilter('Todos'); setZoomManual(false); }}
-                    className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-blue-600 text-white text-sm font-black hover:bg-blue-700"
-                    title={L.showAllEquipment}
-                    aria-label={L.clearEquipmentFilter}
+                    onClick={() => { setEquipmentFilter('Todos'); setZoomManual(false); setWeekFilterHintDismissed(true); }}
+                    className={`px-2 py-1 rounded-md text-[10px] font-black uppercase border transition shrink-0 ${equipmentFilter === 'Todos' ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'}`}
                   >
-                    ×
+                    {L.allEquipment}
                   </button>
-                )}
-                {(calendarHScroll.max > 2 || viewMode === 'Semana') && (
-                  <>
-                    <div className="hidden sm:block w-px h-5 bg-slate-200 shrink-0" aria-hidden />
+                  {dynamicColumns.map((eq) => (
+                    <button
+                      key={eq}
+                      type="button"
+                      title={eq}
+                      onClick={() => { setEquipmentFilter(eq); setZoomManual(false); setWeekFilterHintDismissed(true); }}
+                      className={`px-2 py-1 rounded-md text-[10px] font-black uppercase border transition shrink-0 ${equipmentFilter === eq ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'}`}
+                    >
+                      {getEquipmentShortLabel(eq)}
+                    </button>
+                  ))}
+                </div>
+                {(calendarHScroll.max > 8) && (
+                  <div className="flex items-center gap-1 shrink-0 ml-auto">
                     <button
                       type="button"
                       aria-label={L.scrollLeft}
                       disabled={calendarHScroll.left <= 0}
                       onClick={() => scrollCalendarHorizontal(viewMode === 'Semana' ? -Math.max(120, currentColWidth) : -240)}
-                      className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-white border border-slate-300 text-slate-700 font-black hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="shrink-0 w-6 h-6 flex items-center justify-center rounded bg-white border border-slate-300 text-slate-600 text-xs hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
                     >
                       ◀
                     </button>
@@ -3354,34 +3356,19 @@ export default function AppLayout() {
                       max={Math.max(calendarHScroll.max, 1)}
                       value={Math.min(calendarHScroll.left, calendarHScroll.max || 0)}
                       onChange={(e) => setCalendarScrollLeft(Number(e.target.value))}
-                      className="flex-1 min-w-[4rem] max-w-[12rem] sm:max-w-none h-1.5 accent-blue-600 cursor-pointer"
+                      className="w-16 sm:w-24 lg:w-32 h-1 accent-slate-400 cursor-pointer"
                       aria-label={L.scrollHorizontal}
                     />
                     <button
                       type="button"
                       aria-label={L.scrollRight}
-                      disabled={calendarHScroll.max <= 0 || calendarHScroll.left >= calendarHScroll.max - 2}
+                      disabled={calendarHScroll.left >= calendarHScroll.max - 2}
                       onClick={() => scrollCalendarHorizontal(viewMode === 'Semana' ? Math.max(120, currentColWidth) : 240)}
-                      className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-white border border-slate-300 text-slate-700 font-black hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                      className="shrink-0 w-6 h-6 flex items-center justify-center rounded bg-white border border-slate-300 text-slate-600 text-xs hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
                     >
                       ▶
                     </button>
-                    {viewMode === 'Semana' && (
-                      <button
-                        type="button"
-                        title={L.scrollBackToToday}
-                        onClick={() => {
-                          const now = getClinicNow(activeClinic);
-                          setCurrentDate(now.date);
-                          pendingScrollToNowRef.current = true;
-                          window.setTimeout(() => scrollCalendarToNow('smooth'), 80);
-                        }}
-                        className="shrink-0 text-[9px] font-black uppercase text-blue-700 px-2 py-1 rounded-lg border border-blue-300 bg-white hover:bg-blue-50"
-                      >
-                        {L.scrollBackToToday}
-                      </button>
-                    )}
-                  </>
+                  </div>
                 )}
               </div>
 
