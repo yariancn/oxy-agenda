@@ -24,7 +24,12 @@ import {
   shouldScopeTableByClinic,
   staffDbSelectByClinic,
 } from '../lib/clinicRegistry';
-import { ensurePatient, digitsOnly } from '../lib/ensurePatient';
+import {
+  ensurePatient,
+  digitsOnly,
+  resolvePatientForAppointment,
+  resolveDisplayContact,
+} from '../lib/ensurePatient';
 import {
   buildCalendarWeek,
   getDayNameFromDate,
@@ -59,7 +64,7 @@ import {
   normalizeWeeklySchedule,
   WEEKDAY_KEYS,
 } from '../lib/clinicWeeklySchedule';
-import { insertStaffAppointment, updateStaffAppointment } from '../lib/staffAppointmentSave';
+import { insertStaffAppointment, updateStaffAppointment, updateAppointmentNotesAndContact } from '../lib/staffAppointmentSave';
 import { sortOccurrenceDates } from '../lib/appointmentRecurrence';
 import { getRepeatDateAvailability } from '../lib/repeatDateAvailability';
 import { resolveStaffActiveClinic, saveStaffActiveClinic } from '../lib/staffClinicPrefs';
@@ -674,10 +679,12 @@ export default function AppLayout() {
   };
 
   const persistPatientContactFromSlot = async (slot) => {
-    const matchingPatients = dbPatients.filter((x) => normalizeStr(x.patient) === normalizeStr(slot.patient));
     const targetPatient = (slot.patientId
       ? dbPatients.find((p) => String(p.id) === String(slot.patientId))
-      : null) || matchingPatients[0];
+      : null) || resolvePatientForAppointment(
+      { patient: slot.patient, phone: slot.phone },
+      dbPatients,
+    );
     const canonicalPhone = (slot.phone || '').trim();
     const canonicalEmail = (slot.email || '').trim();
     const phoneDigits = digitsOnly(canonicalPhone).slice(-10);
@@ -727,8 +734,8 @@ export default function AppLayout() {
         name: slot.patient,
         phone: canonicalPhone,
         email: canonicalEmail,
-        protocol: slot.protocol || matchingPatients[0]?.protocol || 'Wellness',
-        notes: slot.patientNotes ?? matchingPatients[0]?.notes ?? '',
+        protocol: slot.protocol || targetPatient?.protocol || 'Wellness',
+        notes: slot.patientNotes ?? targetPatient?.notes ?? '',
         prefers_email: slot.prefers_email !== false,
         prefers_sms: slot.prefers_sms !== false,
       });
@@ -742,7 +749,9 @@ export default function AppLayout() {
       };
     }
 
-    for (const pat of matchingPatients) {
+    for (const pat of dbPatients.filter(
+      (x) => normalizeStr(x.patient) === normalizeStr(slot.patient),
+    )) {
       const result = await applyPatientContactPatch(pat);
       if (result.error) return result;
     }
@@ -2010,8 +2019,8 @@ export default function AppLayout() {
   }, [currentUser?.name]);
 
   const openAppointmentDetails = (app) => {
-    const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(app.patient));
-    const patInfo = matchingPatients.find(x => x.notes && x.notes.trim() !== '') || matchingPatients[0];
+    const patInfo = resolvePatientForAppointment(app, dbPatients);
+    const contact = resolveDisplayContact(app, patInfo);
     let repairedWallets = {};
     if (patInfo) {
       const repaired = repairLegacyWalletKeys(patInfo.wallets || {}, patInfo.packageHistory || []);
@@ -2027,8 +2036,8 @@ export default function AppLayout() {
       ...app,
       status: 'booked',
       patientId: patInfo?.id,
-      phone: String(app.phone || '').trim() || patInfo?.phone || '',
-      email: String(app.email || '').trim() || patInfo?.email || '',
+      phone: contact.phone,
+      email: contact.email,
       protocol: patInfo?.protocol || app.protocol,
       wallets: patInfo ? repairedWallets : {},
       historicoSesiones: patInfo?.historicoSesiones || 0,
@@ -2044,11 +2053,13 @@ export default function AppLayout() {
   };
 
   const resolveSlotContact = (slot) => {
-    const matching = dbPatients.filter((x) => normalizeStr(x.patient) === normalizeStr(slot?.patient));
-    const pat = matching[0];
+    const pat = slot?.patientId
+      ? dbPatients.find((p) => String(p.id) === String(slot.patientId))
+      : resolvePatientForAppointment(slot, dbPatients);
+    const contact = resolveDisplayContact(slot, pat);
     return {
-      phone: String(slot?.phone || pat?.phone || '').trim(),
-      email: String(slot?.email || pat?.email || '').trim(),
+      phone: contact.phone,
+      email: contact.email,
       prefers_email: slot?.prefers_email ?? pat?.prefers_email,
       prefers_sms: slot?.prefers_sms ?? pat?.prefers_sms,
     };
@@ -5485,12 +5496,12 @@ export default function AppLayout() {
                         const savedEmail = contactResult.email || selectedSlot.email || '';
                         const savedPatientId = contactResult.patientId || selectedSlot.patientId;
 
-                        const apptRes = await activeSupabase.from('appointments').update({
+                        const apptRes = await updateAppointmentNotesAndContact(activeSupabase, selectedSlot.id, {
                           notes: selectedSlot.notes,
                           phone: savedPhone,
                           email: savedEmail,
                           promoter_code: normalizePromoCode(selectedSlot.promoter_code) || null,
-                        }).eq('id', selectedSlot.id);
+                        });
                         if (apptRes.error) throw apptRes.error;
 
                         if (savedPatientId) {
@@ -5522,6 +5533,18 @@ export default function AppLayout() {
 
                         alert(a('notesSavedOk'));
                         await notifyCalendarChanged();
+                        setDbAppointments((prev) => prev.map((a) => (
+                          a.id === selectedSlot.id
+                            ? { ...a, phone: savedPhone, email: savedEmail, notes: selectedSlot.notes }
+                            : a
+                        )));
+                        if (savedPatientId) {
+                          setDbPatients((prev) => prev.map((p) => (
+                            String(p.id) === String(savedPatientId)
+                              ? { ...p, phone: savedPhone, email: savedEmail }
+                              : p
+                          )));
+                        }
                       } catch(e) { alert(a('notesSaveError')); }
                    }} className="w-full bg-slate-800 text-white font-black py-2 rounded-lg text-[10px] uppercase hover:bg-slate-700 shadow-sm transition">{L.p.appt.saveNotesAndContact}</button>
                 </div>
