@@ -674,31 +674,15 @@ export default function AppLayout() {
   };
 
   const persistPatientContactFromSlot = async (slot) => {
-    const matchingPatients = dbPatients.filter(x => normalizeStr(x.patient) === normalizeStr(slot.patient));
+    const matchingPatients = dbPatients.filter((x) => normalizeStr(x.patient) === normalizeStr(slot.patient));
+    const targetPatient = (slot.patientId
+      ? dbPatients.find((p) => String(p.id) === String(slot.patientId))
+      : null) || matchingPatients[0];
     const canonicalPhone = (slot.phone || '').trim();
     const canonicalEmail = (slot.email || '').trim();
     const phoneDigits = digitsOnly(canonicalPhone).slice(-10);
 
-    if (phoneDigits.length === 10) {
-      const ensured = await ensurePatient(activeSupabase, {
-        name: slot.patient,
-        phone: canonicalPhone,
-        email: canonicalEmail,
-        protocol: slot.protocol || matchingPatients[0]?.protocol || 'Wellness',
-        notes: slot.patientNotes ?? matchingPatients[0]?.notes ?? '',
-        prefers_email: slot.prefers_email !== false,
-        prefers_sms: slot.prefers_sms !== false,
-      });
-      if (ensured.error) return ensured;
-      return {
-        error: null,
-        phone: ensured.phone,
-        email: ensured.email,
-        patient: ensured.displayName,
-      };
-    }
-
-    for (const pat of matchingPatients) {
+    const applyPatientContactPatch = async (pat) => {
       const legacyPatch = {
         notes: slot.patientNotes ?? pat.notes ?? '',
         prefers_email: slot.prefers_email !== false,
@@ -724,6 +708,43 @@ export default function AppLayout() {
         upRes = await activeSupabase.from('patients').update(lowerPatch).eq('id', pat.id);
         if (upRes.error) return { error: upRes.error };
       }
+      return {
+        error: null,
+        phone: canonicalPhone || pat.phone,
+        email: canonicalEmail || pat.email,
+        patient: pat.patient,
+        patientId: pat.id,
+      };
+    };
+
+    // Expediente ya vinculado: actualizar por ID (permite corregir teléfono mal capturado).
+    if (targetPatient?.id) {
+      return applyPatientContactPatch(targetPatient);
+    }
+
+    if (phoneDigits.length === 10) {
+      const ensured = await ensurePatient(activeSupabase, {
+        name: slot.patient,
+        phone: canonicalPhone,
+        email: canonicalEmail,
+        protocol: slot.protocol || matchingPatients[0]?.protocol || 'Wellness',
+        notes: slot.patientNotes ?? matchingPatients[0]?.notes ?? '',
+        prefers_email: slot.prefers_email !== false,
+        prefers_sms: slot.prefers_sms !== false,
+      });
+      if (ensured.error) return ensured;
+      return {
+        error: null,
+        phone: ensured.phone,
+        email: ensured.email,
+        patient: ensured.displayName,
+        patientId: ensured.id,
+      };
+    }
+
+    for (const pat of matchingPatients) {
+      const result = await applyPatientContactPatch(pat);
+      if (result.error) return result;
     }
 
     return {
@@ -731,6 +752,7 @@ export default function AppLayout() {
       phone: canonicalPhone,
       email: canonicalEmail,
       patient: slot.patient,
+      patientId: targetPatient?.id || null,
     };
   };
 
@@ -2005,8 +2027,8 @@ export default function AppLayout() {
       ...app,
       status: 'booked',
       patientId: patInfo?.id,
-      phone: patInfo?.phone || app.phone,
-      email: patInfo?.email,
+      phone: String(app.phone || '').trim() || patInfo?.phone || '',
+      email: String(app.email || '').trim() || patInfo?.email || '',
       protocol: patInfo?.protocol || app.protocol,
       wallets: patInfo ? repairedWallets : {},
       historicoSesiones: patInfo?.historicoSesiones || 0,
@@ -5459,12 +5481,44 @@ export default function AppLayout() {
                         const contactResult = await persistPatientContactFromSlot(selectedSlot);
                         if (contactResult.error) return alert(staffAlert(locale, 'patientFileError', contactResult.error.message));
 
-                        await activeSupabase.from('appointments').update({
+                        const savedPhone = contactResult.phone || selectedSlot.phone || '';
+                        const savedEmail = contactResult.email || selectedSlot.email || '';
+                        const savedPatientId = contactResult.patientId || selectedSlot.patientId;
+
+                        const apptRes = await activeSupabase.from('appointments').update({
                           notes: selectedSlot.notes,
-                          phone: contactResult.phone || selectedSlot.phone || '',
-                          email: contactResult.email || selectedSlot.email || '',
+                          phone: savedPhone,
+                          email: savedEmail,
                           promoter_code: normalizePromoCode(selectedSlot.promoter_code) || null,
                         }).eq('id', selectedSlot.id);
+                        if (apptRes.error) throw apptRes.error;
+
+                        if (savedPatientId) {
+                          setDbPatients((prev) => prev.map((p) => (
+                            String(p.id) === String(savedPatientId)
+                              ? {
+                                ...p,
+                                phone: savedPhone,
+                                email: savedEmail,
+                                notes: selectedSlot.patientNotes ?? p.notes,
+                                prefers_email: selectedSlot.prefers_email !== false,
+                                prefers_sms: selectedSlot.prefers_sms !== false,
+                              }
+                              : p
+                          )));
+                        }
+                        setDbAppointments((prev) => prev.map((a) => (
+                          a.id === selectedSlot.id
+                            ? { ...a, phone: savedPhone, email: savedEmail, notes: selectedSlot.notes }
+                            : a
+                        )));
+                        setSelectedSlot((prev) => ({
+                          ...prev,
+                          phone: savedPhone,
+                          email: savedEmail,
+                          patientId: savedPatientId || prev.patientId,
+                          patientNotes: selectedSlot.patientNotes ?? prev.patientNotes,
+                        }));
 
                         alert(a('notesSavedOk'));
                         await notifyCalendarChanged();
