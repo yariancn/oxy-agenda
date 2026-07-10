@@ -787,7 +787,7 @@ export default function AppLayout() {
       };
 
       if (liveOnly) {
-        const [appointmentsData, resS, resB] = await Promise.all([
+        const [appointmentsData, resS, resB, resC] = await Promise.all([
           fetchPaginated('appointments', { clinicScoped: shouldScopeTableByClinic(clinicId) }),
           shouldScopeTableByClinic(clinicId)
             ? staffDbSelectByClinic(clinicDb, 'services', clinicId, (q) => q)
@@ -795,6 +795,7 @@ export default function AppLayout() {
           shouldScopeTableByClinic(clinicId)
             ? staffDbSelectByClinic(clinicDb, 'blocked_slots', clinicId, (q) => q)
             : clinicDb.from('blocked_slots').select('*'),
+          clinicDb.from('company_config').select('*').eq('clinic', clinicId).maybeSingle(),
         ]);
 
         if (fetchGen !== fetchGenRef.current) return;
@@ -805,6 +806,25 @@ export default function AppLayout() {
         setDbServices((resS.data || []).sort((a, b) => (a.name || '').localeCompare(b.name || '')));
         setDbBlockedSlots(resB.data || []);
         setDbAppointments(appointmentsData || []);
+        if (resC.data) {
+          const clinicLocale = localeForClinic(activeClinic);
+          setDbCompanyConfig((prev) => ({
+            ...prev,
+            ...resC.data,
+            name: formatClinicField(resC.data.name),
+            address: formatClinicField(resC.data.address),
+            maps_url: String(resC.data.maps_url || '').trim(),
+            phone: formatClinicPhone(resC.data.phone),
+            ticket_message: formatClinicField(resC.data.ticket_message),
+            notify_session_label: resC.data.notify_session_label || prev.notify_session_label || defaultNotifySettings(clinicLocale).notify_session_label,
+            notify_session_default: resC.data.notify_session_default ?? prev.notify_session_default ?? defaultNotifySettings(clinicLocale).notify_session_default,
+            notify_session_url: resC.data.notify_session_url || prev.notify_session_url || defaultNotifySettings(clinicLocale).notify_session_url,
+            notify_sms_first: resC.data.notify_sms_first || prev.notify_sms_first || defaultNotifySettings(clinicLocale).notify_sms_first,
+            notify_sms_booking: resC.data.notify_sms_booking || prev.notify_sms_booking || defaultNotifySettings(clinicLocale).notify_sms_booking,
+            notify_sms_reschedule: resC.data.notify_sms_reschedule || prev.notify_sms_reschedule || defaultNotifySettings(clinicLocale).notify_sms_reschedule,
+            notify_sms_cancel: resC.data.notify_sms_cancel || prev.notify_sms_cancel || defaultNotifySettings(clinicLocale).notify_sms_cancel,
+          }));
+        }
         if (dbStatus === 'error') {
           setDbStatus('listo');
           setDbErrorMessage('');
@@ -1016,13 +1036,20 @@ export default function AppLayout() {
 
   fetchAllDataRef.current = fetchAllData;
 
+  const syncCalendarLive = useCallback(async () => {
+    await fetchAllDataRef.current({ silent: true, liveOnly: true });
+  }, []);
+
+  const notifyCalendarChanged = useCallback(async () => {
+    await syncCalendarLive();
+    broadcastLiveDataUpdated(activeClinic);
+  }, [activeClinic, syncCalendarLive]);
+
   useLiveSyncPoll({
     enabled: Boolean(currentUser),
     clinic: activeClinic,
     endpoint: '/api/staff/live-sync',
-    onChange: async () => {
-      await fetchAllDataRef.current({ silent: true, liveOnly: true });
-    },
+    onChange: syncCalendarLive,
   });
 
   const dbErrorHint = useMemo(() => {
@@ -2397,7 +2424,7 @@ export default function AppLayout() {
       
       setMoveConfirmation(null);
       closeAppointmentPanel();
-      fetchAllData();
+      await notifyCalendarChanged();
     } catch (e) {
       alert(a('connectionErrorMsg', e.message));
     }
@@ -2941,6 +2968,8 @@ export default function AppLayout() {
       const recurrenceLine = createdCount > 1
         ? `${L.p.appt.repeatCreated(createdCount, skippedCount)}\n`
         : (skippedCount > 0 ? `${L.p.appt.repeatCreated(createdCount, skippedCount)}\n` : '');
+
+      await notifyCalendarChanged();
 
       setAppointmentSaveFeedback({
         phase: 'success',
@@ -3493,7 +3522,7 @@ export default function AppLayout() {
                             {dbBlockedSlots.filter(b => b.date === currentDayInfo.fullDate && (b.is_global || appointmentEquipment(b.equipment) === eqName)).map(b => (
                               <div key={b.id} className="absolute left-1 right-1 bg-slate-200 border-l-4 border-slate-400 rounded-md opacity-80 overflow-hidden flex flex-col justify-center items-center z-0" style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.03) 10px, rgba(0,0,0,0.03) 20px)', top: `${timeToPixels(b.start_time)}px`, height: `${timeToPixels(b.end_time) - timeToPixels(b.start_time)}px` }}>
                                 <span className="text-[10px] font-black text-slate-500 uppercase bg-white/80 px-2 py-1 rounded">{b.reason}</span>
-                                {currentUserLevel <= 2 && <button onClick={async () => { await activeSupabase.from('blocked_slots').delete().eq('id', b.id); fetchAllData(); }} className="text-red-500 text-[8px] font-black mt-1 uppercase bg-white/80 px-2 rounded">Eliminar</button>}
+                                {currentUserLevel <= 2 && <button onClick={async () => { await activeSupabase.from('blocked_slots').delete().eq('id', b.id); await notifyCalendarChanged(); }} className="text-red-500 text-[8px] font-black mt-1 uppercase bg-white/80 px-2 rounded">Eliminar</button>}
                               </div>
                             ))}
 
@@ -5399,7 +5428,7 @@ export default function AppLayout() {
                         }).eq('id', selectedSlot.id);
 
                         alert(a('notesSavedOk'));
-                        fetchAllData();
+                        await notifyCalendarChanged();
                       } catch(e) { alert(a('notesSaveError')); }
                    }} className="w-full bg-slate-800 text-white font-black py-2 rounded-lg text-[10px] uppercase hover:bg-slate-700 shadow-sm transition">{L.p.appt.saveNotesAndContact}</button>
                 </div>
@@ -6087,7 +6116,7 @@ export default function AppLayout() {
                   clinic: normalizeClinicId(activeClinic),
                 }]);
                 setShowOOOModal(false); 
-                fetchAllData();
+                await notifyCalendarChanged();
               }} className="w-full sm:flex-1 bg-red-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-red-700">Aplicar Bloqueo</button>
             </div>
           </div>
