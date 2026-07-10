@@ -56,6 +56,17 @@ function StackedIndicators({ app, locale, compact, ultra }) {
   );
 }
 
+function PatientName({ name, isNew, className = '' }) {
+  return (
+    <div
+      className={`font-black uppercase leading-[1.15] line-clamp-2 break-words w-full min-w-0 ${className}`}
+      title={name}
+    >
+      {isNew ? '⭐ ' : ''}{name}
+    </div>
+  );
+}
+
 export default function CalendarAppointmentBlock({
   app,
   colWidth,
@@ -100,14 +111,14 @@ export default function CalendarAppointmentBlock({
       onClick={onSelect}
       draggable={draggable}
       onDragStart={onDragStart}
-      className={`absolute ${paddingClass} p-0.5 sm:p-1 ${roundedClass} border-2 border-l-[6px] shadow-md cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-105 hover:ring-1 hover:ring-black/20 hover:z-30 ${colorClasses} ${isSelected ? 'ring-2 ring-blue-600 ring-offset-1 z-30' : ''}`}
+      className={`absolute ${paddingClass} p-0.5 sm:p-0.5 ${roundedClass} border border-l-[3px] shadow-sm cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-[1.02] hover:ring-1 hover:ring-black/10 hover:z-30 ${colorClasses} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1 z-30' : ''}`}
       style={{ top: `${topPx}px`, height: `${heightPx}px`, zIndex: 10 }}
     >
       {ultra ? (
         <div className="flex flex-col items-center justify-start h-full py-0.5 gap-0.5 text-center min-w-0 w-full">
           <span className="text-[6px] font-black uppercase leading-none opacity-80 shrink-0">{app.time.replace(' AM', 'a').replace(' PM', 'p')}</span>
           {showNameInUltra ? (
-            <span className="text-[7px] font-black uppercase leading-tight truncate w-full px-0.5">{app.patient}</span>
+            <PatientName name={app.patient} isNew={app.is_new_patient} className="text-[7px] text-center" />
           ) : (
             <span className="text-[8px] font-black uppercase leading-none">{getPatientInitials(app.patient)}</span>
           )}
@@ -123,17 +134,21 @@ export default function CalendarAppointmentBlock({
           </div>
 
           {compact ? (
-            <div className="flex flex-col items-stretch min-w-0 w-full flex-1">
-              <div className={`font-black uppercase leading-tight truncate w-full ${shortBlock ? 'text-[7px]' : 'text-[8px] sm:text-[9px]'}`}>
-                {app.patient}
-              </div>
+            <div className="flex flex-col items-stretch min-w-0 w-full flex-1 min-h-0">
+              <PatientName
+                name={app.patient}
+                isNew={app.is_new_patient}
+                className={shortBlock ? 'text-[7px]' : 'text-[8px] sm:text-[9px]'}
+              />
               <StackedIndicators app={app} locale={locale} compact ultra={false} />
             </div>
           ) : (
             <>
-              <div className={`font-black uppercase truncate leading-none ${shortBlock ? 'text-[8px]' : 'text-[10px]'}`}>
-                {app.is_new_patient ? '⭐ ' : ''}{app.patient}
-              </div>
+              <PatientName
+                name={app.patient}
+                isNew={app.is_new_patient}
+                className={shortBlock ? 'text-[8px]' : 'text-[10px]'}
+              />
               {blockMins > 45 && (
                 <div className="text-[7px] font-bold opacity-70 uppercase truncate mt-0.5">
                   {duration}m sesión · {blockMins}m bloque

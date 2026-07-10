@@ -2209,45 +2209,59 @@ export default function AppLayout() {
   }, [selectedSlot]);
 
   const getEquipmentColors = (color) => {
-    const map = { 
-      blue: 'bg-blue-50 border-blue-500 text-blue-900', rose: 'bg-rose-50 border-rose-500 text-rose-900', 
-      emerald: 'bg-emerald-50 border-emerald-500 text-emerald-900', purple: 'bg-purple-50 border-purple-500 text-purple-900',
-      amber: 'bg-amber-50 border-amber-500 text-amber-900', cyan: 'bg-cyan-50 border-cyan-500 text-cyan-900',
-      indigo: 'bg-indigo-50 border-indigo-500 text-indigo-900', fuchsia: 'bg-fuchsia-50 border-fuchsia-500 text-fuchsia-900',
-      pink: 'bg-pink-50 border-pink-500 text-pink-900', orange: 'bg-orange-50 border-orange-500 text-orange-900',
-      teal: 'bg-teal-50 border-teal-500 text-teal-900', violet: 'bg-violet-50 border-violet-500 text-violet-900'
+    const map = {
+      blue: 'bg-blue-50/90 border-blue-300 text-blue-800',
+      rose: 'bg-rose-50/90 border-rose-300 text-rose-800',
+      emerald: 'bg-emerald-50/90 border-emerald-300 text-emerald-800',
+      purple: 'bg-purple-50/90 border-purple-300 text-purple-800',
+      amber: 'bg-amber-50/90 border-amber-300 text-amber-800',
+      cyan: 'bg-cyan-50/90 border-cyan-300 text-cyan-800',
+      indigo: 'bg-indigo-50/90 border-indigo-300 text-indigo-800',
+      fuchsia: 'bg-fuchsia-50/90 border-fuchsia-300 text-fuchsia-800',
+      pink: 'bg-pink-50/90 border-pink-300 text-pink-800',
+      orange: 'bg-orange-50/90 border-orange-300 text-orange-800',
+      teal: 'bg-teal-50/90 border-teal-300 text-teal-800',
+      violet: 'bg-violet-50/90 border-violet-300 text-violet-800',
     };
-    return map[color] || 'bg-slate-50 border-slate-500 text-slate-900';
+    return map[color] || 'bg-slate-50/90 border-slate-300 text-slate-800';
   };
 
   const getEquipmentBgColor = (color) => {
-    const map = { 
-      blue: 'bg-blue-100/60', rose: 'bg-rose-100/60', emerald: 'bg-emerald-100/60', 
-      purple: 'bg-purple-100/60', amber: 'bg-amber-100/60', cyan: 'bg-cyan-100/60', 
-      indigo: 'bg-indigo-100/60', fuchsia: 'bg-fuchsia-100/60', pink: 'bg-pink-100/60', 
-      orange: 'bg-orange-100/60', teal: 'bg-teal-100/60', violet: 'bg-violet-100/60'
+    const map = {
+      blue: 'bg-blue-50/35', rose: 'bg-rose-50/35', emerald: 'bg-emerald-50/35',
+      purple: 'bg-purple-50/35', amber: 'bg-amber-50/35', cyan: 'bg-cyan-50/35',
+      indigo: 'bg-indigo-50/35', fuchsia: 'bg-fuchsia-50/35', pink: 'bg-pink-50/35',
+      orange: 'bg-orange-50/35', teal: 'bg-teal-50/35', violet: 'bg-violet-50/35',
     };
-    return map[color] || 'bg-slate-100/60';
+    return map[color] || 'bg-slate-50/35';
   };
 
   const getEquipmentHeaderColor = (color) => {
-    const map = { 
-      blue: 'bg-blue-600 text-white', rose: 'bg-rose-600 text-white', emerald: 'bg-emerald-600 text-white', 
-      purple: 'bg-purple-600 text-white', amber: 'bg-amber-600 text-white', cyan: 'bg-cyan-600 text-white',
-      indigo: 'bg-indigo-600 text-white', fuchsia: 'bg-fuchsia-600 text-white', pink: 'bg-pink-600 text-white',
-      orange: 'bg-orange-600 text-white', teal: 'bg-teal-600 text-white', violet: 'bg-violet-600 text-white'
+    const map = {
+      blue: 'bg-blue-100 text-blue-800 border-b border-blue-200',
+      rose: 'bg-rose-100 text-rose-800 border-b border-rose-200',
+      emerald: 'bg-emerald-100 text-emerald-800 border-b border-emerald-200',
+      purple: 'bg-purple-100 text-purple-800 border-b border-purple-200',
+      amber: 'bg-amber-100 text-amber-800 border-b border-amber-200',
+      cyan: 'bg-cyan-100 text-cyan-800 border-b border-cyan-200',
+      indigo: 'bg-indigo-100 text-indigo-800 border-b border-indigo-200',
+      fuchsia: 'bg-fuchsia-100 text-fuchsia-800 border-b border-fuchsia-200',
+      pink: 'bg-pink-100 text-pink-800 border-b border-pink-200',
+      orange: 'bg-orange-100 text-orange-800 border-b border-orange-200',
+      teal: 'bg-teal-100 text-teal-800 border-b border-teal-200',
+      violet: 'bg-violet-100 text-violet-800 border-b border-violet-200',
     };
-    return map[color] || 'bg-slate-800 text-white';
+    return map[color] || 'bg-slate-100 text-slate-800 border-b border-slate-200';
   };
 
   const getDynamicColorClass = (color) => {
     const map = {
-      blue: 'bg-blue-500', rose: 'bg-rose-500', emerald: 'bg-emerald-500', 
-      purple: 'bg-purple-500', amber: 'bg-amber-500', cyan: 'bg-cyan-500', 
-      indigo: 'bg-indigo-500', fuchsia: 'bg-fuchsia-500', pink: 'bg-pink-500', 
-      orange: 'bg-orange-500', teal: 'bg-teal-500', violet: 'bg-violet-500'
+      blue: 'bg-blue-300', rose: 'bg-rose-300', emerald: 'bg-emerald-300',
+      purple: 'bg-purple-300', amber: 'bg-amber-300', cyan: 'bg-cyan-300',
+      indigo: 'bg-indigo-300', fuchsia: 'bg-fuchsia-300', pink: 'bg-pink-300',
+      orange: 'bg-orange-300', teal: 'bg-teal-300', violet: 'bg-violet-300',
     };
-    return map[color] || 'bg-slate-500';
+    return map[color] || 'bg-slate-300';
   };
 
   const getStatusBadge = (status) => {
@@ -3552,7 +3566,7 @@ export default function AppLayout() {
                       {displayedEquipments.map((eqName) => {
                         const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                         return (
-                        <div key={eqName} className={`flex-1 border-r-2 border-slate-400 last:border-r-0 ${getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth * 2}px` }}>
+                        <div key={eqName} className={`flex-1 border-r border-slate-300 last:border-r-0 ${getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth * 2}px` }}>
                           <div className={`h-12 border-b border-slate-200 flex flex-col items-center justify-center sticky top-0 z-40 ${getEquipmentHeaderColor(srvColor)}`}>
                             <span className="text-[10px] font-black uppercase leading-none">{eqName}</span>
                             <span className="text-[11px] font-bold opacity-80">{currentDayInfo.date}</span>
@@ -3632,7 +3646,7 @@ export default function AppLayout() {
                                 return (
                                   <div
                                     key={`${dayInfo.fullDate}-hdr-${eqName}`}
-                                    className={`flex items-center justify-center border-r-2 border-slate-400 last:border-r-0 ${getEquipmentHeaderColor(srvColor)}`}
+                                    className={`flex items-center justify-center border-r border-slate-300 last:border-r-0 ${getEquipmentHeaderColor(srvColor)}`}
                                     style={{ width: `${eqW}px`, minWidth: `${eqW}px`, flex: `0 0 ${eqW}px` }}
                                     title={eqName}
                                   >
@@ -3660,7 +3674,7 @@ export default function AppLayout() {
                               const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                               const eqW = equipWidthFor(eqName);
                               return (
-                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`relative border-r-2 border-slate-400 last:border-r-0 ${getEquipmentBgColor(srvColor)}`} style={{ width: `${eqW}px`, minWidth: `${eqW}px`, flex: `0 0 ${eqW}px` }}>
+                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`relative border-r border-slate-300 last:border-r-0 ${getEquipmentBgColor(srvColor)}`} style={{ width: `${eqW}px`, minWidth: `${eqW}px`, flex: `0 0 ${eqW}px` }}>
                                 
                                 <div className="absolute inset-0 z-0">{renderBackgroundSlots(eqName, dayInfo.name, dayInfo.fullDate)}</div>
                                 

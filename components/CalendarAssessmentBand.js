@@ -48,7 +48,7 @@ export default function CalendarAssessmentBand({
             title={ariaLabel}
             aria-label={ariaLabel}
             onClick={() => onSelect?.(app)}
-            className="flex items-center gap-1 min-w-0 max-w-full shrink-0 rounded border-2 border-dashed border-fuchsia-400 bg-fuchsia-100 hover:bg-fuchsia-200 px-1.5 py-0.5 text-left transition shadow-sm"
+            className="flex items-center gap-1 min-w-0 max-w-full shrink-0 rounded border border-dashed border-fuchsia-200 bg-fuchsia-50 hover:bg-fuchsia-100/80 px-1.5 py-0.5 text-left transition shadow-sm"
           >
             <span className="text-[7px] font-black text-fuchsia-900 uppercase leading-none shrink-0">
               {app.time}
