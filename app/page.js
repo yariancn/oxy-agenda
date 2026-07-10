@@ -47,6 +47,7 @@ import AppSymbolLegend from '../components/AppSymbolLegend';
 import PosReceiptModal from '../components/PosReceiptModal';
 import StaffTabErrorBoundary from '../components/StaffTabErrorBoundary';
 import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
+import CalendarAssessmentBand from '../components/CalendarAssessmentBand';
 
 const STAFF_TAB_PANEL = 'flex-1 min-h-0 overflow-y-auto overscroll-y-contain flex flex-col z-10 p-3 pb-20 lg:p-6 lg:pb-6';
 import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
@@ -80,6 +81,7 @@ import {
   isCompactColumn,
   weekDayColumnWidths,
   WEEK_STICKY_HEADER_PX,
+  ASSESSMENT_BAND_HEIGHT_PX,
   CALENDAR_PIXELS_PER_MINUTE,
 } from '../lib/calendarDisplay';
 import { getWeekScrollLeftForToday } from '../lib/calendarScroll';
@@ -1289,7 +1291,7 @@ export default function AppLayout() {
   };
 
   const activeServices = dbServices.filter(s => s.is_active);
-  const { columns: calendarEquipmentColumns } = useMemo(
+  const { columns: calendarEquipmentColumns, assessmentService } = useMemo(
     () => buildCalendarEquipmentColumns(dbServices),
     [dbServices],
   );
@@ -1298,7 +1300,30 @@ export default function AppLayout() {
     (equipment) => resolveAppointmentEquipment(equipment, dbServices),
     [dbServices],
   );
-  const displayedEquipments = equipmentFilter === 'Todos' ? dynamicColumns : [equipmentFilter];
+  const assessmentOnlyMode = Boolean(
+    assessmentService && equipmentFilter === assessmentService,
+  );
+  const showAssessmentBand = Boolean(
+    assessmentService && equipmentFilter === 'Todos',
+  );
+  const weekStickyHeaderPx = showAssessmentBand
+    ? WEEK_STICKY_HEADER_PX + ASSESSMENT_BAND_HEIGHT_PX
+    : WEEK_STICKY_HEADER_PX;
+  const displayedEquipments = assessmentOnlyMode
+    ? [assessmentService]
+    : (equipmentFilter === 'Todos' ? dynamicColumns : [equipmentFilter]);
+  const filterChipEquipments = assessmentService
+    ? [...dynamicColumns, assessmentService]
+    : dynamicColumns;
+
+  const getAssessmentAppsForDay = useCallback((fullDate) => {
+    if (!assessmentService) return [];
+    return dbAppointments.filter(
+      (app) => app.full_date === fullDate
+        && app.check_in_status !== 'Cancelado'
+        && appointmentEquipment(app.equipment) === assessmentService,
+    );
+  }, [assessmentService, dbAppointments, appointmentEquipment]);
 
   const weekDayLayouts = useMemo(() => {
     if (viewMode !== 'Semana') return {};
@@ -1306,25 +1331,23 @@ export default function AppLayout() {
     const names = equipmentFilter === 'Todos'
       ? dynamicColumns
       : dynamicColumns.filter((eq) => eq === equipmentFilter);
+    const equipNames = assessmentOnlyMode
+      ? [assessmentService]
+      : (names.length ? names : dynamicColumns);
     for (const day of weekDays) {
       layouts[day.fullDate] = weekDayColumnWidths({
-        fullDate: day.fullDate,
-        equipmentNames: names.length ? names : dynamicColumns,
+        equipmentNames: equipNames,
         colWidth: currentColWidth,
-        appointments: dbAppointments,
-        blockedSlots: dbBlockedSlots,
-        resolveEquipment: appointmentEquipment,
       });
     }
     return layouts;
   }, [
     viewMode,
     weekDays,
-    dbAppointments,
-    dbBlockedSlots,
     equipmentFilter,
     dynamicColumns,
-    appointmentEquipment,
+    assessmentOnlyMode,
+    assessmentService,
     currentColWidth,
   ]);
 
@@ -1743,12 +1766,12 @@ export default function AppLayout() {
   }, [activeClinic, activeTab]);
 
   useEffect(() => {
-    if (dynamicColumns.length === 0) return;
-    if (equipmentFilter !== 'Todos' && !dynamicColumns.includes(equipmentFilter)) {
+    if (filterChipEquipments.length === 0) return;
+    if (equipmentFilter !== 'Todos' && !filterChipEquipments.includes(equipmentFilter)) {
       setEquipmentFilter('Todos');
       setZoomManual(false);
     }
-  }, [dynamicColumns, equipmentFilter]);
+  }, [filterChipEquipments, equipmentFilter]);
 
   useEffect(() => {
     if (!prefsHydratedRef.current || displayedEquipments.length === 0 || skipAutoZoomRef.current) return;
@@ -3416,13 +3439,13 @@ export default function AppLayout() {
                   >
                     {L.allEquipment}
                   </button>
-                  {dynamicColumns.map((eq) => (
+                  {filterChipEquipments.map((eq) => (
                     <button
                       key={eq}
                       type="button"
                       title={eq}
                       onClick={() => { setEquipmentFilter(eq); setZoomManual(false); setWeekFilterHintDismissed(true); }}
-                      className={`px-2 py-1 rounded-md text-[10px] font-black uppercase border transition shrink-0 ${equipmentFilter === eq ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'}`}
+                      className={`px-2 py-1 rounded-md text-[10px] font-black uppercase border transition shrink-0 ${equipmentFilter === eq ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : eq === assessmentService ? 'bg-fuchsia-50 text-fuchsia-800 border-fuchsia-300 hover:border-fuchsia-400' : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'}`}
                     >
                       {getEquipmentShortLabel(eq)}
                     </button>
@@ -3482,7 +3505,7 @@ export default function AppLayout() {
                 <div className="w-16 md:w-20 shrink-0 border-r border-slate-200 bg-slate-50 sticky left-0 z-50" data-cal-time-col>
                   <div
                     className="border-b border-slate-200 bg-slate-100 flex items-center justify-center sticky top-0 z-[60]"
-                    style={{ height: viewMode === 'Semana' ? `${WEEK_STICKY_HEADER_PX}px` : '48px' }}
+                    style={{ height: viewMode === 'Semana' ? `${weekStickyHeaderPx}px` : '48px' }}
                   >
                     <span className="text-[9px] font-black text-slate-400 uppercase">{L.time}</span>
                   </div>
@@ -3497,7 +3520,18 @@ export default function AppLayout() {
                 
                 <div className="flex-1 flex">
                   {viewMode === 'Día' ? (
-                    <div className="flex min-w-full">
+                    <div className="flex min-w-full flex-col">
+                      {showAssessmentBand && getAssessmentAppsForDay(currentDayInfo.fullDate).length > 0 && (
+                        <CalendarAssessmentBand
+                          appointments={getAssessmentAppsForDay(currentDayInfo.fullDate)}
+                          locale={locale}
+                          L={L}
+                          calculateEndTime={calculateEndTime}
+                          onSelect={openAppointmentDetails}
+                          label={assessmentService}
+                        />
+                      )}
+                      <div className="flex min-w-full">
                       {displayedEquipments.map((eqName) => {
                         const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                         return (
@@ -3546,68 +3580,73 @@ export default function AppLayout() {
                           </div>
                         </div>
                       )})}
+                      </div>
                     </div>
                   ) : (
-                    <div className="flex min-w-full">
-                      {weekDays.map((dayInfo) => {
+                    <div className="flex min-w-full gap-1.5 px-0.5">
+                      {weekDays.map((dayInfo, dayIndex) => {
                         const dayOpen = getDaySchedule(dbCompanyConfig, dayInfo.fullDate).open;
                         const dayLayout = weekDayLayouts[dayInfo.fullDate] || weekDayColumnWidths({
-                          fullDate: dayInfo.fullDate,
                           equipmentNames: displayedEquipments,
                           colWidth: currentColWidth,
-                          appointments: dbAppointments,
-                          blockedSlots: dbBlockedSlots,
-                          resolveEquipment: appointmentEquipment,
                         });
-                        const { dayWidth, byEquipment, compactDay } = dayLayout;
+                        const { dayWidth, byEquipment } = dayLayout;
                         const equipWidthFor = (eqName) => byEquipment[eqName] ?? currentColWidth;
-                        const isNarrowEquip = (eqName) => equipWidthFor(eqName) < currentColWidth * 0.99;
+                        const dayAssessments = getAssessmentAppsForDay(dayInfo.fullDate);
+                        const isToday = dayInfo.fullDate === clinicNow.dateStr;
                         return (
-                        <div key={dayInfo.fullDate} data-cal-day={dayInfo.fullDate} className={`shrink-0 border-r-[3px] ${dayInfo.fullDate === clinicNow.dateStr ? 'border-blue-600 ring-2 ring-inset ring-blue-400/60' : 'border-slate-500'} ${!dayOpen ? 'opacity-60' : ''}`} style={{ width: `${dayWidth}px`, minWidth: `${dayWidth}px`, flex: '0 0 auto' }}>
-                          <div className={`sticky top-0 z-40 border-b border-slate-200 ${dayInfo.fullDate === clinicNow.dateStr ? 'bg-blue-50' : dayOpen ? 'bg-slate-50' : 'bg-slate-200'}`}>
-                            <div className={`flex flex-col items-center justify-center ${compactDay ? 'h-8 px-0.5' : 'h-8'}`}>
-                              <span className={`font-black text-slate-800 uppercase leading-none ${compactDay ? 'text-[7px] [writing-mode:vertical-rl] rotate-180 max-h-8 truncate' : 'text-[9px]'}`}>{dayInfo.name}</span>
-                              <span className={`font-bold leading-none ${compactDay ? 'text-[8px] text-slate-500' : 'text-[10px]'} ${dayOpen ? 'text-blue-600' : 'text-slate-500'}`}>
-                                {compactDay ? dayInfo.date.split(' ')[0] : dayInfo.date}{!dayOpen && !compactDay ? ` · ${L.p.admin.weeklyClosedShort}` : ''}
+                        <div
+                          key={dayInfo.fullDate}
+                          data-cal-day={dayInfo.fullDate}
+                          className={`shrink-0 rounded-lg overflow-hidden shadow-md ring-1 ring-slate-300/80 ${isToday ? 'ring-2 ring-blue-500 shadow-blue-200/40' : ''} ${!dayOpen ? 'opacity-60' : ''} ${dayIndex > 0 ? 'border-l-4 border-slate-700' : ''}`}
+                          style={{ width: `${dayWidth}px`, minWidth: `${dayWidth}px`, flex: '0 0 auto' }}
+                        >
+                          <div className={`sticky top-0 z-40 border-b-2 border-slate-300 ${isToday ? 'bg-blue-50' : dayOpen ? 'bg-slate-50' : 'bg-slate-200'}`}>
+                            <div className="flex flex-col items-center justify-center h-8 border-b border-slate-200/80">
+                              <span className="font-black text-slate-800 uppercase leading-none text-[9px]">{dayInfo.name}</span>
+                              <span className={`font-bold leading-none text-[10px] ${dayOpen ? 'text-blue-600' : 'text-slate-500'}`}>
+                                {dayInfo.date}{!dayOpen ? ` · ${L.p.admin.weeklyClosedShort}` : ''}
                               </span>
                             </div>
-                            {compactDay ? (
-                              <div className="border-t border-slate-200 h-7 flex items-center justify-center bg-slate-100/80">
-                                <span className="text-[6px] font-black text-slate-300 uppercase">·</span>
-                              </div>
-                            ) : (
-                            <div className="flex border-t border-slate-200 h-7">
+                            <div className="flex border-b border-slate-200 h-7">
                               {displayedEquipments.map((eqName) => {
                                 const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                                 const eqW = equipWidthFor(eqName);
-                                const narrow = isNarrowEquip(eqName);
                                 return (
                                   <div
                                     key={`${dayInfo.fullDate}-hdr-${eqName}`}
-                                    className={`flex items-center justify-center border-r-2 border-slate-400 last:border-r-0 ${getEquipmentHeaderColor(srvColor)} ${narrow ? 'overflow-hidden' : ''}`}
+                                    className={`flex items-center justify-center border-r-2 border-slate-400 last:border-r-0 ${getEquipmentHeaderColor(srvColor)}`}
                                     style={{ width: `${eqW}px`, minWidth: `${eqW}px`, flex: `0 0 ${eqW}px` }}
                                     title={eqName}
                                   >
                                     <span className="text-[7px] sm:text-[8px] font-black uppercase truncate px-0.5 text-center w-full leading-none">
-                                      {narrow ? getEquipmentShortLabel(eqName).slice(0, 2) : (currentColWidth >= 96 ? eqName : getEquipmentShortLabel(eqName))}
+                                      {currentColWidth >= 96 ? eqName : getEquipmentShortLabel(eqName)}
                                     </span>
                                   </div>
                                 );
                               })}
                             </div>
+                            {showAssessmentBand && (
+                              <CalendarAssessmentBand
+                                appointments={dayAssessments}
+                                locale={locale}
+                                L={L}
+                                calculateEndTime={calculateEndTime}
+                                onSelect={openAppointmentDetails}
+                                label={assessmentService}
+                                reserveWhenEmpty
+                              />
                             )}
                           </div>
                           <div className="flex w-full relative" style={{ height: `${CALENDAR_HEIGHT}px` }}>
                             {displayedEquipments.map(eqName => {
                               const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
                               const eqW = equipWidthFor(eqName);
-                              const narrow = isNarrowEquip(eqName);
                               return (
-                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`relative border-r-2 border-slate-400 last:border-r-0 ${getEquipmentBgColor(srvColor)} ${narrow ? 'overflow-hidden' : ''}`} style={{ width: `${eqW}px`, minWidth: `${eqW}px`, flex: `0 0 ${eqW}px` }}>
+                              <div key={`${dayInfo.fullDate}-${eqName}`} className={`relative border-r-2 border-slate-400 last:border-r-0 ${getEquipmentBgColor(srvColor)}`} style={{ width: `${eqW}px`, minWidth: `${eqW}px`, flex: `0 0 ${eqW}px` }}>
                                 
                                 <div className="absolute inset-0 z-0">{renderBackgroundSlots(eqName, dayInfo.name, dayInfo.fullDate)}</div>
                                 
-                                {/* LÍNEA DE HORA ACTUAL (MULTIHUSO) */}
                                 {dayInfo.fullDate === clinicNow.dateStr && clinicNow.mins >= calendarStartMins && clinicNow.mins <= endMins && (
                                   <div className="absolute left-0 right-0 pointer-events-none flex items-center z-20" style={{ top: `${(clinicNow.mins - calendarStartMins) * PIXELS_PER_MINUTE}px`, marginTop: '-1px' }}>
                                     <div className="w-2 h-2 rounded-full bg-red-500 shadow -ml-1"></div>
@@ -3625,7 +3664,7 @@ export default function AppLayout() {
                                   <CalendarAppointmentBlock
                                     key={app.id}
                                     app={app}
-                                    colWidth={narrow ? eqW : currentColWidth}
+                                    colWidth={currentColWidth}
                                     locale={locale}
                                     L={L}
                                     isSelected={selectedSlot?.id === app.id}
