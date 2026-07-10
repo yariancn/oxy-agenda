@@ -29,6 +29,7 @@ import {
   digitsOnly,
   resolvePatientForAppointment,
   resolveDisplayContact,
+  updatePatientContact,
 } from '../lib/ensurePatient';
 import {
   buildCalendarWeek,
@@ -690,31 +691,14 @@ export default function AppLayout() {
     const phoneDigits = digitsOnly(canonicalPhone).slice(-10);
 
     const applyPatientContactPatch = async (pat) => {
-      const legacyPatch = {
+      const upRes = await updatePatientContact(activeSupabase, pat.id, {
+        phone: canonicalPhone,
+        email: canonicalEmail,
         notes: slot.patientNotes ?? pat.notes ?? '',
-        prefers_email: slot.prefers_email !== false,
-        prefers_sms: slot.prefers_sms !== false,
-      };
-      if (canonicalPhone) {
-        legacyPatch.Phone = canonicalPhone;
-        legacyPatch.phone = canonicalPhone;
-      }
-      if (canonicalEmail) {
-        legacyPatch.Email = canonicalEmail;
-        legacyPatch.email = canonicalEmail;
-      }
-      let upRes = await activeSupabase.from('patients').update(legacyPatch).eq('id', pat.id);
-      if (upRes.error) {
-        const lowerPatch = {
-          notes: legacyPatch.notes,
-          prefers_email: legacyPatch.prefers_email,
-          prefers_sms: legacyPatch.prefers_sms,
-        };
-        if (canonicalPhone) lowerPatch.phone = canonicalPhone;
-        if (canonicalEmail) lowerPatch.email = canonicalEmail;
-        upRes = await activeSupabase.from('patients').update(lowerPatch).eq('id', pat.id);
-        if (upRes.error) return { error: upRes.error };
-      }
+        prefers_email: slot.prefers_email,
+        prefers_sms: slot.prefers_sms,
+      });
+      if (upRes.error) return { error: upRes.error };
       return {
         error: null,
         phone: canonicalPhone || pat.phone,
