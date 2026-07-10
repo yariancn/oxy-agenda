@@ -2713,7 +2713,7 @@ export default function AppLayout() {
           return (
             <div
               key={`grid-${m}`}
-              className={`absolute left-0 right-0 pointer-events-none border-t box-border ${isHour ? 'border-slate-400' : 'border-slate-300/90'}`}
+              className={`absolute left-0 right-0 pointer-events-none border-t box-border ${isHour ? 'border-slate-300/90' : 'border-slate-200/80'}`}
               style={{ top: `${top}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}
             />
           );
@@ -2746,7 +2746,7 @@ export default function AppLayout() {
               }}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, timeStr, equipment, day, fullDate, true)}
-              className="absolute left-0 right-0 bg-slate-200/60 hover:bg-amber-100/80 active:bg-amber-200/90 cursor-pointer border-t border-slate-300 box-border z-[1] transition-all hover:ring-2 hover:ring-inset hover:ring-amber-400/50"
+              className="absolute left-0 right-0 bg-slate-200/60 hover:bg-amber-100/80 active:bg-amber-200/90 cursor-pointer border-t border-slate-200/80 box-border z-[1] transition-all hover:ring-1 hover:ring-inset hover:ring-amber-400/40"
               style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}
               title={`${L.clickToBook} · ${L.p.legendOutsideHours}`}
             />
@@ -2790,7 +2790,7 @@ export default function AppLayout() {
             }}
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, time, equipment, day, fullDate)}
-            className="absolute left-0 right-0 border-t-2 border-b-2 border-slate-400/70 hover:bg-white hover:shadow-[inset_0_0_0_2px_rgba(100,116,139,0.55)] active:bg-slate-50 cursor-pointer transition-all box-border z-[1]"
+            className="absolute left-0 right-0 border-t border-slate-300/55 hover:bg-white/50 hover:shadow-[inset_0_0_0_1px_rgba(148,163,184,0.28)] active:bg-slate-50/80 cursor-pointer transition-all box-border z-[1]"
             style={{ top: `${timeToPixels(time)}px`, height: `${blockMins * PIXELS_PER_MINUTE}px` }}
             title={`${L.clickToBook} · ${blockMins} min`}
           />
@@ -3517,7 +3517,7 @@ export default function AppLayout() {
 
               {showCalendarLegend && (
                 <div className="flex flex-wrap gap-1.5 px-2 py-1.5 lg:px-3 border-t border-slate-100 text-[9px] font-bold text-slate-600">
-                  <span className="inline-flex items-center gap-1 bg-white border-2 border-slate-400 px-2 py-0.5 rounded-lg"><span className="w-3 h-3 bg-white border-2 border-slate-400 rounded" /> {L.legendAvailable}</span>
+                  <span className="inline-flex items-center gap-1 bg-white border border-slate-300 px-2 py-0.5 rounded-lg"><span className="w-3 h-3 bg-white border border-slate-300 rounded" /> {L.legendAvailable}</span>
                   <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg">🟡 {L.legendOutsideHours}</span>
                   <span className="inline-flex items-center gap-1 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded-lg">🟣 {L.legendExtended}</span>
                   <span className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-lg">⭐ {L.legendNewPatient}</span>
@@ -3541,11 +3541,14 @@ export default function AppLayout() {
                     <span className="text-[9px] font-black text-slate-400 uppercase">{L.time}</span>
                   </div>
                   <div className="relative" style={{ height: `${CALENDAR_HEIGHT}px` }}>
-                    {timeOptions.map((timeStr) => (
-                      <div key={timeStr} className="absolute w-full border-t border-slate-400 box-border" style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}>
+                    {timeOptions.map((timeStr, timeIdx) => {
+                      const slotMins = calendarStartMins + timeIdx * intervalMins;
+                      const isHourLine = slotMins % 60 === 0;
+                      return (
+                      <div key={timeStr} className={`absolute w-full border-t box-border ${isHourLine ? 'border-slate-300/90' : 'border-slate-200/80'}`} style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}>
                         <span className="block text-right pr-2 pt-0.5 text-[9px] font-black text-slate-600 leading-none bg-slate-50">{timeStr}</span>
                       </div>
-                    ))}
+                    );})}
                   </div>
                 </div>
                 
