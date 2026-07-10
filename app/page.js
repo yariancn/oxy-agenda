@@ -2697,6 +2697,11 @@ export default function AppLayout() {
       stepByBlock: true,
     });
 
+    const serviceLineMinutes = [...new Set([
+      ...slotTimes.map((t) => getMinutes(t)),
+      svcEnd,
+    ])].sort((a, b) => a - b);
+
     const offHourBands = [];
     for (let m = startMins; m < endMins; m += intervalMins) {
       if (m < svcStart || m >= svcEnd) {
@@ -2706,13 +2711,25 @@ export default function AppLayout() {
 
     return (
       <>
+        {serviceLineMinutes.map((m) => {
+          const top = (m - calendarStartMins) * PIXELS_PER_MINUTE;
+          const isBoundary = m === svcStart || m === svcEnd;
+          return (
+            <div
+              key={`grid-svc-${m}`}
+              className={`absolute left-0 right-0 pointer-events-none border-t box-border ${isBoundary ? 'border-slate-300/90' : 'border-slate-200/80'}`}
+              style={{ top: `${top}px` }}
+            />
+          );
+        })}
         {Array.from({ length: Math.ceil((calendarEndMins - calendarStartMins) / intervalMins) }, (_, i) => {
           const m = calendarStartMins + i * intervalMins;
+          if (m >= svcStart && m <= svcEnd) return null;
           const top = (m - calendarStartMins) * PIXELS_PER_MINUTE;
           const isHour = m % 60 === 0;
           return (
             <div
-              key={`grid-${m}`}
+              key={`grid-off-${m}`}
               className={`absolute left-0 right-0 pointer-events-none border-t box-border ${isHour ? 'border-slate-300/90' : 'border-slate-200/80'}`}
               style={{ top: `${top}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}
             />
@@ -2790,7 +2807,7 @@ export default function AppLayout() {
             }}
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, time, equipment, day, fullDate)}
-            className="absolute left-0 right-0 border-t border-slate-300/55 hover:bg-white/50 hover:shadow-[inset_0_0_0_1px_rgba(148,163,184,0.28)] active:bg-slate-50/80 cursor-pointer transition-all box-border z-[1]"
+            className="absolute left-0 right-0 hover:bg-white/50 hover:shadow-[inset_0_0_0_1px_rgba(148,163,184,0.28)] active:bg-slate-50/80 cursor-pointer transition-all box-border z-[1]"
             style={{ top: `${timeToPixels(time)}px`, height: `${blockMins * PIXELS_PER_MINUTE}px` }}
             title={`${L.clickToBook} · ${blockMins} min`}
           />
@@ -3632,7 +3649,7 @@ export default function AppLayout() {
                         <div
                           key={dayInfo.fullDate}
                           data-cal-day={dayInfo.fullDate}
-                          className={`shrink-0 rounded-lg overflow-hidden shadow-md ring-1 ring-slate-300/80 ${isToday ? 'ring-2 ring-blue-500 shadow-blue-200/40' : ''} ${!dayOpen ? 'opacity-60' : ''} ${dayIndex > 0 ? 'border-l-4 border-slate-700' : ''}`}
+                          className={`shrink-0 rounded-lg overflow-hidden shadow-md ring-1 ring-slate-300/80 ${isToday ? 'ring-2 ring-blue-500 shadow-blue-200/40' : ''} ${!dayOpen ? 'opacity-60' : ''} ${dayIndex > 0 ? 'border-l border-slate-200' : ''}`}
                           style={{ width: `${dayWidth}px`, minWidth: `${dayWidth}px`, flex: '0 0 auto' }}
                         >
                           <div className={`sticky top-0 z-40 border-b-2 border-slate-300 ${isToday ? 'bg-blue-50' : dayOpen ? 'bg-slate-50' : 'bg-slate-200'}`}>
