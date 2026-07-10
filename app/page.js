@@ -1971,6 +1971,44 @@ export default function AppLayout() {
     };
   }, [dbServices, getPatientSessionGroup]);
 
+  const applySessionDataToSelectedSlot = useCallback((patch = {}) => {
+    setSelectedSlot((prev) => {
+      if (!prev) return prev;
+      const { patientId, wallets, adeudo, packageHistory, sessionGroup } = patch;
+      const pat = patientId
+        ? dbPatients.find((p) => String(p.id) === String(patientId))
+        : null;
+      const matchesPatient =
+        (patientId && String(prev.patientId) === String(patientId))
+        || (pat && normalizeStr(pat.patient) === normalizeStr(prev.patient));
+      const matchesGroup =
+        sessionGroup?.id && prev.sessionGroup?.id === sessionGroup.id;
+
+      if (!matchesPatient && !matchesGroup) return prev;
+
+      const next = { ...prev };
+
+      if (matchesPatient && (wallets != null || packageHistory != null || adeudo != null)) {
+        const repaired = repairLegacyWalletKeys(
+          wallets ?? prev.wallets ?? {},
+          packageHistory ?? prev.packageHistory ?? [],
+        );
+        next.wallets = repaired.wallets;
+        next.adeudo = adeudo ?? next.adeudo ?? 0;
+        next.packageHistory = packageHistory ?? next.packageHistory ?? [];
+      }
+
+      if (matchesGroup && sessionGroup) {
+        const enriched = enrichGroupForDisplay(sessionGroup, dbPatients);
+        next.sessionGroup = enriched;
+        next.groupMembers = enriched?.members || [];
+        next.sessionGroupId = sessionGroup.id;
+      }
+
+      return next;
+    });
+  }, [dbPatients]);
+
   const processSessionDeduction = async (patient, equipment, servicePrice) => {
     if (!patient?.id) return { deducted: false, nextAdeudo: 0, walletContext: null };
     const sessionGroup = getPatientSessionGroup(patient);
@@ -2318,6 +2356,17 @@ export default function AppLayout() {
       }
 
       await logAudit(null, patientName, 'REVERSIÓN DE VENTA', formatSaleCancelAuditDetail(tx, currencyStr));
+      setDbPatients((prev) => prev.map((p) => (
+        String(p.id) === String(patientId)
+          ? { ...p, wallets: reversed.wallets, adeudo: reversed.adeudo, packageHistory: newHistory }
+          : p
+      )));
+      applySessionDataToSelectedSlot({
+        patientId,
+        wallets: reversed.wallets,
+        adeudo: reversed.adeudo,
+        packageHistory: newHistory,
+      });
       alert(a('saleCancelled'));
       fetchAllData();
     } catch (e) {
@@ -6316,9 +6365,10 @@ export default function AppLayout() {
             currentUserLevel={currentUserLevel}
             sessionGroupsEnabled={sessionGroupsEnabled}
             allPatients={dbPatients}
-            sessionGroup={getPatientSessionGroup(
+            sessionGroup={selectedSlot.sessionGroup || getPatientSessionGroup(
               dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient)),
             )}
+            onSessionUpdated={applySessionDataToSelectedSlot}
             onCreateSessionGroup={async ({ name, titularPatient }) => {
               await createSessionGroup(activeSupabase, { name, titularPatient, patients: dbPatients });
               await fetchAllData();
@@ -6340,7 +6390,16 @@ export default function AppLayout() {
                 adeudo,
                 package_history: history,
               }).eq('id', groupId);
-              await fetchAllData();
+              const updatedGroup = { ...(group || { id: groupId }), wallets, adeudo, packageHistory: history };
+              setDbSessionGroups((prev) => prev.map((g) => (
+                g.id === groupId ? { ...g, wallets, adeudo, packageHistory: history } : g
+              )));
+              applySessionDataToSelectedSlot({
+                patientId: selectedSlot?.patientId,
+                sessionGroup: updatedGroup,
+              });
+              broadcastLiveDataUpdated(activeClinic);
+              await fetchAllData({ silent: true });
             }}
             onGroupCancelSale={async ({ groupId, transaction }) => {
               const group = dbSessionGroups.find((g) => g.id === groupId);
@@ -6352,7 +6411,18 @@ export default function AppLayout() {
                 adeudo: reversed.adeudo,
                 package_history: history,
               }).eq('id', groupId);
-              await fetchAllData();
+              const updatedGroup = { ...group, wallets: reversed.wallets, adeudo: reversed.adeudo, packageHistory: history };
+              setDbSessionGroups((prev) => prev.map((g) => (
+                g.id === groupId
+                  ? { ...g, wallets: reversed.wallets, adeudo: reversed.adeudo, packageHistory: history }
+                  : g
+              )));
+              applySessionDataToSelectedSlot({
+                patientId: selectedSlot?.patientId,
+                sessionGroup: updatedGroup,
+              });
+              broadcastLiveDataUpdated(activeClinic);
+              await fetchAllData({ silent: true });
             }}
             onAllocateTicketNumber={async () => {
               const next = resolveNextTicketNumber({
@@ -6370,7 +6440,24 @@ export default function AppLayout() {
               }
               return next;
             }}
-            onClose={() => setShowPatientProfile(false)}
+            onClose={() => {
+              const patientId = selectedSlot?.patientId;
+              const pat = patientId
+                ? dbPatients.find((p) => String(p.id) === String(patientId))
+                : dbPatients.find((p) => normalizeStr(p.patient) === normalizeStr(selectedSlot?.patient));
+              if (pat) {
+                applySessionDataToSelectedSlot({
+                  patientId: pat.id,
+                  wallets: pat.wallets,
+                  adeudo: pat.adeudo,
+                  packageHistory: pat.packageHistory,
+                  sessionGroup: selectedSlot?.sessionGroup?.id
+                    ? selectedSlot.sessionGroup
+                    : getPatientSessionGroup(pat),
+                });
+              }
+              setShowPatientProfile(false);
+            }}
             onLogSale={(tx, patientName) => {
               logAudit(null, patientName, 'VENTA POS', formatSaleAuditDetail(tx, currencyStr));
             }}
@@ -6395,6 +6482,12 @@ export default function AppLayout() {
                   ? { ...p, wallets: repaired.wallets, adeudo: adeudo ?? 0, packageHistory }
                   : p
               )));
+              applySessionDataToSelectedSlot({
+                patientId: id,
+                wallets: repaired.wallets,
+                adeudo: adeudo ?? 0,
+                packageHistory,
+              });
               broadcastLiveDataUpdated(activeClinic);
             }}
             onCancelSale={(tx, patientName) => {

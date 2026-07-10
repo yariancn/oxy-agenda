@@ -28,6 +28,7 @@ export default function PatientProfileModal({
   onGroupPurchase,
   onGroupCancelSale,
   onPersistPurchase,
+  onSessionUpdated,
 }) {
   const { locale, L } = useStaffLocale();
   const t = L.modals.patient;
@@ -216,11 +217,21 @@ export default function PatientProfileModal({
     const nextPackageHistory = [newTransaction, ...(formData.packageHistory || [])];
 
     if (useGroup) {
+      const nextGroupHistory = [newTransaction, ...(sessionGroup.packageHistory || [])];
       onGroupPurchase({
         groupId: sessionGroup.id,
         wallets: applied.wallets,
         adeudo: applied.adeudo,
         transaction: newTransaction,
+      });
+      onSessionUpdated?.({
+        patientId: formData.id,
+        sessionGroup: {
+          ...sessionGroup,
+          wallets: applied.wallets,
+          adeudo: applied.adeudo,
+          packageHistory: nextGroupHistory,
+        },
       });
     } else {
       setFormData((prev) => ({
@@ -236,6 +247,12 @@ export default function PatientProfileModal({
           adeudo: applied.adeudo,
           packageHistory: nextPackageHistory,
           transaction: newTransaction,
+        });
+        onSessionUpdated?.({
+          patientId: formData.id,
+          wallets: applied.wallets,
+          adeudo: applied.adeudo,
+          packageHistory: nextPackageHistory,
         });
       } catch (err) {
         alert(err?.message || String(err));
@@ -281,6 +298,13 @@ export default function PatientProfileModal({
       wallets: reversed.wallets,
       adeudo: reversed.adeudo,
       packageHistory: nextHistory,
+    })?.then(() => {
+      onSessionUpdated?.({
+        patientId: formData.id,
+        wallets: reversed.wallets,
+        adeudo: reversed.adeudo,
+        packageHistory: nextHistory,
+      });
     })?.catch((err) => alert(err?.message || String(err)));
   };
 
@@ -664,7 +688,19 @@ export default function PatientProfileModal({
         activeClinic={activeClinic}
         locale={locale}
         labels={t}
-        onClose={() => setReceipt(null)}
+        onClose={() => {
+          setReceipt(null);
+          if (isTitular && sessionGroup?.id) {
+            onSessionUpdated?.({ patientId: formData.id, sessionGroup });
+          } else {
+            onSessionUpdated?.({
+              patientId: formData.id,
+              wallets: formData.wallets,
+              adeudo: formData.adeudo,
+              packageHistory: formData.packageHistory,
+            });
+          }
+        }}
       />
     </div>
   );
