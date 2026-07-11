@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { refreshStaffSessionUser } from '../../../../lib/resolveStaffLoginServer.js';
 import {
   createStaffSessionToken,
   readStaffSessionFromRequest,
@@ -7,9 +8,15 @@ import {
 } from '../../../../lib/staffSession.js';
 
 export async function GET(request) {
-  const user = readStaffSessionFromRequest(request);
+  let user = readStaffSessionFromRequest(request);
   if (!user) {
     return NextResponse.json({ user: null });
+  }
+
+  try {
+    user = await refreshStaffSessionUser(user);
+  } catch {
+    /* keep existing session */
   }
 
   const response = NextResponse.json({ user });

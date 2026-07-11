@@ -23,6 +23,7 @@ import {
   normalizeClinicId,
   shouldScopeTableByClinic,
   staffDbSelectByClinic,
+  CLINIC_SELECTOR_ORDER,
 } from '../lib/clinicRegistry';
 import {
   ensurePatient,
@@ -497,13 +498,20 @@ export default function AppLayout() {
 
   const activeSupabase = useMemo(() => createStaffDb(activeClinic), [activeClinic]);
 
-  const allowedClinics = getAllowedClinics(currentUser);
   const activeStaffProfile = getStaffProfileForClinic(currentUser, activeClinic) || currentUser;
 
   // CÁLCULO DE JERARQUÍA (rol puede variar por clínica)
   const currentUserLevel = currentUser?.id === 'admin'
     ? 1
-    : (dbRoles.find(r => r.name === activeStaffProfile?.role)?.level || 3);
+    : (dbRoles.find(r => r.name === activeStaffProfile?.role)?.level
+      ?? Number(currentUser?.accessLevel)
+      ?? 3);
+
+  const allowedClinics = getAllowedClinics(currentUser, { roleLevel: currentUserLevel });
+  const visibleClinics = useMemo(
+    () => CLINIC_SELECTOR_ORDER.filter((clinicKey) => allowedClinics.includes(clinicKey)),
+    [allowedClinics],
+  );
 
   // Actualizador de Reloj por Clínica
   useEffect(() => {
@@ -2148,7 +2156,7 @@ export default function AppLayout() {
       normalize: normalizeStr,
     });
 
-    // Notas de primera sesión: solo en primera cita (paciente o equipo nuevo).
+    // Notas de primera sesión: solo paciente nuevo en la clínica (no por cámara/equipo).
     // Reprogramaciones y cancelaciones nunca llevan notas.
     const includeFirstSessionNotes = notifyType === 'first';
 
@@ -3119,10 +3127,9 @@ export default function AppLayout() {
           phone: canonicalPhone,
           email: canonicalEmail,
           is_new_patient: isNewForAppointment,
-        }, { source: 'staff', isFirstSession: isNewForAppointment || isFirstSessionAppointment({
+        }, { source: 'staff', isFirstSession: isFirstSessionAppointment({
           isNewPatient: isNewForAppointment,
           patientName: selectedSlot.patient,
-          equipment: selectedSlot.equipment,
           appointments: dbAppointments,
           excludeAppointmentId: firstCreated.id,
           normalize: normalizeStr,
@@ -3388,17 +3395,17 @@ export default function AppLayout() {
                <button onClick={handleLogout} className="text-red-400 hover:text-red-300 shrink-0">{L.logout}</button>
              </div>
              <span className="text-[8px] text-emerald-400">{L.accessLevel}: {currentUserLevel}</span>
-             {allowedClinics.length > 1 && (
-               <span className="text-[8px] text-blue-300">{L.clinics}: {allowedClinics.map((c) => getClinicShortLabel(c)).join(' · ')}</span>
+             {visibleClinics.length > 1 && (
+               <span className="text-[8px] text-blue-300">{L.clinics}: {visibleClinics.map((c) => getClinicShortLabel(c)).join(' · ')}</span>
              )}
            </div>
         )}
 
-        {currentUser && allowedClinics.length > 1 && (
+        {currentUser && visibleClinics.length > 1 && (
         <div className="p-3 bg-slate-900 border-b border-slate-800">
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1.5 px-1">{L.activeLocation}</p>
           <div className="bg-slate-950 p-1 rounded-xl flex border border-slate-800 gap-0.5">
-            {[CLINIC_OXYGENDGL, CLINIC_OXYGENDGL2, CLINIC_SHENANDOAH].filter((c) => allowedClinics.includes(c)).map((clinicKey) => {
+            {visibleClinics.map((clinicKey) => {
               const theme = getClinicTheme(clinicKey);
               const meta = getClinicMeta(clinicKey);
               return (
@@ -3415,7 +3422,7 @@ export default function AppLayout() {
         </div>
         )}
 
-        {currentUser && allowedClinics.length === 1 && (
+        {currentUser && visibleClinics.length === 1 && (
         <div className="p-3 bg-slate-900 border-b border-slate-800">
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1.5 px-1">{L.location}</p>
           <div className="bg-slate-950 py-2 px-3 rounded-xl border border-slate-800 text-center text-[10px] font-black uppercase text-white leading-snug">
@@ -3482,9 +3489,9 @@ export default function AppLayout() {
         {currentUser && (
           <div className="lg:hidden shrink-0 bg-slate-950 text-white px-2 py-2 flex items-center gap-2 border-b border-slate-800 z-20 safe-area-top">
             <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" alt="Logo" className="h-8 w-8 object-contain bg-white rounded p-0.5 shrink-0" />
-            {allowedClinics.length > 1 ? (
+            {visibleClinics.length > 1 ? (
               <div className="flex bg-slate-900 p-0.5 rounded-lg border border-slate-700 shrink-0">
-                {[CLINIC_OXYGENDGL, CLINIC_OXYGENDGL2, CLINIC_SHENANDOAH].filter((c) => allowedClinics.includes(c)).map((clinicKey) => {
+                {visibleClinics.map((clinicKey) => {
                   const theme = getClinicTheme(clinicKey);
                   const meta = getClinicMeta(clinicKey);
                   return (
@@ -4717,15 +4724,15 @@ export default function AppLayout() {
                     />
                     <span className="text-[10px] font-black text-indigo-900 uppercase leading-snug">
                       {locale === 'en'
-                        ? 'Only first sessions (new patient or first time on this equipment)'
-                        : 'Solo primeras citas (paciente nuevo o primera vez en este equipo)'}
+                        ? 'Only first sessions (new patient to the clinic)'
+                        : 'Solo primeras citas (paciente nuevo en la clínica)'}
                     </span>
                   </label>
                   <p className="text-[9px] font-bold text-indigo-700/80 mb-3 normal-case leading-snug">
                     {dbCompanyConfig.staff_alert_first_sessions_only === true
                       ? (locale === 'en'
-                        ? 'Unchecked above = all new appointments trigger alerts. With this on, returning patients on the same equipment are skipped.'
-                        : 'Sin el segundo check = aviso en todas las citas nuevas. Con este check = solo ⭐ o primera vez en ese equipo.')
+                        ? 'Unchecked above = all new appointments trigger alerts. With this on, only new patients (⭐) or first-ever visit at the clinic.'
+                        : 'Sin el segundo check = aviso en todas las citas nuevas. Con este check = solo ⭐ o primera visita del paciente en la clínica.')
                       : (locale === 'en'
                         ? 'Leave unchecked to alert on every new booking.'
                         : 'Déjalo sin marcar para avisar en cada cita nueva.')}

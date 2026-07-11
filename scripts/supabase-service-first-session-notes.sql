@@ -1,5 +1,5 @@
 -- Notas de primera sesión propias por equipo (override de las generales)
--- Se envían solo en la primera cita del paciente (nuevo en la clínica o en ese equipo).
+-- Se envían solo en la primera cita del paciente en la clínica (paciente nuevo).
 -- Ejecutar en Supabase GDL y TX según corresponda.
 
 ALTER TABLE services
