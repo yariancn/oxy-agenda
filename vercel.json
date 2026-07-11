@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/labsmobile-balance",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/appointment-confirmation",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

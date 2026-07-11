@@ -8,6 +8,28 @@ import {
   CALENDAR_PIXELS_PER_MINUTE,
 } from '../lib/calendarDisplay';
 import { translateCheckInStatus } from '../lib/i18n';
+import {
+  CONFIRMATION_STATUS,
+  confirmationStatusClass,
+  confirmationStatusLabel,
+} from '../lib/appointmentConfirmation';
+
+function ConfirmationBadge({ status, locale, compact }) {
+  if (!status || status === CONFIRMATION_STATUS.NONE) return null;
+  const label = confirmationStatusLabel(status, locale);
+  const icon = status === CONFIRMATION_STATUS.CONFIRMED ? '✅'
+    : status === CONFIRMATION_STATUS.DECLINED ? '❌'
+      : status === CONFIRMATION_STATUS.NO_RESPONSE ? '⚠️'
+        : '⏳';
+  return (
+    <span
+      title={label}
+      className={`text-[6px] font-black px-0.5 rounded border shrink-0 ${confirmationStatusClass(status)} ${compact ? '' : 'sm:text-[7px]'}`}
+    >
+      {icon}{compact ? '' : ` ${label}`}
+    </span>
+  );
+}
 
 function StatusBadge({ status, locale, compact }) {
   if (!status || status === 'Agendado') return null;
@@ -46,11 +68,13 @@ function FlagIcons({ app, ultra }) {
 function StackedIndicators({ app, locale, compact, ultra }) {
   const hasFlags = app.is_new_patient || app.outside_normal_hours || app.is_extended_block;
   const hasStatus = app.check_in_status && app.check_in_status !== 'Agendado';
-  if (!hasFlags && !hasStatus) return null;
+  const hasConfirmation = app.confirmation_status && app.confirmation_status !== CONFIRMATION_STATUS.NONE;
+  if (!hasFlags && !hasStatus && !hasConfirmation) return null;
 
   return (
     <div className={`flex items-center justify-center gap-0.5 flex-wrap ${ultra ? 'mt-0.5' : 'mt-0.5 w-full'}`}>
       <FlagIcons app={app} ultra={ultra} />
+      {hasConfirmation && <ConfirmationBadge status={app.confirmation_status} locale={locale} compact={compact || ultra} />}
       {compact && hasStatus && <StatusBadge status={app.check_in_status} locale={locale} compact />}
     </div>
   );
@@ -130,7 +154,12 @@ export default function CalendarAppointmentBlock({
             <span className={`font-black uppercase bg-black/10 px-0.5 rounded leading-none truncate min-w-0 flex-1 ${compact ? 'text-[6px]' : 'text-[7px]'}`}>
               {timeLabel}
             </span>
-            {!compact && <StatusBadge status={app.check_in_status} locale={locale} compact={false} />}
+            {!compact && (
+              <div className="flex items-center gap-0.5 shrink-0">
+                <ConfirmationBadge status={app.confirmation_status} locale={locale} compact />
+                <StatusBadge status={app.check_in_status} locale={locale} compact={false} />
+              </div>
+            )}
           </div>
 
           {compact ? (

@@ -149,6 +149,11 @@ import {
 } from '../lib/staffBookingAlert';
 import { broadcastLiveDataUpdated } from '../lib/liveSyncBroadcast';
 import { useLiveSyncPoll } from '../lib/useLiveSyncPoll';
+import {
+  CONFIRMATION_STATUS,
+  confirmationStatusClass,
+  confirmationStatusLabel,
+} from '../lib/appointmentConfirmation';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -180,6 +185,8 @@ export default function AppLayout() {
   const [zoomScale, setZoomScale] = useState(80);
   const [zoomManual, setZoomManual] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [liveSyncAt, setLiveSyncAt] = useState(null);
+  const [, setLiveSyncTick] = useState(0);
   const [weekFilterHintDismissed, setWeekFilterHintDismissed] = useState(false);
   const [showCalendarLegend, setShowCalendarLegend] = useState(false);
   const [showSymbolLegend, setShowSymbolLegend] = useState(false);
@@ -1055,6 +1062,7 @@ export default function AppLayout() {
 
   const syncCalendarLive = useCallback(async () => {
     await fetchAllDataRef.current({ silent: true, liveOnly: true });
+    setLiveSyncAt(Date.now());
   }, []);
 
   const notifyCalendarChanged = useCallback(async () => {
@@ -1068,6 +1076,32 @@ export default function AppLayout() {
     endpoint: '/api/staff/live-sync',
     onChange: syncCalendarLive,
   });
+
+  useEffect(() => {
+    const id = window.setInterval(() => setLiveSyncTick((n) => n + 1), 5000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedSlot?.id) return;
+    const fresh = dbAppointments.find((a) => a.id === selectedSlot.id);
+    if (!fresh) return;
+    setSelectedSlot((prev) => {
+      if (!prev || prev.id !== fresh.id) return prev;
+      return {
+        ...prev,
+        ...fresh,
+        ...appointmentFlagsFromApp(fresh),
+        patientId: prev.patientId,
+        wallets: prev.wallets,
+        adeudo: prev.adeudo,
+        packageHistory: prev.packageHistory,
+        sessionGroup: prev.sessionGroup,
+        groupMembers: prev.groupMembers,
+        patientNotes: prev.patientNotes ?? prev.notes,
+      };
+    });
+  }, [dbAppointments, selectedSlot?.id]);
 
   const dbErrorHint = useMemo(() => {
     if (!dbErrorMessage) return L.dbErrorHint;
@@ -1300,6 +1334,7 @@ export default function AppLayout() {
   const CALENDAR_HEIGHT = (calendarEndMins - calendarStartMins) * PIXELS_PER_MINUTE;
   const currentColWidth = (160 * zoomScale) / 100;
   const isCompact = isCompactColumn(currentColWidth);
+  const fitAllEquipOnScreen = isMobileViewport && viewMode === 'Día';
 
   const timeToPixels = (timeStr) => {
     return (getMinutes(timeStr) - calendarStartMins) * PIXELS_PER_MINUTE;
@@ -3477,7 +3512,9 @@ export default function AppLayout() {
                   <button onClick={() => navigateDate(-1)} className="p-1.5 hover:bg-white rounded-lg transition text-slate-600 text-sm" aria-label={L.scrollLeft}>◀</button>
                   <div className="px-2 sm:px-3 flex items-center justify-center min-w-0">
                     <span className="text-[10px] sm:text-xs font-bold text-slate-800 truncate max-w-[9rem] sm:max-w-none">
-                      {viewMode === 'Día' ? currentDayInfo.date : `${weekDays[0].date} – ${weekDays[6].date}`}
+                      {viewMode === 'Día'
+                        ? `${currentDayInfo.name} · ${currentDayInfo.date}`
+                        : `${weekDays[0].name} ${weekDays[0].date} – ${weekDays[6].name} ${weekDays[6].date}`}
                     </span>
                   </div>
                   <button onClick={() => navigateDate(1)} className="p-1.5 hover:bg-white rounded-lg transition text-slate-600 text-sm" aria-label={L.scrollRight}>▶</button>
@@ -3504,6 +3541,16 @@ export default function AppLayout() {
                 </span>
                 <span className="lg:hidden text-[9px] font-bold text-slate-500 shrink-0" title={`${L.agendaSummaryToday}: ${agendaSummary.today} · ${L.agendaSummaryView}: ${agendaSummary.view}`}>
                   {agendaSummary.today}/{agendaSummary.view}
+                </span>
+                <span
+                  className={`text-[8px] font-black uppercase shrink-0 px-1.5 py-0.5 rounded border ${
+                    liveSyncAt && Date.now() - liveSyncAt < 20000
+                      ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                      : 'text-slate-400 bg-slate-50 border-slate-200'
+                  }`}
+                  title={locale === 'en' ? 'Calendar refreshes every 5 seconds when this tab is open' : 'El calendario se actualiza cada 5 s con esta pestaña abierta'}
+                >
+                  {liveSyncAt && Date.now() - liveSyncAt < 20000 ? '● Live 5s' : '○ Sync'}
                 </span>
                 <div className="flex-1 min-w-[0.5rem]" />
                 {currentUserLevel <= 2 && (
@@ -3596,8 +3643,8 @@ export default function AppLayout() {
             </header>
 
             {/* --- CONTENEDOR DEL CALENDARIO: SCROLL UNIFICADO (CIRUGÍA CSS) --- */}
-            <div ref={calendarScrollRef} className="calendar-h-scroll flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0 scroll-pb-16" style={{ scrollPaddingBottom: '4rem' }}>
-              <div className="flex min-w-max pb-16">
+            <div ref={calendarScrollRef} className={`calendar-h-scroll flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0 scroll-pb-16 ${fitAllEquipOnScreen ? 'overflow-x-hidden' : ''}`} style={{ scrollPaddingBottom: '4rem' }}>
+              <div className={`flex pb-16 ${fitAllEquipOnScreen ? 'w-full min-w-0' : 'min-w-max'}`}>
                 
                 <div className="w-16 md:w-20 shrink-0 border-r border-slate-200 bg-slate-50 sticky left-0 z-50" data-cal-time-col>
                   <div
@@ -3631,14 +3678,21 @@ export default function AppLayout() {
                           label={assessmentService}
                         />
                       )}
-                      <div className="flex min-w-full">
+                      <div className={`flex min-w-full ${fitAllEquipOnScreen ? 'w-full' : ''}`}>
                       {displayedEquipments.map((eqName) => {
                         const srvColor = dbServices.find(s => s.name === eqName)?.color || 'blue';
+                        const equipColStyle = fitAllEquipOnScreen
+                          ? { flex: '1 1 0%', minWidth: 0 }
+                          : { minWidth: `${currentColWidth}px`, flex: `0 0 ${currentColWidth}px` };
+                        const blockColWidth = fitAllEquipOnScreen
+                          ? Math.max(48, Math.floor(320 / Math.max(1, displayedEquipments.length)))
+                          : currentColWidth;
                         return (
-                        <div key={eqName} className={`flex-1 border-r border-slate-300 last:border-r-0 ${getEquipmentBgColor(srvColor)}`} style={{ minWidth: `${currentColWidth * 2}px` }}>
+                        <div key={eqName} className={`border-r border-slate-300 last:border-r-0 min-w-0 ${getEquipmentBgColor(srvColor)}`} style={equipColStyle}>
                           <div className={`h-12 border-b border-slate-200 flex flex-col items-center justify-center sticky top-0 z-40 ${getEquipmentHeaderColor(srvColor)}`}>
-                            <span className="text-[10px] font-black uppercase leading-none">{eqName}</span>
-                            <span className="text-[11px] font-bold opacity-80">{currentDayInfo.date}</span>
+                            <span className="text-[8px] font-black uppercase leading-none text-slate-500">{currentDayInfo.name}</span>
+                            <span className="text-[9px] sm:text-[10px] font-black uppercase leading-none truncate max-w-full px-0.5">{eqName}</span>
+                            <span className="text-[8px] font-bold opacity-80">{currentDayInfo.date}</span>
                           </div>
                           <div className="relative w-full" style={{ height: `${CALENDAR_HEIGHT}px` }}>
                             
@@ -3665,7 +3719,7 @@ export default function AppLayout() {
                               <CalendarAppointmentBlock
                                 key={app.id}
                                 app={app}
-                                colWidth={currentColWidth * 2}
+                                colWidth={blockColWidth}
                                 locale={locale}
                                 L={L}
                                 isSelected={selectedSlot?.id === app.id}
@@ -4443,6 +4497,39 @@ export default function AppLayout() {
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Horas previas (recordatorio automático por correo — próximamente)</label>
                     <input type="number" value={dbCompanyConfig.reminder_hours} onChange={e => setDbCompanyConfig({ ...dbCompanyConfig, reminder_hours: Number(e.target.value) })} className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm" />
                   </div>
+                  {isShenandoah(activeClinic) && (
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
+                      <p className="text-[10px] font-black uppercase text-blue-900">
+                        {locale === 'en' ? 'First-session SMS confirmation (Houston)' : 'Confirmación SMS primera sesión (Houston)'}
+                      </p>
+                      <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-blue-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={dbCompanyConfig.confirmation_sms_enabled === true}
+                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_sms_enabled: e.target.checked })}
+                          className="w-4 h-4"
+                        />
+                        <span className="text-[10px] font-black uppercase text-blue-900">
+                          {locale === 'en' ? 'Send YES/NO request 6h before first sessions' : 'Enviar SI/NO 6 h antes de primeras sesiones'}
+                        </span>
+                      </label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[9px] font-black text-blue-800 uppercase">{locale === 'en' ? 'Hours before' : 'Horas antes'}</label>
+                          <input type="number" min="1" max="24" value={dbCompanyConfig.confirmation_hours_before ?? 6} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_hours_before: Number(e.target.value) })} className="w-full p-2 border border-blue-200 rounded-lg font-bold text-sm bg-white" />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-black text-blue-800 uppercase">{locale === 'en' ? 'No-reply alert (hours)' : 'Alerta sin respuesta (h)'}</label>
+                          <input type="number" min="1" max="6" value={dbCompanyConfig.confirmation_no_reply_hours ?? 1} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_no_reply_hours: Number(e.target.value) })} className="w-full p-2 border border-blue-200 rounded-lg font-bold text-sm bg-white" />
+                        </div>
+                      </div>
+                      <p className="text-[9px] font-bold text-blue-800/90 normal-case leading-snug">
+                        {locale === 'en'
+                          ? 'Twilio webhook: POST /api/twilio/inbound-sms on your Messaging Service. Reception sees Confirmed / Declined / Likely no-show on the calendar.'
+                          : 'Webhook Twilio: POST /api/twilio/inbound-sms en el Messaging Service. Recepción ve Confirmada / Declinó / Probable falta en el calendario.'}
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <h4 className="text-xs font-black uppercase text-emerald-900 mb-2">Contenido por tipo de aviso</h4>
@@ -5764,6 +5851,30 @@ export default function AppLayout() {
                     <p className="text-[9px] font-bold text-amber-700 uppercase bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
                       ⚠️ {L.p.appt.noBalanceBitacora}
                     </p>
+                  )}
+                  {isShenandoah(activeClinic) && selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE && (
+                    <div className={`rounded-xl border p-3 space-y-1 ${confirmationStatusClass(selectedSlot.confirmation_status)}`}>
+                      <p className="text-[10px] font-black uppercase">
+                        {locale === 'en' ? 'SMS confirmation' : 'Confirmación SMS'}
+                        {' · '}
+                        {confirmationStatusLabel(selectedSlot.confirmation_status, locale)}
+                      </p>
+                      {selectedSlot.confirmation_reply && (
+                        <p className="text-xs font-bold normal-case">
+                          {locale === 'en' ? 'Reply:' : 'Respuesta:'} &quot;{selectedSlot.confirmation_reply}&quot;
+                          {selectedSlot.confirmation_replied_at && (
+                            <span className="text-[10px] font-bold opacity-80 block mt-0.5">
+                              {new Date(selectedSlot.confirmation_replied_at).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX')}
+                            </span>
+                          )}
+                        </p>
+                      )}
+                      {selectedSlot.confirmation_sent_at && (
+                        <p className="text-[9px] font-bold opacity-80 normal-case">
+                          {locale === 'en' ? 'Sent' : 'Enviado'}: {new Date(selectedSlot.confirmation_sent_at).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX')}
+                        </p>
+                      )}
+                    </div>
                   )}
               </div>
 
