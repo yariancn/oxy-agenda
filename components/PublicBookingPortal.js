@@ -292,6 +292,7 @@ export default function PublicBookingPortal({
 
       if (dbConfig?.notify_staff_on_booking === true) {
         try {
+          const isFirstSession = notifyType === 'first';
           await notifyStaffNewBooking({
             companyConfig: dbConfig,
             clinicName,
@@ -303,6 +304,7 @@ export default function PublicBookingPortal({
             locale,
             source: activePromoter.code ? 'promoter' : 'public',
             promoterCode: activePromoter.code || '',
+            isFirstSession,
           });
         } catch (staffErr) {
           console.warn('Staff alert failed', staffErr);

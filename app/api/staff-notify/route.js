@@ -27,6 +27,7 @@ export async function POST(request) {
       locale = 'es',
       source = 'public',
       promoterCode = '',
+      isFirstSession = false,
     } = body;
 
     if (!patientName || !date || !time) {
@@ -49,6 +50,7 @@ export async function POST(request) {
       locale,
       source,
       promoterCode,
+      isFirstSession,
     });
 
     return NextResponse.json({ success: true, ...result });

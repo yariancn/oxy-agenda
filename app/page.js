@@ -133,6 +133,7 @@ import {
   EMAIL_PLACEHOLDER_HINT,
   emptyEmailTemplateState,
   resolveEffectiveNotifyType,
+  isFirstSessionAppointment,
 } from '../lib/emailTemplates';
 import {
   defaultNotifySettings,
@@ -347,10 +348,18 @@ export default function AppLayout() {
     return picked;
   };
 
-  const alertStaffNewBooking = async (slot, { source = 'staff', promoterCode = '' } = {}) => {
+  const alertStaffNewBooking = async (slot, { source = 'staff', promoterCode = '', isFirstSession } = {}) => {
     if (dbCompanyConfig.notify_staff_on_booking !== true) {
       return { skipped: true, reason: 'disabled' };
     }
+    const firstSession = isFirstSession ?? isFirstSessionAppointment({
+      isNewPatient: slot.is_new_patient,
+      patientName: slot.patient,
+      equipment: slot.equipment,
+      appointments: dbAppointments,
+      excludeAppointmentId: slot.id,
+      normalize: normalizeStr,
+    });
     try {
       return await notifyStaffNewBooking({
         companyConfig: { ...pickStaffAlertSettings(), notify_staff_on_booking: true },
@@ -364,6 +373,7 @@ export default function AppLayout() {
         locale,
         source,
         promoterCode,
+        isFirstSession: firstSession,
       });
     } catch (error) {
       console.warn('Staff booking alert failed', error);
@@ -983,6 +993,7 @@ export default function AppLayout() {
           notify_channel_sms: resC.data.notify_channel_sms !== false,
           notify_on_booking: resC.data.notify_on_booking !== false,
           notify_staff_on_booking: resC.data.notify_staff_on_booking === true,
+          staff_alert_first_sessions_only: resC.data.staff_alert_first_sessions_only === true,
           staff_alert_phones: resC.data.staff_alert_phones || '',
           staff_alert_emails: resC.data.staff_alert_emails || '',
           start_time: normalizeTimeInput(resC.data.start_time) || '07:00',
@@ -3107,7 +3118,15 @@ export default function AppLayout() {
           fullDate: firstCreated.full_date || apptDate,
           phone: canonicalPhone,
           email: canonicalEmail,
-        }, { source: 'staff' });
+          is_new_patient: isNewForAppointment,
+        }, { source: 'staff', isFirstSession: isNewForAppointment || isFirstSessionAppointment({
+          isNewPatient: isNewForAppointment,
+          patientName: selectedSlot.patient,
+          equipment: selectedSlot.equipment,
+          appointments: dbAppointments,
+          excludeAppointmentId: firstCreated.id,
+          normalize: normalizeStr,
+        }) });
         notifySummary = formatBookingNotifyFeedback({
           patientResult: patientNotifyResult,
           staffResult: staffNotifyResult,
@@ -4688,6 +4707,29 @@ export default function AppLayout() {
                     />
                     <span className="text-[10px] font-black text-indigo-900 uppercase">Avisar al equipo cuando hay cita nueva</span>
                   </label>
+                  <label className={`flex items-start gap-2 bg-white p-3 rounded-lg border border-indigo-200 shadow-sm cursor-pointer mb-3 ${dbCompanyConfig.notify_staff_on_booking !== true ? 'opacity-50' : ''}`}>
+                    <input
+                      type="checkbox"
+                      disabled={dbCompanyConfig.notify_staff_on_booking !== true}
+                      checked={dbCompanyConfig.staff_alert_first_sessions_only === true}
+                      onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, staff_alert_first_sessions_only: e.target.checked })}
+                      className="w-4 h-4 mt-0.5 shrink-0"
+                    />
+                    <span className="text-[10px] font-black text-indigo-900 uppercase leading-snug">
+                      {locale === 'en'
+                        ? 'Only first sessions (new patient or first time on this equipment)'
+                        : 'Solo primeras citas (paciente nuevo o primera vez en este equipo)'}
+                    </span>
+                  </label>
+                  <p className="text-[9px] font-bold text-indigo-700/80 mb-3 normal-case leading-snug">
+                    {dbCompanyConfig.staff_alert_first_sessions_only === true
+                      ? (locale === 'en'
+                        ? 'Unchecked above = all new appointments trigger alerts. With this on, returning patients on the same equipment are skipped.'
+                        : 'Sin el segundo check = aviso en todas las citas nuevas. Con este check = solo ⭐ o primera vez en ese equipo.')
+                      : (locale === 'en'
+                        ? 'Leave unchecked to alert on every new booking.'
+                        : 'Déjalo sin marcar para avisar en cada cita nueva.')}
+                  </p>
                   <div className="space-y-3">
                     <div>
                       <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">

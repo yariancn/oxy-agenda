@@ -190,6 +190,7 @@ export async function POST(request) {
         locale,
         source: 'staff',
         promoterCode: '',
+        isFirstSession: true,
       });
     }
 
