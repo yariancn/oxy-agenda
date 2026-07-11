@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { refreshStaffSessionUser } from '../../../../lib/resolveStaffLoginServer.js';
+import { normalizeStaffSessionUser } from '../../../../lib/clinicAccess.js';
 import {
   createStaffSessionToken,
   readStaffSessionFromRequest,
@@ -15,6 +16,7 @@ export async function GET(request) {
 
   try {
     user = await refreshStaffSessionUser(user);
+    user = normalizeStaffSessionUser(user, { roleLevel: user?.accessLevel });
   } catch {
     /* keep existing session */
   }

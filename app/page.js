@@ -7,6 +7,7 @@ import {
   getAllowedClinics,
   getStaffProfileForClinic,
   normalizeStaffSessionUser,
+  resolveStaffRoleLevel,
   CLINIC_OXYGENDGL,
   CLINIC_OXYGENDGL2,
   CLINIC_SHENANDOAH,
@@ -500,14 +501,13 @@ export default function AppLayout() {
 
   const activeStaffProfile = getStaffProfileForClinic(currentUser, activeClinic) || currentUser;
 
-  // CÁLCULO DE JERARQUÍA (rol puede variar por clínica)
-  const currentUserLevel = currentUser?.id === 'admin'
-    ? 1
-    : (dbRoles.find(r => r.name === activeStaffProfile?.role)?.level
-      ?? Number(currentUser?.accessLevel)
-      ?? 3);
+  const currentUserLevel = resolveStaffRoleLevel(currentUser, dbRoles, activeClinic);
 
-  const allowedClinics = getAllowedClinics(currentUser, { roleLevel: currentUserLevel });
+  const allowedClinics = getAllowedClinics(currentUser, {
+    roleLevel: currentUserLevel,
+    dbRoles,
+    activeClinic,
+  });
   const visibleClinics = useMemo(
     () => CLINIC_SELECTOR_ORDER.filter((clinicKey) => allowedClinics.includes(clinicKey)),
     [allowedClinics],
@@ -1141,7 +1141,7 @@ export default function AppLayout() {
         if (cancelled) return;
 
         if (meData?.user) {
-          const user = normalizeStaffSessionUser(meData.user);
+          const user = normalizeStaffSessionUser(meData.user, { roleLevel: meData.user?.accessLevel });
           setCurrentUser(user);
           setActiveClinic(resolveStaffActiveClinic(user));
           return;
@@ -1190,11 +1190,23 @@ export default function AppLayout() {
 
   useEffect(() => {
     if (!currentUser) return;
-    const allowed = getAllowedClinics(currentUser);
+    const level = resolveStaffRoleLevel(currentUser, dbRoles, activeClinic);
+    const allowed = getAllowedClinics(currentUser, { roleLevel: level, dbRoles, activeClinic });
     if (allowed.length && !allowed.includes(activeClinic)) {
       setActiveClinic(allowed[0]);
     }
-  }, [currentUser, activeClinic]);
+  }, [currentUser, activeClinic, dbRoles]);
+
+  useEffect(() => {
+    if (!currentUser || currentUser.id === 'admin' || !dbRoles.length) return;
+    const level = resolveStaffRoleLevel(currentUser, dbRoles, activeClinic);
+    const expanded = normalizeStaffSessionUser(currentUser, { roleLevel: level });
+    const prev = (currentUser.allowedClinics || []).join('|');
+    const next = (expanded?.allowedClinics || []).join('|');
+    if (expanded && prev !== next) {
+      setCurrentUser(expanded);
+    }
+  }, [currentUser, dbRoles, activeClinic]);
 
   // --- MOTORES DE ACCESO Y SEGURIDAD ---
   const handleForgetDevice = async () => {
@@ -1241,8 +1253,8 @@ export default function AppLayout() {
         setLoginPin('');
         return;
       }
-      setCurrentUser(normalizeStaffSessionUser(result.user));
-      setActiveClinic(resolveStaffActiveClinic(normalizeStaffSessionUser(result.user)));
+      setCurrentUser(normalizeStaffSessionUser(result.user, { roleLevel: result.user?.accessLevel }));
+      setActiveClinic(resolveStaffActiveClinic(normalizeStaffSessionUser(result.user, { roleLevel: result.user?.accessLevel })));
       setLoginPin('');
     } catch {
       alert(staffAlert(locale, 'loginFailed'));
@@ -1253,7 +1265,11 @@ export default function AppLayout() {
   };
 
   const switchClinic = (clinic) => {
-    if (!canAccessClinic(currentUser, clinic)) {
+    if (!canAccessClinic(currentUser, clinic, {
+      roleLevel: currentUserLevel,
+      dbRoles,
+      activeClinic,
+    })) {
       alert(staffAlert(locale, 'noClinicAccess'));
       return;
     }
