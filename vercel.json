@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/appointment-confirmation",
-      "schedule": "*/10 * * * *"
+      "schedule": "0 16 * * *"
     }
   ]
 }
