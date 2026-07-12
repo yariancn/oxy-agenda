@@ -32,6 +32,11 @@ import {
   parseVisionJsonContent,
   parseWeekdayDayFromText,
 } from '../lib/screenshotAppointmentParse.js';
+import {
+  defaultEquipmentForClinic,
+  extractEquipmentFromText,
+  resolveScreenshotEquipment,
+} from '../lib/screenshotEquipment.js';
 import { getAllowedClinics, normalizeStaffSessionUser } from '../lib/clinicAccess.js';
 
 let passed = 0;
@@ -210,6 +215,7 @@ test('captura WhatsApp: mañana y teléfono MX', () => {
     phone: '3312345678',
     date: 'mañana',
     time: '10:30 am',
+    equipment: 'CAMARA 2 60 MIN',
     confidence: 'high',
   }, { referenceDate: '2026-07-09', locale: 'es' });
   assert.equal(parsed.patient, 'Juan Pérez');
@@ -242,6 +248,50 @@ Martes 14
 
 test('OCR: martes 14 resuelve día del mes', () => {
   assert.equal(parseWeekdayDayFromText('cita martes 14 por favor', '2026-07-09'), '2026-07-14');
+});
+
+const gdlServices = [
+  { name: 'CAMARA 1, 60 MIN', is_active: true },
+  { name: 'CAMARA 2 60 MIN', is_active: true },
+  { name: 'CAMARA 3 60 MIN', is_active: true },
+];
+
+test('captura: default GDL → cámara 2', () => {
+  assert.equal(defaultEquipmentForClinic(CLINIC_OXYGENDGL, gdlServices), 'CAMARA 2 60 MIN');
+});
+
+test('captura: default Houston → cámara 1', () => {
+  const txServices = [
+    { name: 'Chamber 1 - 60 min', is_active: true },
+    { name: 'Chamber 2 - 60 min', is_active: true },
+  ];
+  assert.equal(defaultEquipmentForClinic(CLINIC_SHENANDOAH, txServices), 'Chamber 1 - 60 min');
+});
+
+test('captura: OCR con cámara 3 gana sobre default', () => {
+  const eq = resolveScreenshotEquipment({
+    clinic: CLINIC_OXYGENDGL,
+    services: gdlServices,
+    ocrText: 'cita camara 3 el martes',
+  });
+  assert.equal(eq, 'CAMARA 3 60 MIN');
+});
+
+test('captura: OCR sin cámara usa default de clínica', () => {
+  const ex = parseAppointmentFromOcrText('Elizabeth Gonzalez martes 14 4:30', {
+    referenceDate: '2026-07-09',
+    locale: 'es',
+    clinic: CLINIC_OXYGENDGL,
+    services: gdlServices,
+  });
+  assert.equal(ex.equipment, 'CAMARA 2 60 MIN');
+});
+
+test('captura: extrae cámara del texto', () => {
+  assert.equal(
+    extractEquipmentFromText('quiero camara 1 por favor', gdlServices),
+    'CAMARA 1, 60 MIN',
+  );
 });
 
 console.log(`\n${passed} pruebas OK\n`);

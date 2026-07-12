@@ -11,6 +11,7 @@ export default function ScreenshotAppointmentModal({
   locale,
   labels,
   services = [],
+  activeClinic = '',
   defaultEquipment = '',
   referenceDate = '',
   onSchedule,
@@ -99,19 +100,23 @@ export default function ScreenshotAppointmentModal({
         },
       });
 
-      const ex = parseAppointmentFromOcrText(text, { referenceDate, locale });
+      const ex = parseAppointmentFromOcrText(text, {
+        referenceDate,
+        locale,
+        clinic: activeClinic,
+        services,
+      });
       if (!ex.patient && !ex.fullDate && !ex.time) {
         throw new Error(t.analyzeError);
       }
 
-      const firstSrv = services.find((s) => s.is_active) || services[0];
       setForm({
         patient: ex.patient || '',
         phone: ex.phone || '',
         email: ex.email || '',
         fullDate: ex.fullDate || '',
         time: ex.time || '',
-        equipment: defaultEquipment || firstSrv?.name || '',
+        equipment: ex.equipment || defaultEquipment,
         notes: ex.notes || '',
         confidence: ex.confidence || 'medium',
         aiSummary: ex.aiSummary || '',
@@ -205,6 +210,17 @@ export default function ScreenshotAppointmentModal({
                 </p>
               </div>
               <div>
+                <label className="text-[10px] font-black uppercase text-slate-500">{t.equipment}</label>
+                <select value={form.equipment} onChange={(e) => setForm((p) => ({ ...p, equipment: e.target.value }))} className="w-full p-2.5 border rounded-xl font-bold text-sm mt-1 uppercase">
+                  {!form.equipment || services.some((s) => s.is_active !== false && s.name === form.equipment) ? null : (
+                    <option value={form.equipment}>{form.equipment}</option>
+                  )}
+                  {services.filter((s) => s.is_active !== false).map((s) => (
+                    <option key={s.id} value={s.name}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <label className="text-[10px] font-black uppercase text-slate-500">{t.patient}</label>
                 <input type="text" value={form.patient} onChange={(e) => setForm((p) => ({ ...p, patient: e.target.value }))} className="w-full p-2.5 border rounded-xl font-bold text-sm mt-1" />
               </div>
@@ -221,14 +237,6 @@ export default function ScreenshotAppointmentModal({
               <div>
                 <label className="text-[10px] font-black uppercase text-slate-500">{t.phone}</label>
                 <input type="tel" value={form.phone} onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))} className="w-full p-2.5 border rounded-xl font-bold text-sm mt-1" />
-              </div>
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500">{t.equipment}</label>
-                <select value={form.equipment} onChange={(e) => setForm((p) => ({ ...p, equipment: e.target.value }))} className="w-full p-2.5 border rounded-xl font-bold text-sm mt-1 uppercase">
-                  {services.filter((s) => s.is_active).map((s) => (
-                    <option key={s.id} value={s.name}>{s.name}</option>
-                  ))}
-                </select>
               </div>
               <div>
                 <label className="text-[10px] font-black uppercase text-slate-500">{t.notes}</label>

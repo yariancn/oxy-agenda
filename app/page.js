@@ -106,6 +106,7 @@ import {
   CALENDAR_PIXELS_PER_MINUTE,
 } from '../lib/calendarDisplay';
 import { getWeekScrollLeftForToday } from '../lib/calendarScroll';
+import { defaultEquipmentForClinic } from '../lib/screenshotEquipment';
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
 import { formatClinicDateIso, getClinicNow } from '../lib/clinicClock';
 import {
@@ -2047,6 +2048,11 @@ export default function AppLayout() {
     equipment: L.p.appt.equipment,
     notes: L.p.appt.noteToday,
   }), [L]);
+
+  const screenshotDefaultEquipment = useMemo(
+    () => defaultEquipmentForClinic(activeClinic, dbServices),
+    [activeClinic, dbServices],
+  );
 
   useEffect(() => {
     if (!showNewAppointment || !repeatBooking.enabled) return;
@@ -7015,7 +7021,7 @@ export default function AppLayout() {
           labels={screenshotIntakeLabels}
           activeClinic={activeClinic}
           services={dbServices}
-          defaultEquipment={dbServices.find((s) => s.is_active)?.name || ''}
+          defaultEquipment={screenshotDefaultEquipment}
           referenceDate={clinicNow.dateStr || currentFullDate}
           onSchedule={async (form) => {
             const draft = buildDraftFromScreenshot(form);
