@@ -3591,7 +3591,7 @@ export default function AppLayout() {
             onClick={() => setShowScreenshotIntake(true)}
             className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-2.5 rounded-xl flex items-center justify-center gap-2 shadow transition uppercase text-[10px]"
           >
-            {L.p.appt.screenshotFromCapture}
+            {L.p.appt.screenshotFromCapture.replace(/^📷\s*/, '📷 ')}
           </button>
         </div>
 
@@ -3672,6 +3672,14 @@ export default function AppLayout() {
             <span className="flex-1 truncate text-[10px] font-bold text-slate-200 min-w-0">{currentUser.name}</span>
             <button type="button" onClick={() => setShowSymbolLegend(true)} className="shrink-0 h-8 w-8 rounded-lg border border-slate-700 text-sm leading-none" aria-label={L.symbolLegendBtn}>ℹ️</button>
             <button onClick={() => openNewAppointment()} className="shrink-0 h-8 w-8 bg-emerald-600 rounded-lg text-white font-black text-lg leading-none shadow" aria-label={L.ariaNewAppt}>+</button>
+            <button
+              type="button"
+              onClick={() => setShowScreenshotIntake(true)}
+              className="shrink-0 h-8 w-8 bg-indigo-600 rounded-lg text-white text-base leading-none shadow"
+              aria-label={L.ariaScreenshotCapture}
+            >
+              📷
+            </button>
             <button onClick={handleLogout} className="shrink-0 text-[9px] font-black text-red-400 uppercase px-1">{L.logout}</button>
           </div>
         )}
@@ -7047,6 +7055,18 @@ export default function AppLayout() {
                   <span className="text-[8px] font-black uppercase truncate max-w-full">{tab.label}</span>
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMoreOpen(false);
+                  setShowScreenshotIntake(true);
+                }}
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-w-0 px-1 ${showScreenshotIntake ? 'text-indigo-400' : 'text-slate-500'}`}
+                aria-label={L.ariaScreenshotCapture}
+              >
+                <span className="text-base leading-none">📷</span>
+                <span className="text-[8px] font-black uppercase truncate max-w-full">{L.mobileTabs.Captura}</span>
+              </button>
               {mobileAdminTabs.length > 0 && (
                 <button
                   onClick={() => setMobileMoreOpen(v => !v)}
