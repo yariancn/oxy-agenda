@@ -24,6 +24,13 @@ import {
   isClinicEnabled,
   isPublicClinic,
 } from '../lib/clinicRegistry.js';
+import {
+  normalizeAppointmentDate,
+  normalizeAppointmentTime,
+  normalizeScreenshotExtraction,
+  normalizeScreenshotPhone,
+  parseVisionJsonContent,
+} from '../lib/screenshotAppointmentParse.js';
 import { getAllowedClinics, normalizeStaffSessionUser } from '../lib/clinicAccess.js';
 
 let passed = 0;
@@ -188,6 +195,33 @@ test('bitácora: no confundir id de cita con id de paciente', () => {
   const correct = resolvePatientForAppointment(selectedSlot, dbPatients);
   assert.equal(wrongLookup, undefined);
   assert.equal(correct?.id, 'p1');
+});
+
+test('captura WhatsApp: normaliza fecha DD/MM y hora 24h', () => {
+  assert.equal(normalizeAppointmentDate('15/07/2026', '2026-07-09'), '2026-07-15');
+  assert.equal(normalizeAppointmentTime('14:30'), '02:30 PM');
+  assert.equal(normalizeAppointmentTime('9:00 AM'), '09:00 AM');
+});
+
+test('captura WhatsApp: mañana y teléfono MX', () => {
+  const parsed = normalizeScreenshotExtraction({
+    patient: 'Juan Pérez',
+    phone: '3312345678',
+    date: 'mañana',
+    time: '10:30 am',
+    confidence: 'high',
+  }, { referenceDate: '2026-07-09', locale: 'es' });
+  assert.equal(parsed.patient, 'Juan Pérez');
+  assert.equal(parsed.fullDate, '2026-07-10');
+  assert.equal(parsed.time, '10:30 AM');
+  assert.ok(parsed.phone.includes('3312345678'));
+  assert.equal(parsed.ready, true);
+});
+
+test('captura: JSON de visión se parsea con markdown', () => {
+  const raw = parseVisionJsonContent('```json\n{"patient":"Ana","time":"11:00 AM"}\n```');
+  assert.equal(raw.patient, 'Ana');
+  assert.equal(raw.time, '11:00 AM');
 });
 
 console.log(`\n${passed} pruebas OK\n`);

@@ -45,6 +45,7 @@ import PatientProfileModal from '../components/PatientProfileModal';
 import PatientSessionHistory from '../components/PatientSessionHistory';
 import AppointmentSavingOverlay from '../components/AppointmentSavingOverlay';
 import StaffSaveToast from '../components/StaffSaveToast';
+import ScreenshotAppointmentModal from '../components/ScreenshotAppointmentModal';
 import RepeatDatesCalendar from '../components/RepeatDatesCalendar';
 import GFEManager from '../components/GFEManager';
 import { InstallGuideLink } from '../components/InstallGuide';
@@ -226,6 +227,7 @@ export default function AppLayout() {
   const [showBitacora, setShowBitacora] = useState(false);
   const [showPatientProfile, setShowPatientProfile] = useState(false);
   const [showNewAppointment, setShowNewAppointment] = useState(false);
+  const [showScreenshotIntake, setShowScreenshotIntake] = useState(false);
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
   const [appointmentSaveFeedback, setAppointmentSaveFeedback] = useState(null);
   const [saveToast, setSaveToast] = useState('');
@@ -1983,6 +1985,68 @@ export default function AppLayout() {
     setShowNewAppointment(true);
   };
 
+  const buildDraftFromScreenshot = (form) => {
+    const srv = dbServices.find((s) => s.name === form.equipment && s.is_active)
+      || dbServices.find((s) => s.is_active);
+    const duration = Number(srv?.duration) || 60;
+    const buffer = Number(srv?.buffer ?? 30);
+    const exact = dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(form.patient));
+    const fullDate = form.fullDate;
+    return {
+      ...createEmptyAppointmentDraft(),
+      patient: String(form.patient || '').trim(),
+      patientId: exact?.id || null,
+      phone: form.phone || '',
+      email: form.email || exact?.email || '',
+      protocol: exact?.protocol || 'Wellness',
+      patientNotes: exact?.notes || '',
+      fullDate,
+      full_date: fullDate,
+      day: getDayNameFromDate(locale, new Date(`${fullDate}T12:00:00`)),
+      time: form.time,
+      notes: form.notes || '',
+      equipment: form.equipment || srv?.name || '',
+      serviceId: srv?.id ?? '',
+      duration,
+      buffer,
+      sessionPreset: getPresetFromTimes(duration, buffer).id,
+      is_new_patient: !exact,
+      prefers_email: exact ? exact.prefers_email !== false : true,
+      prefers_sms: exact ? exact.prefers_sms !== false : true,
+    };
+  };
+
+  const screenshotIntakeLabels = useMemo(() => ({
+    title: L.p.appt.screenshotTitle,
+    subtitle: L.p.appt.screenshotSubtitle,
+    pickImage: L.p.appt.screenshotPick,
+    pickImageHint: L.p.appt.screenshotPickHint,
+    analyze: L.p.appt.screenshotAnalyze,
+    analyzing: L.p.appt.screenshotAnalyzing,
+    recognizedTitle: L.p.appt.screenshotRecognized,
+    confirmHint: L.p.appt.screenshotConfirmHint,
+    confirmSchedule: L.p.appt.screenshotConfirm,
+    back: L.p.appt.screenshotBack,
+    cancel: L.p.common.cancel,
+    notConfigured: L.p.appt.screenshotNotConfigured,
+    analyzeError: L.p.appt.screenshotAnalyzeError,
+    scheduleError: L.p.appt.screenshotScheduleError,
+    missingFields: L.p.appt.screenshotMissingFields,
+    invalidImage: L.p.appt.screenshotInvalidImage,
+    imageTooLarge: L.p.appt.screenshotTooLarge,
+    readError: L.p.appt.screenshotReadError,
+    confidenceLabel: L.p.appt.screenshotConfidence,
+    confidenceHigh: L.p.appt.screenshotConfidenceHigh,
+    confidenceMedium: L.p.appt.screenshotConfidenceMedium,
+    confidenceLow: L.p.appt.screenshotConfidenceLow,
+    patient: L.p.appt.patientName,
+    date: L.p.appt.date,
+    time: L.p.appt.time,
+    phone: L.p.appt.phone,
+    equipment: L.p.appt.equipment,
+    notes: L.p.appt.noteToday,
+  }), [L]);
+
   useEffect(() => {
     if (!showNewAppointment || !repeatBooking.enabled) return;
     const d = selectedSlot?.fullDate || selectedSlot?.full_date;
@@ -3015,23 +3079,26 @@ export default function AppLayout() {
     });
   };
 
-  const handleSaveNewAppointment = async () => {
+  const handleSaveNewAppointment = async (slotOverride = null) => {
     if (isSavingAppointment) return;
+    const slot = slotOverride || selectedSlot;
+    const newPatientForSlot = slot?.patient
+      && !dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(slot.patient));
     try {
-      if (!selectedSlot?.patient || !selectedSlot?.equipment || !selectedSlot?.time) {
+      if (!slot?.patient || !slot?.equipment || !slot?.time) {
         return alert(staffAlert(locale, 'missingData'));
       }
 
-      const apptDate = selectedSlot.fullDate || selectedSlot.full_date || currentFullDate;
-      if (isPastTime(apptDate, selectedSlot.time) && selectedSlot.status !== 'booked') {
+      const apptDate = slot.fullDate || slot.full_date || currentFullDate;
+      if (isPastTime(apptDate, slot.time) && slot.status !== 'booked') {
         return alert(staffAlert(locale, 'pastSchedule'));
       }
 
-      const existingP = dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
+      const existingP = dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(slot.patient));
       if (existingP?.is_blocked) return alert(staffAlert(locale, 'patientBlockedShort'));
 
-      const sessionTimes = resolveSessionTimes(selectedSlot);
-      const useRecurrence = repeatBooking.enabled && !selectedSlot.id;
+      const sessionTimes = resolveSessionTimes(slot);
+      const useRecurrence = repeatBooking.enabled && !slot.id;
       const occurrenceDates = useRecurrence
         ? sortOccurrenceDates(repeatBooking.dates)
         : [apptDate];
@@ -3041,12 +3108,12 @@ export default function AppLayout() {
       }
 
       if (!useRecurrence && checkOverlap(
-        selectedSlot.equipment,
+        slot.equipment,
         apptDate,
-        selectedSlot.time,
+        slot.time,
         sessionTimes.duration,
         sessionTimes.buffer,
-        selectedSlot.id,
+        slot.id,
       )) {
         return alert(staffAlert(locale, 'overlap'));
       }
@@ -3058,11 +3125,11 @@ export default function AppLayout() {
         detail: L.p.appt.creatingHint,
       });
 
-      let canonicalPatient = selectedSlot.patient.trim();
-      const resolvedContact = resolveSlotContact(selectedSlot);
+      let canonicalPatient = slot.patient.trim();
+      const resolvedContact = resolveSlotContact(slot);
       let canonicalPhone = resolvedContact.phone;
       let canonicalEmail = resolvedContact.email;
-      let isNewForAppointment = !!(selectedSlot.is_new_patient || isNewPatientInline);
+      let isNewForAppointment = !!(slot.is_new_patient || newPatientForSlot);
 
       const phoneDigits = digitsOnly(canonicalPhone).slice(-10);
       if (phoneDigits.length === 10) {
@@ -3070,10 +3137,10 @@ export default function AppLayout() {
           name: canonicalPatient,
           phone: canonicalPhone,
           email: canonicalEmail,
-          protocol: selectedSlot.protocol || 'Wellness',
-          notes: selectedSlot.patientNotes || '',
-          prefers_email: selectedSlot.prefers_email !== false,
-          prefers_sms: selectedSlot.prefers_sms !== false,
+          protocol: slot.protocol || 'Wellness',
+          notes: slot.patientNotes || '',
+          prefers_email: slot.prefers_email !== false,
+          prefers_sms: slot.prefers_sms !== false,
         });
         if (ensured.error) {
           setAppointmentSaveFeedback({
@@ -3088,7 +3155,7 @@ export default function AppLayout() {
         canonicalPhone = ensured.phone;
         canonicalEmail = ensured.email;
         if (ensured.isNew) isNewForAppointment = true;
-      } else if (isNewPatientInline && !selectedSlot.id) {
+      } else if (newPatientForSlot && !slot.id) {
         setAppointmentSaveFeedback({
           phase: 'error',
           title: locale === 'en' ? 'Phone required' : 'Teléfono requerido',
@@ -3096,8 +3163,8 @@ export default function AppLayout() {
           closeForm: false,
         });
         return;
-      } else if (!isNewPatientInline) {
-        const contactResult = await persistPatientContactFromSlot(selectedSlot);
+      } else if (!newPatientForSlot) {
+        const contactResult = await persistPatientContactFromSlot(slot);
         if (contactResult.error) {
           setAppointmentSaveFeedback({
             phase: 'error',
@@ -3116,20 +3183,20 @@ export default function AppLayout() {
         patient: canonicalPatient,
         phone: canonicalPhone,
         email: canonicalEmail,
-        protocol: selectedSlot.protocol || 'Wellness',
-        equipment: selectedSlot.equipment,
+        protocol: slot.protocol || 'Wellness',
+        equipment: slot.equipment,
         duration: sessionTimes.duration,
         buffer: sessionTimes.buffer,
-        time: selectedSlot.time,
-        appointment_time: selectedSlot.time,
-        attendant: selectedSlot.attendant || 'Por Asignar',
-        check_in_status: selectedSlot.check_in_status || 'Agendado',
+        time: slot.time,
+        appointment_time: slot.time,
+        attendant: slot.attendant || 'Por Asignar',
+        check_in_status: slot.check_in_status || 'Agendado',
         is_new_patient: isNewForAppointment,
-        notes: selectedSlot.notes || '',
-        outside_normal_hours: !!selectedSlot.outside_normal_hours,
-        is_extended_block: isExtendedSession(selectedSlot),
+        notes: slot.notes || '',
+        outside_normal_hours: !!slot.outside_normal_hours,
+        is_extended_block: isExtendedSession(slot),
         clinic: normalizeClinicId(activeClinic),
-        promoter_code: normalizePromoCode(selectedSlot.promoter_code) || null,
+        promoter_code: normalizePromoCode(slot.promoter_code) || null,
       };
 
       let createdCount = 0;
@@ -3138,12 +3205,12 @@ export default function AppLayout() {
 
       for (const dateIso of occurrenceDates) {
         if (checkOverlap(
-          selectedSlot.equipment,
+          slot.equipment,
           dateIso,
-          selectedSlot.time,
+          slot.time,
           sessionTimes.duration,
           sessionTimes.buffer,
-          selectedSlot.id,
+          slot.id,
         )) {
           skippedCount += 1;
           continue;
@@ -3170,8 +3237,8 @@ export default function AppLayout() {
           createdCount += 1;
           if (!firstCreated) firstCreated = na[0];
           const flags = [
-            selectedSlot.outside_normal_hours ? L.p.appt.badgeOutsideHours : '',
-            isExtendedSession(selectedSlot) ? L.p.appt.badgeExtended : '',
+            slot.outside_normal_hours ? L.p.appt.badgeOutsideHours : '',
+            isExtendedSession(slot) ? L.p.appt.badgeExtended : '',
           ].filter(Boolean).join(' · ');
           await logAudit(na[0].id, payload.patient, 'CREACIÓN', `${payload.time} · ${dateIso}${flags ? ` (${flags})` : ''}`);
           pushGoogleCalendarSync(na[0].id, 'upsert');
@@ -3199,8 +3266,8 @@ export default function AppLayout() {
           fullDate: firstCreated.full_date || apptDate,
           phone: canonicalPhone,
           email: canonicalEmail,
-          prefers_email: selectedSlot.prefers_email ?? resolvedContact.prefers_email,
-          prefers_sms: selectedSlot.prefers_sms ?? resolvedContact.prefers_sms,
+          prefers_email: slot.prefers_email ?? resolvedContact.prefers_email,
+          prefers_sms: slot.prefers_sms ?? resolvedContact.prefers_sms,
           is_new_patient: isNewForAppointment,
         }, { reportResult: true, forceNotify: true });
         const staffNotifyResult = await alertStaffNewBooking({
@@ -3212,7 +3279,7 @@ export default function AppLayout() {
           is_new_patient: isNewForAppointment,
         }, { source: 'staff', isFirstSession: isFirstSessionAppointment({
           isNewPatient: isNewForAppointment,
-          patientName: selectedSlot.patient,
+          patientName: slot.patient,
           appointments: dbAppointments,
           excludeAppointmentId: firstCreated.id,
           normalize: normalizeStr,
@@ -3515,9 +3582,16 @@ export default function AppLayout() {
         </div>
         )}
 
-        <div className="p-3">
+        <div className="p-3 space-y-2">
           <button onClick={() => openNewAppointment()} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg transition uppercase text-xs">
             <span className="text-xl leading-none">+</span> {L.newAppointment}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowScreenshotIntake(true)}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-2.5 rounded-xl flex items-center justify-center gap-2 shadow transition uppercase text-[10px]"
+          >
+            {L.p.appt.screenshotFromCapture}
           </button>
         </div>
 
@@ -6923,6 +6997,23 @@ export default function AppLayout() {
       />
 
       <StaffSaveToast message={saveToast} />
+
+      {showScreenshotIntake && (
+        <ScreenshotAppointmentModal
+          open={showScreenshotIntake}
+          onClose={() => setShowScreenshotIntake(false)}
+          locale={locale}
+          labels={screenshotIntakeLabels}
+          activeClinic={activeClinic}
+          services={dbServices}
+          defaultEquipment={dbServices.find((s) => s.is_active)?.name || ''}
+          onSchedule={async (form) => {
+            const draft = buildDraftFromScreenshot(form);
+            setShowScreenshotIntake(false);
+            await handleSaveNewAppointment(draft);
+          }}
+        />
+      )}
 
       {/* Navegación inferior móvil — iconos */}
       {currentUser && (
