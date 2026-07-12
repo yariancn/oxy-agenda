@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { parseAppointmentFromOcrText } from '../lib/screenshotAppointmentParse';
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
@@ -9,15 +10,16 @@ export default function ScreenshotAppointmentModal({
   onClose,
   locale,
   labels,
-  activeClinic,
   services = [],
   defaultEquipment = '',
+  referenceDate = '',
   onSchedule,
 }) {
   const fileRef = useRef(null);
   const [step, setStep] = useState('upload');
   const [previewUrl, setPreviewUrl] = useState('');
   const [error, setError] = useState('');
+  const [progress, setProgress] = useState('');
   const [form, setForm] = useState({
     patient: '',
     phone: '',
@@ -35,6 +37,7 @@ export default function ScreenshotAppointmentModal({
     setStep('upload');
     setPreviewUrl('');
     setError('');
+    setProgress('');
     setForm({
       patient: '',
       phone: '',
@@ -84,24 +87,23 @@ export default function ScreenshotAppointmentModal({
     }
     setStep('processing');
     setError('');
+    setProgress(t.analyzing);
     try {
-      const res = await fetch('/api/staff/screenshot-intake', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clinic: activeClinic,
-          locale,
-          image: previewUrl,
-        }),
+      const { recognize } = await import('tesseract.js');
+      const lang = locale === 'en' ? 'eng' : 'spa+eng';
+      const { data: { text } } = await recognize(previewUrl, lang, {
+        logger: (m) => {
+          if (m.status === 'recognizing text' && m.progress) {
+            setProgress(`${t.analyzing} ${Math.round(m.progress * 100)}%`);
+          }
+        },
       });
-      const data = await res.json();
-      if (!res.ok) {
-        if (data.error === 'SCREENSHOT_INTAKE_NOT_CONFIGURED') throw new Error(t.notConfigured);
-        if (data.error === 'OPENAI_API_KEY_INVALID') throw new Error(t.badApiKey);
-        throw new Error(data.error || t.analyzeError);
+
+      const ex = parseAppointmentFromOcrText(text, { referenceDate, locale });
+      if (!ex.patient && !ex.fullDate && !ex.time) {
+        throw new Error(t.analyzeError);
       }
-      const ex = data.extracted || {};
+
       const firstSrv = services.find((s) => s.is_active) || services[0];
       setForm({
         patient: ex.patient || '',
@@ -118,6 +120,8 @@ export default function ScreenshotAppointmentModal({
     } catch (err) {
       setError(err?.message || t.analyzeError);
       setStep('upload');
+    } finally {
+      setProgress('');
     }
   };
 
@@ -181,7 +185,8 @@ export default function ScreenshotAppointmentModal({
           {step === 'processing' && (
             <div className="py-10 text-center">
               <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4" />
-              <p className="text-sm font-black uppercase text-slate-700">{t.analyzing}</p>
+              <p className="text-sm font-black uppercase text-slate-700">{progress || t.analyzing}</p>
+              <p className="text-[10px] font-bold text-slate-500 mt-2">{t.processingHint}</p>
             </div>
           )}
 

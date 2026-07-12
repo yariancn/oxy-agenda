@@ -2029,7 +2029,7 @@ export default function AppLayout() {
     back: L.p.appt.screenshotBack,
     cancel: L.p.common.cancel,
     notConfigured: L.p.appt.screenshotNotConfigured,
-    badApiKey: L.p.appt.screenshotBadApiKey,
+    processingHint: L.p.appt.screenshotProcessingHint,
     analyzeError: L.p.appt.screenshotAnalyzeError,
     scheduleError: L.p.appt.screenshotScheduleError,
     missingFields: L.p.appt.screenshotMissingFields,
@@ -7016,6 +7016,7 @@ export default function AppLayout() {
           activeClinic={activeClinic}
           services={dbServices}
           defaultEquipment={dbServices.find((s) => s.is_active)?.name || ''}
+          referenceDate={clinicNow.dateStr || currentFullDate}
           onSchedule={async (form) => {
             const draft = buildDraftFromScreenshot(form);
             setShowScreenshotIntake(false);

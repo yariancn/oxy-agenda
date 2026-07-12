@@ -28,8 +28,9 @@ import {
   normalizeAppointmentDate,
   normalizeAppointmentTime,
   normalizeScreenshotExtraction,
-  normalizeScreenshotPhone,
+  parseAppointmentFromOcrText,
   parseVisionJsonContent,
+  parseWeekdayDayFromText,
 } from '../lib/screenshotAppointmentParse.js';
 import { getAllowedClinics, normalizeStaffSessionUser } from '../lib/clinicAccess.js';
 
@@ -222,6 +223,25 @@ test('captura: JSON de visión se parsea con markdown', () => {
   const raw = parseVisionJsonContent('```json\n{"patient":"Ana","time":"11:00 AM"}\n```');
   assert.equal(raw.patient, 'Ana');
   assert.equal(raw.time, '11:00 AM');
+});
+
+test('OCR WhatsApp: Elizabeth — martes 14 y 4:30', () => {
+  const ocr = `
+Elizabeth Gonzalez
+Buenos días
+Quisiera una cita para oxigenación
+Martes 14
+10:30, 12:00 o 4:30
+4:30
+`;
+  const ex = parseAppointmentFromOcrText(ocr, { referenceDate: '2026-07-09', locale: 'es' });
+  assert.equal(ex.patient, 'Elizabeth Gonzalez');
+  assert.equal(ex.fullDate, '2026-07-14');
+  assert.equal(ex.time, '04:30 PM');
+});
+
+test('OCR: martes 14 resuelve día del mes', () => {
+  assert.equal(parseWeekdayDayFromText('cita martes 14 por favor', '2026-07-09'), '2026-07-14');
 });
 
 console.log(`\n${passed} pruebas OK\n`);
