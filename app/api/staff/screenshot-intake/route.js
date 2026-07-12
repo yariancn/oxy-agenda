@@ -30,6 +30,9 @@ export async function POST(request) {
     if (!apiKey) {
       return NextResponse.json({ error: 'SCREENSHOT_INTAKE_NOT_CONFIGURED' }, { status: 503 });
     }
+    if (!/^sk-/.test(apiKey)) {
+      return NextResponse.json({ error: 'OPENAI_API_KEY_INVALID' }, { status: 503 });
+    }
 
     const extracted = await extractAppointmentFromScreenshot({
       imageDataUrl: image,
@@ -42,6 +45,9 @@ export async function POST(request) {
     return NextResponse.json({ ok: true, extracted });
   } catch (error) {
     const message = error?.message || String(error);
+    if (message.includes('VISION_API_ERROR: 401') || message.includes('Incorrect API key')) {
+      return NextResponse.json({ error: 'OPENAI_API_KEY_INVALID' }, { status: 503 });
+    }
     if (message === 'Clinic access denied') {
       return NextResponse.json({ error: 'FORBIDDEN' }, { status: 403 });
     }

@@ -98,6 +98,7 @@ export default function ScreenshotAppointmentModal({
       const data = await res.json();
       if (!res.ok) {
         if (data.error === 'SCREENSHOT_INTAKE_NOT_CONFIGURED') throw new Error(t.notConfigured);
+        if (data.error === 'OPENAI_API_KEY_INVALID') throw new Error(t.badApiKey);
         throw new Error(data.error || t.analyzeError);
       }
       const ex = data.extracted || {};

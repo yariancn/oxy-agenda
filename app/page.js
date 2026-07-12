@@ -2029,6 +2029,7 @@ export default function AppLayout() {
     back: L.p.appt.screenshotBack,
     cancel: L.p.common.cancel,
     notConfigured: L.p.appt.screenshotNotConfigured,
+    badApiKey: L.p.appt.screenshotBadApiKey,
     analyzeError: L.p.appt.screenshotAnalyzeError,
     scheduleError: L.p.appt.screenshotScheduleError,
     missingFields: L.p.appt.screenshotMissingFields,
