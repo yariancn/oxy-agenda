@@ -17,7 +17,8 @@
     "seed-demo:gdl:both": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs --both",
     "import-setmore:gdl": "node --env-file=.env.local scripts/import-setmore-gdl.mjs",
     "import-setmore:gdl:dry": "node --env-file=.env.local scripts/import-setmore-gdl.mjs --dry-run",
-    "import-setmore:gdl:no-clear": "node --env-file=.env.local scripts/import-setmore-gdl.mjs --no-clear"
+    "import-setmore:gdl:no-clear": "node --env-file=.env.local scripts/import-setmore-gdl.mjs --no-clear",
+    "simulate": "node scripts/simulate-user-flows.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1",

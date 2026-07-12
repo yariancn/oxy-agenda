@@ -5,6 +5,7 @@ import PosReceiptModal from './PosReceiptModal';
 import { applyPurchaseSessions, priceWalletKey, reversePurchaseSessions, sumWalletBalance, resolveWalletStorageKey, formatWalletKeyLabel, repairLegacyWalletKeys } from '../lib/sessionWallet';
 import { sumPurchasedSessions } from '../lib/sessionSummary';
 import { canCreateSessionGroup, canJoinSessionGroup, isGroupTitular } from '../lib/sessionGroup';
+import { sanitizePatientNotesForDisplay } from '../lib/patientNotes';
 import PatientSessionHistory from './PatientSessionHistory';
 
 export default function PatientProfileModal({
@@ -43,7 +44,7 @@ export default function PatientProfileModal({
     email: initialData.email || '',
     dob: initialData.dob || '',
     protocol: initialData.protocol || 'Wellness',
-    notes: initialData.patientNotes || initialData.notes || '',
+    notes: sanitizePatientNotesForDisplay(initialData.patientNotes || initialData.notes || ''),
     is_blocked: initialData.is_blocked || false,
     prefers_email: initialData.prefers_email !== false,
     prefers_sms: initialData.prefers_sms !== false,
@@ -66,8 +67,8 @@ export default function PatientProfileModal({
   const [sharedGroupName, setSharedGroupName] = useState('');
   const [memberToAdd, setMemberToAdd] = useState('');
   const [sharedBusy, setSharedBusy] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
 
-  const canManageShared = currentUserLevel <= 2;
   const inGroup = Boolean(sessionGroup?.id || initialData.sessionGroupId);
   const isTitular = sessionGroup ? isGroupTitular({ id: formData.id }, sessionGroup) : false;
   const isMember = inGroup && !isTitular;
@@ -369,7 +370,7 @@ export default function PatientProfileModal({
 
           <div className="bg-amber-50 p-4 rounded-xl border border-amber-200">
             <label className="text-[10px] font-black uppercase text-amber-800 mb-2 block">{t.notesLabel}</label>
-            <textarea disabled={formData.is_blocked && currentUserLevel > 1} value={formData.notes} onChange={(e) => handleChange('notes', e.target.value)} placeholder={t.notesPlaceholder} className="w-full p-3 border border-amber-200 rounded-lg text-xs font-bold bg-white text-amber-900 disabled:opacity-50" rows={2} />
+            <textarea value={formData.notes} onChange={(e) => handleChange('notes', e.target.value)} placeholder={t.notesPlaceholder} className="w-full p-3 border border-amber-200 rounded-lg text-xs font-bold bg-white text-amber-900" rows={2} />
             <p className="text-[8px] text-amber-600 mt-1 font-bold uppercase">{t.notesHint}</p>
           </div>
 
@@ -389,15 +390,12 @@ export default function PatientProfileModal({
             </div>
           )}
 
-          {canManageShared && (
-            <div className="rounded-xl border-2 border-indigo-300 bg-indigo-50 p-3">
-              <p className="text-[11px] font-black uppercase text-indigo-900">{t.packagesSectionTitle}</p>
-              <p className="text-[9px] font-bold text-indigo-800/90 mt-1 leading-snug normal-case">{t.packagesSectionHint}</p>
-            </div>
-          )}
+          <div className="rounded-xl border-2 border-indigo-300 bg-indigo-50 p-3">
+            <p className="text-[11px] font-black uppercase text-indigo-900">{t.packagesSectionTitle}</p>
+            <p className="text-[9px] font-bold text-indigo-800/90 mt-1 leading-snug normal-case">{t.packagesSectionHint}</p>
+          </div>
 
-          {canManageShared && (
-            <div className="rounded-xl border-2 border-violet-300 bg-violet-50 p-4 space-y-3">
+          <div className="rounded-xl border-2 border-violet-300 bg-violet-50 p-4 space-y-3">
               <div>
                 <p className="text-[10px] font-black uppercase text-violet-900">{t.sharedWalletTitle}</p>
                 <p className="text-[8px] font-bold text-violet-800/90 mt-1 leading-snug">{t.sharedWalletHint}</p>
@@ -534,8 +532,7 @@ export default function PatientProfileModal({
                   )}
                 </div>
               )}
-            </div>
-          )}
+          </div>
 
           <div className={`p-4 rounded-xl border ${formData.is_blocked ? 'bg-slate-200 opacity-60' : 'bg-slate-50'}`}>
             <h4 className="text-[10px] font-black text-slate-500 uppercase mb-3">{t.walletTitle}</h4>
@@ -675,8 +672,25 @@ export default function PatientProfileModal({
         </div>
 
         <div className="p-6 border-t flex gap-3 shrink-0">
-          <button type="button" onClick={onClose} className="flex-1 bg-slate-100 font-black py-3 rounded-xl uppercase text-xs">{t.close}</button>
-          <button type="button" onClick={() => onSave(formData)} className="flex-1 bg-emerald-600 text-white font-black py-3 rounded-xl uppercase text-xs">{t.saveProfile}</button>
+          <button type="button" onClick={onClose} disabled={savingProfile} className="flex-1 bg-slate-100 font-black py-3 rounded-xl uppercase text-xs disabled:opacity-50">{t.close}</button>
+          <button
+            type="button"
+            disabled={savingProfile}
+            onClick={async () => {
+              if (savingProfile) return;
+              setSavingProfile(true);
+              try {
+                await onSave?.(formData);
+              } catch (err) {
+                alert(err?.message || String(err));
+              } finally {
+                setSavingProfile(false);
+              }
+            }}
+            className="flex-1 bg-emerald-600 text-white font-black py-3 rounded-xl uppercase text-xs disabled:opacity-60"
+          >
+            {savingProfile ? '...' : t.saveProfile}
+          </button>
         </div>
       </div>
 

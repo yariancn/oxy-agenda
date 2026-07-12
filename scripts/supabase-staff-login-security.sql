@@ -19,8 +19,8 @@ COMMENT ON TABLE staff_login_attempts IS 'Bloqueo temporal tras 5 intentos falli
 ALTER TABLE users_staff
   ADD COLUMN IF NOT EXISTS email text,
   ADD COLUMN IF NOT EXISTS phone text,
-  ADD COLUMN IF NOT EXISTS notify_on_booking boolean DEFAULT true;
+  ADD COLUMN IF NOT EXISTS notify_on_booking boolean DEFAULT false;
 
 COMMENT ON COLUMN users_staff.email IS 'Correo institucional único para login staff.';
-COMMENT ON COLUMN users_staff.phone IS 'Celular del empleado (10 dígitos). SMS/WhatsApp de alertas de cita nueva.';
-COMMENT ON COLUMN users_staff.notify_on_booking IS 'Si true, recibe alertas de cita nueva cuando tiene teléfono o correo.';
+COMMENT ON COLUMN users_staff.phone IS 'Celular del empleado (10 dígitos). SMS/WhatsApp solo si notify_on_booking = true.';
+COMMENT ON COLUMN users_staff.notify_on_booking IS 'Si true, recibe alertas de cita nueva en su teléfono/correo. El teléfono de clínica (staff_alert_phones) es independiente.';

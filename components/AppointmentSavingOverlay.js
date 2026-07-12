@@ -1,5 +1,5 @@
 "use client";
-import React from 'react';
+import React, { useEffect } from 'react';
 
 export default function AppointmentSavingOverlay({
   open,
@@ -8,10 +8,17 @@ export default function AppointmentSavingOverlay({
   detail = '',
   closeLabel,
   onClose,
+  autoCloseMs = 0,
 }) {
-  if (!open) return null;
-
   const isCreating = phase === 'creating';
+
+  useEffect(() => {
+    if (!open || isCreating || !autoCloseMs || !onClose) return undefined;
+    const timer = window.setTimeout(onClose, autoCloseMs);
+    return () => window.clearTimeout(timer);
+  }, [open, isCreating, autoCloseMs, onClose]);
+
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[20000] bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-4">

@@ -44,6 +44,7 @@ import BitacoraModal from '../components/BitacoraModal';
 import PatientProfileModal from '../components/PatientProfileModal';
 import PatientSessionHistory from '../components/PatientSessionHistory';
 import AppointmentSavingOverlay from '../components/AppointmentSavingOverlay';
+import StaffSaveToast from '../components/StaffSaveToast';
 import RepeatDatesCalendar from '../components/RepeatDatesCalendar';
 import GFEManager from '../components/GFEManager';
 import { InstallGuideLink } from '../components/InstallGuide';
@@ -80,6 +81,17 @@ import {
   renameEquipmentAcrossClinic,
   resolveAppointmentEquipment,
 } from '../lib/serviceEquipmentSync';
+import {
+  isStaleAppointmentPatientName,
+  renamePatientAcrossClinic,
+  repairStaleAppointmentNames,
+  syncAppointmentPatientName,
+  withCanonicalPatientName,
+} from '../lib/patientNameSync';
+import {
+  sanitizeAppointmentNotesForDisplay,
+  sanitizePatientNotesForDisplay,
+} from '../lib/patientNotes';
 import { saveCompanyConfigRow } from '../lib/companyConfigSave';
 import { formatClinicField, formatClinicPhone } from '../lib/clinicText';
 import { getSessionPresetLabels, translateCheckInStatus } from '../lib/i18n';
@@ -216,6 +228,8 @@ export default function AppLayout() {
   const [showNewAppointment, setShowNewAppointment] = useState(false);
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
   const [appointmentSaveFeedback, setAppointmentSaveFeedback] = useState(null);
+  const [saveToast, setSaveToast] = useState('');
+  const saveToastTimerRef = useRef(null);
   const [repeatBooking, setRepeatBooking] = useState({ enabled: false, dates: [] });
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelDeductSession, setCancelDeductSession] = useState(false);
@@ -280,6 +294,7 @@ export default function AppLayout() {
   const [dbErrorMessage, setDbErrorMessage] = useState('');
   const fetchGenRef = useRef(0);
   const fetchAllDataRef = useRef(async () => {});
+  const slotNotesDirtyRef = useRef(false);
 
   // --- FORMULARIOS GLOBALES ---
   const [newSrv, setNewSrv] = useState({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '', use_custom_notes: false });
@@ -298,7 +313,7 @@ export default function AppLayout() {
   const [newRole, setNewRole] = useState({ id: null, name: '', level: 3 });
   const [isEditingRole, setIsEditingRole] = useState(false);
 
-  const [newUser, setNewUser] = useState({ id: null, name: '', email: '', phone: '', notify_on_booking: true, role: 'Técnico Certificado IBUM', cert: '', is_active: true, pin: '' });
+  const [newUser, setNewUser] = useState({ id: null, name: '', email: '', phone: '', notify_on_booking: false, role: 'Técnico Certificado IBUM', cert: '', is_active: true, pin: '' });
   const [isEditingUser, setIsEditingUser] = useState(false);
 
   const [showNewPatientModal, setShowNewPatientModal] = useState(false);
@@ -473,6 +488,14 @@ export default function AppLayout() {
     ...pickStaffAlertSettings(),
   });
 
+  const flashSaveToast = (message) => {
+    const text = String(message || '').trim();
+    if (!text) return;
+    setSaveToast(text);
+    if (saveToastTimerRef.current) window.clearTimeout(saveToastTimerRef.current);
+    saveToastTimerRef.current = window.setTimeout(() => setSaveToast(''), 2200);
+  };
+
   const saveCompanyConfig = async () => {
     const { error, warning } = await saveCompanyConfigRow(activeSupabase, {
       id: dbCompanyConfig.id,
@@ -481,7 +504,7 @@ export default function AppLayout() {
       locale,
     });
     if (error) throw new Error(error.message);
-    alert(warning || L.p.admin.configSaved);
+    flashSaveToast(warning || L.p.admin.configSaved);
     fetchAllData();
   };
 
@@ -719,7 +742,7 @@ export default function AppLayout() {
       const upRes = await updatePatientContact(activeSupabase, pat.id, {
         phone: canonicalPhone,
         email: canonicalEmail,
-        notes: slot.patientNotes ?? pat.notes ?? '',
+        notes: slot.patientNotes ?? sanitizePatientNotesForDisplay(pat.notes ?? ''),
         prefers_email: slot.prefers_email,
         prefers_sms: slot.prefers_sms,
       });
@@ -744,7 +767,7 @@ export default function AppLayout() {
         phone: canonicalPhone,
         email: canonicalEmail,
         protocol: slot.protocol || targetPatient?.protocol || 'Wellness',
-        notes: slot.patientNotes ?? targetPatient?.notes ?? '',
+        notes: slot.patientNotes ?? sanitizePatientNotesForDisplay(targetPatient?.notes ?? ''),
         prefers_email: slot.prefers_email !== false,
         prefers_sms: slot.prefers_sms !== false,
       });
@@ -922,7 +945,7 @@ export default function AppLayout() {
         phone: String(p.Phone || p.phone || ''),
         email: String(p.Email || p.email || ''),
         protocol: String(p.protocol || ''),
-        notes: String(p.notes || p.Notes || ''),
+        notes: sanitizePatientNotesForDisplay(p.notes || p.Notes || ''),
         is_blocked: p.is_blocked || false,
         prefers_email: p.prefers_email !== false,
         prefers_sms: p.prefers_sms !== false,
@@ -1068,6 +1091,16 @@ export default function AppLayout() {
       setDbErrorMessage('');
       if (!silent) pendingScrollToNowRef.current = true;
       broadcastLiveDataUpdated(activeClinic);
+
+      if (clinicDb && safePatients.length && appointmentsReady.length) {
+        repairStaleAppointmentNames(clinicDb, appointmentsReady, safePatients)
+          .then((repaired) => {
+            if (repaired > 0 && fetchGen === fetchGenRef.current) {
+              fetchAllDataRef.current({ silent: true, liveOnly: true });
+            }
+          })
+          .catch(() => {});
+      }
     } catch (err) {
       if (fetchGen !== fetchGenRef.current) return;
       console.error(err);
@@ -1102,25 +1135,38 @@ export default function AppLayout() {
   }, []);
 
   useEffect(() => {
+    slotNotesDirtyRef.current = false;
+  }, [selectedSlot?.id]);
+
+  useEffect(() => {
     if (!selectedSlot?.id) return;
     const fresh = dbAppointments.find((a) => a.id === selectedSlot.id);
     if (!fresh) return;
+    const patInfo = resolvePatientForAppointment(fresh, dbPatients);
     setSelectedSlot((prev) => {
       if (!prev || prev.id !== fresh.id) return prev;
+      const canonicalPatient = patInfo?.patient || fresh.patient;
+      const dirty = slotNotesDirtyRef.current;
       return {
         ...prev,
         ...fresh,
         ...appointmentFlagsFromApp(fresh),
-        patientId: prev.patientId,
+        patient: canonicalPatient,
+        patientId: patInfo?.id || prev.patientId,
+        phone: patInfo?.phone || prev.phone || fresh.phone,
+        email: patInfo?.email || prev.email || fresh.email,
+        notes: dirty ? prev.notes : sanitizeAppointmentNotesForDisplay(fresh.notes),
+        patientNotes: dirty
+          ? prev.patientNotes
+          : (prev.patientNotes ?? sanitizePatientNotesForDisplay(patInfo?.notes)),
         wallets: prev.wallets,
         adeudo: prev.adeudo,
         packageHistory: prev.packageHistory,
         sessionGroup: prev.sessionGroup,
         groupMembers: prev.groupMembers,
-        patientNotes: prev.patientNotes ?? prev.notes,
       };
     });
-  }, [dbAppointments, selectedSlot?.id]);
+  }, [dbAppointments, dbPatients, selectedSlot?.id]);
 
   const dbErrorHint = useMemo(() => {
     if (!dbErrorMessage) return L.dbErrorHint;
@@ -1401,14 +1447,19 @@ export default function AppLayout() {
     ? [...dynamicColumns, assessmentService]
     : dynamicColumns;
 
+  const calendarAppointments = useMemo(
+    () => dbAppointments.map((app) => withCanonicalPatientName(app, dbPatients)),
+    [dbAppointments, dbPatients],
+  );
+
   const getAssessmentAppsForDay = useCallback((fullDate) => {
     if (!assessmentService) return [];
-    return dbAppointments.filter(
+    return calendarAppointments.filter(
       (app) => app.full_date === fullDate
         && app.check_in_status !== 'Cancelado'
         && appointmentEquipment(app.equipment) === assessmentService,
     );
-  }, [assessmentService, dbAppointments, appointmentEquipment]);
+  }, [assessmentService, calendarAppointments, appointmentEquipment]);
 
   const weekDayLayouts = useMemo(() => {
     if (viewMode !== 'Semana') return {};
@@ -2048,9 +2099,11 @@ export default function AppLayout() {
       const pat = patientId
         ? dbPatients.find((p) => String(p.id) === String(patientId))
         : null;
+      const prevPatientId = prev.patientId || prev.id;
       const matchesPatient =
-        (patientId && String(prev.patientId) === String(patientId))
-        || (pat && normalizeStr(pat.patient) === normalizeStr(prev.patient));
+        (patientId && prevPatientId && String(prevPatientId) === String(patientId))
+        || (pat && normalizeStr(pat.patient) === normalizeStr(prev.patient))
+        || (pat && prev.phone && digitsOnly(pat.phone).slice(-10) === digitsOnly(prev.phone).slice(-10));
       const matchesGroup =
         sessionGroup?.id && prev.sessionGroup?.id === sessionGroup.id;
 
@@ -2113,6 +2166,18 @@ export default function AppLayout() {
   const openAppointmentDetails = (app) => {
     const patInfo = resolvePatientForAppointment(app, dbPatients);
     const contact = resolveDisplayContact(app, patInfo);
+    if (
+      patInfo?.id
+      && isStaleAppointmentPatientName(app, patInfo)
+      && activeSupabase
+    ) {
+      syncAppointmentPatientName(activeSupabase, app.id, patInfo.patient).catch((err) => {
+        console.error('No se pudo sincronizar nombre en cita', err);
+      });
+      setDbAppointments((prev) => prev.map((row) => (
+        row.id === app.id ? { ...row, patient: patInfo.patient } : row
+      )));
+    }
     let repairedWallets = {};
     if (patInfo) {
       const repaired = repairLegacyWalletKeys(patInfo.wallets || {}, patInfo.packageHistory || []);
@@ -2127,15 +2192,17 @@ export default function AppLayout() {
     setSelectedSlot(attachSessionContext({
       ...app,
       status: 'booked',
+      patient: patInfo?.patient || app.patient,
       patientId: patInfo?.id,
+      patientNotes: sanitizePatientNotesForDisplay(patInfo?.notes),
       phone: contact.phone,
       email: contact.email,
       protocol: patInfo?.protocol || app.protocol,
+      notes: sanitizeAppointmentNotesForDisplay(app.notes),
       wallets: patInfo ? repairedWallets : {},
       historicoSesiones: patInfo?.historicoSesiones || 0,
       adeudo: patInfo?.adeudo || 0,
       packageHistory: patInfo?.packageHistory || [],
-      patientNotes: patInfo ? patInfo.notes : '',
       sessionPreset: getPresetFromTimes(app.duration, app.buffer).id,
       prefers_email: patInfo?.prefers_email !== false,
       prefers_sms: patInfo?.prefers_sms !== false,
@@ -3173,6 +3240,7 @@ export default function AppLayout() {
         title: locale === 'en' ? 'Appointment saved' : 'Cita guardada',
         detail: `${recurrenceLine}${notifySummary || (locale === 'en' ? 'Done.' : 'Listo.')}`,
         closeForm: true,
+        autoCloseMs: 1400,
       });
     } catch (e) {
       setAppointmentSaveFeedback({
@@ -3757,7 +3825,7 @@ export default function AppLayout() {
                             ))}
 
                             {/* CITAS */}
-                            {dbAppointments.filter(app => appointmentEquipment(app.equipment) === eqName && app.full_date === currentDayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
+                            {calendarAppointments.filter(app => appointmentEquipment(app.equipment) === eqName && app.full_date === currentDayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
                               <CalendarAppointmentBlock
                                 key={app.id}
                                 app={app}
@@ -3856,7 +3924,7 @@ export default function AppLayout() {
                                   </div>
                                 ))}
 
-                                {dbAppointments.filter(app => appointmentEquipment(app.equipment) === eqName && app.full_date === dayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
+                                {calendarAppointments.filter(app => appointmentEquipment(app.equipment) === eqName && app.full_date === dayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
                                   <CalendarAppointmentBlock
                                     key={app.id}
                                     app={app}
@@ -3920,7 +3988,7 @@ export default function AppLayout() {
                       </div>
                       <div className="mt-auto flex gap-2">
                          <button onClick={() => { 
-                           setSelectedSlot(p); 
+                           setSelectedSlot({ ...p, patientId: p.id }); 
                            setShowPatientProfile(true); 
                          }} className="flex-1 bg-emerald-600 text-white text-[9px] font-black uppercase py-2 rounded hover:bg-emerald-700 transition shadow-sm">💳 {L.chart}</button>
                          <button onClick={() => { 
@@ -4756,8 +4824,13 @@ export default function AppLayout() {
                   <div className="space-y-3">
                     <div>
                       <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">
-                        Teléfonos del equipo (SMS)
+                        {locale === 'en' ? 'Clinic phones (SMS)' : 'Teléfonos de la clínica (SMS)'}
                       </label>
+                      <p className="text-[8px] font-bold text-indigo-700/80 normal-case mb-1">
+                        {locale === 'en'
+                          ? 'Main recipients for booking alerts. Staff personal phones only receive alerts if they enable it in their employee profile.'
+                          : 'Destinatarios principales. El celular personal de cada empleado solo alerta si lo activan en su perfil de empleado.'}
+                      </p>
                       <textarea
                         rows={2}
                         value={dbCompanyConfig.staff_alert_phones || ''}
@@ -5162,7 +5235,7 @@ export default function AppLayout() {
                       <input type="tel" placeholder={L.p.admin.staffPhonePh} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" value={newUser.phone || ''} onChange={e => setNewUser({...newUser, phone: e.target.value})} />
                       <input type="email" placeholder={L.p.admin.staffEmailPh} className="w-full p-2.5 border rounded-lg font-bold outline-none text-slate-900 bg-white" value={newUser.email || ''} onChange={e => setNewUser({...newUser, email: e.target.value})} />
                       <label className="flex items-center gap-2 bg-indigo-50 p-3 rounded-lg border border-indigo-200 cursor-pointer">
-                        <input type="checkbox" checked={newUser.notify_on_booking !== false} onChange={e => setNewUser({ ...newUser, notify_on_booking: e.target.checked })} className="w-4 h-4" />
+                        <input type="checkbox" checked={newUser.notify_on_booking === true} onChange={e => setNewUser({ ...newUser, notify_on_booking: e.target.checked })} className="w-4 h-4" />
                         <span className="text-[10px] font-black uppercase text-indigo-900">{L.p.admin.staffNotifyBooking}</span>
                       </label>
                       <select className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})}>
@@ -5171,7 +5244,7 @@ export default function AppLayout() {
                       <input type="text" placeholder="Certificación (Ej. IBUM, D.O.)" className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" value={newUser.cert} onChange={e => setNewUser({...newUser, cert: e.target.value})} />
                       <input type="text" placeholder="PIN Personal (6 Dígitos)" maxLength="6" className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none tracking-widest text-slate-900 bg-white" value={newUser.pin || ''} onChange={e => setNewUser({...newUser, pin: e.target.value})} />
                       <div className="flex gap-2">
-                        {isEditingUser && <button onClick={() => {setIsEditingUser(false); setNewUser({ id: null, name: '', email: '', phone: '', notify_on_booking: true, role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' });}} className="w-1/3 bg-slate-300 text-slate-700 font-black py-3 rounded-xl uppercase text-xs">Cancelar</button>}
+                        {isEditingUser && <button onClick={() => {setIsEditingUser(false); setNewUser({ id: null, name: '', email: '', phone: '', notify_on_booking: false, role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' });}} className="w-1/3 bg-slate-300 text-slate-700 font-black py-3 rounded-xl uppercase text-xs">Cancelar</button>}
                         <button onClick={async () => {
                           if (!newUser.name) return alert(L.p.admin.userName);
                           if (!newUser.pin || newUser.pin.length !== 6) return alert(L.p.admin.pinSix);
@@ -5183,7 +5256,7 @@ export default function AppLayout() {
                             cert: newUser.cert,
                             is_active: newUser.is_active,
                             pin: newUser.pin,
-                            notify_on_booking: newUser.notify_on_booking !== false,
+                            notify_on_booking: newUser.notify_on_booking === true,
                             email,
                           };
                           const phone = (newUser.phone || '').trim();
@@ -5210,7 +5283,7 @@ export default function AppLayout() {
                             } else {
                               res = await saveStaff(fallback);
                             }
-                            if (!res.error && (phone || newUser.notify_on_booking !== false)) {
+                            if (!res.error && (phone || newUser.notify_on_booking === true)) {
                               alert(L.p.admin.staffPhoneColumnMissing);
                             }
                           } else if (res.error && res.error.message.toLowerCase().includes('column') && staffPayload.email) {
@@ -5225,7 +5298,7 @@ export default function AppLayout() {
                             await logAudit(null, newUser.name, 'ALTA DE EMPLEADO', `Rol: ${newUser.role} · ${activeClinic}`);
                           }
                           setIsEditingUser(false); 
-                          setNewUser({ id: null, name: '', email: '', phone: '', notify_on_booking: true, role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' }); 
+                          setNewUser({ id: null, name: '', email: '', phone: '', notify_on_booking: false, role: dbRoles[0]?.name || '', cert: '', is_active: true, pin: '' }); 
                           fetchAllData();
                         }} className="flex-1 bg-slate-900 text-white font-black py-3 rounded-xl uppercase text-xs shadow-md">{isEditingUser ? 'Actualizar' : 'Guardar'}</button>
                       </div>
@@ -5692,7 +5765,10 @@ export default function AppLayout() {
                       <label className="text-[10px] font-black uppercase text-amber-800 flex items-center gap-1 mb-1">{L.p.appt.notePermanent}</label>
                       <textarea 
                         value={selectedSlot.patientNotes || ''} 
-                        onChange={e => setSelectedSlot({...selectedSlot, patientNotes: e.target.value})}
+                        onChange={e => {
+                          slotNotesDirtyRef.current = true;
+                          setSelectedSlot({...selectedSlot, patientNotes: e.target.value});
+                        }}
                         className="w-full p-2 border border-amber-200 rounded-lg text-xs font-bold outline-none bg-white text-amber-900"
                         rows="2" placeholder={L.p.appt.notePermanentPh}
                       />
@@ -5701,7 +5777,10 @@ export default function AppLayout() {
                       <label className="text-[10px] font-black uppercase text-blue-800 flex items-center gap-1 mb-1">{L.p.appt.noteToday}</label>
                       <textarea 
                         value={selectedSlot.notes || ''} 
-                        onChange={e => setSelectedSlot({...selectedSlot, notes: e.target.value})}
+                        onChange={e => {
+                          slotNotesDirtyRef.current = true;
+                          setSelectedSlot({...selectedSlot, notes: e.target.value});
+                        }}
                         className="w-full p-2 border border-blue-200 rounded-lg text-xs font-bold outline-none bg-white text-blue-900"
                         rows="2" placeholder={L.p.appt.noteTodayPh}
                       />
@@ -5750,7 +5829,8 @@ export default function AppLayout() {
                           patientNotes: selectedSlot.patientNotes ?? prev.patientNotes,
                         }));
 
-                        alert(a('notesSavedOk'));
+                        slotNotesDirtyRef.current = false;
+                        flashSaveToast(a('notesSavedOk'));
                         await notifyCalendarChanged();
                         setDbAppointments((prev) => prev.map((a) => (
                           a.id === selectedSlot.id
@@ -6520,7 +6600,11 @@ export default function AppLayout() {
         <div className="relative z-50" style={{ zIndex: 9999 }}>
           <PatientProfileModal 
             initialData={(() => {
-              const profilePatient = dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
+              const profilePatient = (selectedSlot.patientId
+                ? dbPatients.find((p) => String(p.id) === String(selectedSlot.patientId))
+                : null)
+                || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient))
+                || resolvePatientForAppointment(selectedSlot, dbPatients);
               return {
                 ...selectedSlot,
                 ...profilePatient,
@@ -6529,7 +6613,7 @@ export default function AppLayout() {
                 patient: profilePatient?.patient || selectedSlot.patient,
                 phone: profilePatient?.phone || selectedSlot.phone || '',
                 email: profilePatient?.email || selectedSlot.email || '',
-                patientNotes: profilePatient?.notes || selectedSlot.patientNotes || '',
+                patientNotes: sanitizePatientNotesForDisplay(profilePatient?.notes || selectedSlot.patientNotes || ''),
                 prefers_email: profilePatient?.prefers_email !== false && selectedSlot.prefers_email !== false,
                 prefers_sms: profilePatient?.prefers_sms !== false && selectedSlot.prefers_sms !== false,
               };
@@ -6541,9 +6625,13 @@ export default function AppLayout() {
             currentUserLevel={currentUserLevel}
             sessionGroupsEnabled={sessionGroupsEnabled}
             allPatients={dbPatients}
-            sessionGroup={selectedSlot.sessionGroup || getPatientSessionGroup(
-              dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient)),
-            )}
+            sessionGroup={(() => {
+              const profilePat = (selectedSlot.patientId
+                ? dbPatients.find((p) => String(p.id) === String(selectedSlot.patientId))
+                : null)
+                || resolvePatientForAppointment(selectedSlot, dbPatients);
+              return selectedSlot.sessionGroup || getPatientSessionGroup(profilePat);
+            })()}
             onSessionUpdated={applySessionDataToSelectedSlot}
             onCreateSessionGroup={async ({ name, titularPatient }) => {
               await createSessionGroup(activeSupabase, { name, titularPatient, patients: dbPatients });
@@ -6672,6 +6760,10 @@ export default function AppLayout() {
             onSave={async (ud) => {
               const activeSupabase = createStaffDb(activeClinic);
               const patientDbId = ud.id || selectedSlot.patientId;
+              const existingPatient = patientDbId
+                ? dbPatients.find((p) => String(p.id) === String(patientDbId))
+                : resolvePatientForAppointment(selectedSlot, dbPatients);
+              const oldPatientName = existingPatient?.patient || selectedSlot.patient;
               const repairedWallets = repairLegacyWalletKeys(ud.wallets, ud.packageHistory).wallets;
               if (patientDbId) {
                 let p = { 
@@ -6705,6 +6797,26 @@ export default function AppLayout() {
                     historico_sesiones: ud.historicoSesiones,
                   }).eq('id', patientDbId);
                   await activeSupabase.from('patients').update({ adeudo: ud.adeudo ?? 0 }).eq('id', patientDbId);
+                } else if (res.error) {
+                  return alert(a('saveClientError', res.error.message));
+                }
+
+                if (normalizeStr(oldPatientName) !== normalizeStr(ud.patient)) {
+                  try {
+                    const renamed = await renamePatientAcrossClinic(activeSupabase, {
+                      oldName: oldPatientName,
+                      newName: ud.patient,
+                      phone: ud.phone,
+                    });
+                    await logAudit(
+                      selectedSlot?.id || null,
+                      ud.patient,
+                      'RENOMBRAR PACIENTE',
+                      `«${oldPatientName}» → «${ud.patient}». Citas: ${renamed.appointments}, auditoría: ${renamed.auditLogs}`,
+                    );
+                  } catch (renameErr) {
+                    return alert(a('saveClientError', renameErr.message));
+                  }
                 }
               } else if (digitsOnly(ud.phone).slice(-10).length === 10) {
                 await ensurePatient(activeSupabase, {
@@ -6717,6 +6829,26 @@ export default function AppLayout() {
                   prefers_sms: ud.prefers_sms,
                 });
               }
+
+              if (selectedSlot?.id) {
+                setSelectedSlot((prev) => (
+                  prev && prev.id === selectedSlot.id
+                    ? {
+                      ...prev,
+                      patient: ud.patient,
+                      patientId: patientDbId || prev.patientId,
+                      phone: ud.phone,
+                      email: ud.email,
+                      protocol: ud.protocol,
+                      patientNotes: ud.notes,
+                      prefers_email: ud.prefers_email,
+                      prefers_sms: ud.prefers_sms,
+                    }
+                    : prev
+                ));
+              }
+              broadcastLiveDataUpdated(activeClinic);
+              flashSaveToast(locale === 'en' ? 'Profile saved' : 'Expediente guardado');
               setShowPatientProfile(false); 
               fetchAllData();
             }} 
@@ -6732,9 +6864,14 @@ export default function AppLayout() {
             onSeal={async (sd, vt, summaryLines) => {
               const eq = selectedSlot.equipment;
               const servicePrice = selectedSlot.servicePrice || getServicePrice(dbServices, eq);
-              const pat = dbPatients.find((x) => x.id === selectedSlot.patientId)
-                || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
+              const pat = (selectedSlot.patientId
+                ? dbPatients.find((x) => String(x.id) === String(selectedSlot.patientId))
+                : null)
+                || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient))
+                || resolvePatientForAppointment(selectedSlot, dbPatients);
               if (!pat) return alert(a('genericError', 'Paciente no encontrado'));
+
+              const sealPatientName = pat.patient || selectedSlot.patient;
 
               const walletContext = resolveWalletContext({
                 patient: pat,
@@ -6767,7 +6904,7 @@ export default function AppLayout() {
                    ? ` Vitals: BP ${vt.pa}, Temp ${vt.temp}, HR ${vt.hr}.`
                    : ` Signos: PA ${vt.pa}, Temp ${vt.temp}, HR ${vt.hr}.`;
               }
-              await logAudit(selectedSlot.id, selectedSlot.patient, a('bitacoraSealedAuditAction'), auditStr);
+              await logAudit(selectedSlot.id, sealPatientName, a('bitacoraSealedAuditAction'), auditStr);
 
               setShowBitacora(false); setSelectedSlot(null); fetchAllData();
             }} 
@@ -6781,8 +6918,11 @@ export default function AppLayout() {
         title={appointmentSaveFeedback?.title || L.p.appt.creatingTitle}
         detail={appointmentSaveFeedback?.detail || ''}
         closeLabel={L.modals.patient.close}
+        autoCloseMs={appointmentSaveFeedback?.autoCloseMs || 0}
         onClose={appointmentSaveFeedback?.phase === 'creating' ? undefined : closeAppointmentSaveFeedback}
       />
+
+      <StaffSaveToast message={saveToast} />
 
       {/* Navegación inferior móvil — iconos */}
       {currentUser && (
