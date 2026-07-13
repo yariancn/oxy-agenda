@@ -108,6 +108,8 @@ import {
 } from '../lib/calendarDisplay';
 import { getWeekScrollLeftForToday } from '../lib/calendarScroll';
 import { defaultEquipmentForClinic } from '../lib/screenshotEquipment';
+import { getMissingAppointmentFields } from '../lib/appointmentFormValidation';
+import { normalizeAppointmentTime } from '../lib/screenshotAppointmentParse';
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
 import { formatClinicDateIso, getClinicNow } from '../lib/clinicClock';
 import {
@@ -1984,17 +1986,32 @@ export default function AppLayout() {
 
   const openNewAppointment = (draft = {}) => {
     setRepeatBooking({ enabled: false, dates: [] });
-    setSelectedSlot({ ...createEmptyAppointmentDraft(), ...draft });
+    const base = createEmptyAppointmentDraft();
+    const firstSrv = dbServices.find((s) => s.is_active);
+    const merged = { ...base, ...draft };
+    if (firstSrv && (!merged.serviceId || !merged.equipment)) {
+      const dur = Number(firstSrv.duration) || 60;
+      const buf = Number(firstSrv.buffer ?? 30);
+      merged.serviceId = merged.serviceId || firstSrv.id;
+      merged.equipment = merged.equipment || firstSrv.name;
+      merged.duration = merged.duration || dur;
+      merged.buffer = merged.buffer ?? buf;
+      merged.sessionPreset = merged.sessionPreset || getPresetFromTimes(dur, buf).id;
+    }
+    setSelectedSlot(merged);
     setShowNewAppointment(true);
   };
 
   const buildDraftFromScreenshot = (form) => {
+    const equipmentFallback = defaultEquipmentForClinic(activeClinic, dbServices);
     const srv = dbServices.find((s) => s.name === form.equipment && s.is_active)
       || dbServices.find((s) => s.is_active);
     const duration = Number(srv?.duration) || 60;
     const buffer = Number(srv?.buffer ?? 30);
     const exact = dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(form.patient));
     const fullDate = form.fullDate;
+    const time = normalizeAppointmentTime(form.time) || String(form.time || '').trim();
+    const equipment = form.equipment || equipmentFallback || srv?.name || '';
     return {
       ...createEmptyAppointmentDraft(),
       patient: String(form.patient || '').trim(),
@@ -2005,10 +2022,10 @@ export default function AppLayout() {
       patientNotes: exact?.notes || '',
       fullDate,
       full_date: fullDate,
-      day: getDayNameFromDate(locale, new Date(`${fullDate}T12:00:00`)),
-      time: form.time,
+      day: fullDate ? getDayNameFromDate(locale, new Date(`${fullDate}T12:00:00`)) : currentDayInfo.name,
+      time,
       notes: form.notes || '',
-      equipment: form.equipment || srv?.name || '',
+      equipment,
       serviceId: srv?.id ?? '',
       duration,
       buffer,
@@ -2060,6 +2077,11 @@ export default function AppLayout() {
     title: locale === 'en' ? 'Assistant' : 'Asistente',
     subtitle: locale === 'en' ? 'By your access level' : 'Según tu nivel de acceso',
   }), [locale]);
+
+  const newAppointmentMissing = useMemo(() => {
+    if (!showNewAppointment || !selectedSlot) return [];
+    return getMissingAppointmentFields(selectedSlot, locale);
+  }, [showNewAppointment, selectedSlot, locale]);
 
   useEffect(() => {
     if (!showNewAppointment || !repeatBooking.enabled) return;
@@ -3100,7 +3122,8 @@ export default function AppLayout() {
       && !dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(slot.patient));
     try {
       if (!slot?.patient || !slot?.equipment || !slot?.time) {
-        return alert(staffAlert(locale, 'missingData'));
+        const missing = getMissingAppointmentFields(slot, locale);
+        return alert(staffAlert(locale, 'missingAppointmentFields', missing));
       }
 
       const apptDate = slot.fullDate || slot.full_date || currentFullDate;
@@ -6443,6 +6466,11 @@ export default function AppLayout() {
             </div>
 
             <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-t shrink-0 flex flex-col sm:flex-row gap-2 sm:gap-3 text-slate-900">
+              {newAppointmentMissing.length > 0 ? (
+                <p className="w-full text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 sm:col-span-2">
+                  {staffAlert(locale, 'missingAppointmentFields', newAppointmentMissing)}
+                </p>
+              ) : null}
               <button
                 onClick={() => { setShowNewAppointment(false); setSelectedSlot(null); }}
                 disabled={isSavingAppointment}
@@ -6452,7 +6480,7 @@ export default function AppLayout() {
               </button>
               <button
                 onClick={handleSaveNewAppointment}
-                disabled={isSavingAppointment}
+                disabled={isSavingAppointment || newAppointmentMissing.length > 0}
                 className="w-full sm:flex-1 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-emerald-700 transition disabled:opacity-60"
               >
                 {isSavingAppointment ? L.p.appt.creatingTitle : L.p.appt.scheduleSlot}
@@ -7033,8 +7061,12 @@ export default function AppLayout() {
           referenceDate={clinicNow.dateStr || currentFullDate}
           onSchedule={async (form) => {
             const draft = buildDraftFromScreenshot(form);
-            setShowScreenshotIntake(false);
+            const missing = getMissingAppointmentFields(draft, locale);
+            if (missing.length) {
+              throw new Error(staffAlert(locale, 'missingAppointmentFields', missing));
+            }
             await handleSaveNewAppointment(draft);
+            setShowScreenshotIntake(false);
           }}
         />
       )}

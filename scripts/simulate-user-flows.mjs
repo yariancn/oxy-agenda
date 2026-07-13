@@ -38,6 +38,7 @@ import {
   resolveScreenshotEquipment,
 } from '../lib/screenshotEquipment.js';
 import { getAllowedClinics, normalizeStaffSessionUser } from '../lib/clinicAccess.js';
+import { getMissingAppointmentFields } from '../lib/appointmentFormValidation.js';
 
 let passed = 0;
 function test(name, fn) {
@@ -292,6 +293,15 @@ test('captura: extrae cámara del texto', () => {
     extractEquipmentFromText('quiero camara 1 por favor', gdlServices),
     'CAMARA 1, 60 MIN',
   );
+});
+
+test('cita: detecta hora faltante al agendar desde paciente', () => {
+  const missing = getMissingAppointmentFields({
+    patient: 'BRENDA FLORES',
+    equipment: 'CAMARA 2 60 MIN',
+    time: '',
+  }, 'es');
+  assert.deepEqual(missing, ['hora']);
 });
 
 console.log(`\n${passed} pruebas OK\n`);
