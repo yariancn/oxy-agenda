@@ -46,6 +46,7 @@ import PatientSessionHistory from '../components/PatientSessionHistory';
 import AppointmentSavingOverlay from '../components/AppointmentSavingOverlay';
 import StaffSaveToast from '../components/StaffSaveToast';
 import ScreenshotAppointmentModal from '../components/ScreenshotAppointmentModal';
+import StaffAgentChat from '../components/StaffAgentChat';
 import RepeatDatesCalendar from '../components/RepeatDatesCalendar';
 import GFEManager from '../components/GFEManager';
 import { InstallGuideLink } from '../components/InstallGuide';
@@ -229,6 +230,7 @@ export default function AppLayout() {
   const [showPatientProfile, setShowPatientProfile] = useState(false);
   const [showNewAppointment, setShowNewAppointment] = useState(false);
   const [showScreenshotIntake, setShowScreenshotIntake] = useState(false);
+  const [showAgentChat, setShowAgentChat] = useState(false);
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
   const [appointmentSaveFeedback, setAppointmentSaveFeedback] = useState(null);
   const [saveToast, setSaveToast] = useState('');
@@ -2054,6 +2056,11 @@ export default function AppLayout() {
     [activeClinic, dbServices],
   );
 
+  const agentChatLabels = useMemo(() => ({
+    title: locale === 'en' ? 'Assistant' : 'Asistente',
+    subtitle: locale === 'en' ? 'By your access level' : 'Según tu nivel de acceso',
+  }), [locale]);
+
   useEffect(() => {
     if (!showNewAppointment || !repeatBooking.enabled) return;
     const d = selectedSlot?.fullDate || selectedSlot?.full_date;
@@ -3626,6 +3633,7 @@ export default function AppLayout() {
           <button onClick={() => selectTab('Agenda')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Agenda' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📅 {L.tabs.Agenda}</button>
           <button onClick={() => selectTab('Pacientes')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Pacientes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>👥 {L.tabs.Pacientes}</button>
           <button onClick={() => selectTab('GFE')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'GFE' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🩺 {L.tabs.GFE}</button>
+          <button type="button" onClick={() => setShowAgentChat(true)} className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm text-violet-300 hover:bg-slate-800">🤖 {locale === 'en' ? 'Assistant' : 'Asistente'}</button>
           
           {currentUserLevel <= 2 && (
             <>
@@ -7031,6 +7039,15 @@ export default function AppLayout() {
         />
       )}
 
+      <StaffAgentChat
+        open={showAgentChat}
+        onClose={() => setShowAgentChat(false)}
+        activeClinic={activeClinic}
+        locale={locale}
+        labels={agentChatLabels}
+        isMaster={currentUserLevel <= 1}
+      />
+
       {/* Navegación inferior móvil — iconos */}
       {currentUser && (
         <>
@@ -7063,6 +7080,18 @@ export default function AppLayout() {
                   <span className="text-[8px] font-black uppercase truncate max-w-full">{tab.label}</span>
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMoreOpen(false);
+                  setShowAgentChat(true);
+                }}
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-w-0 px-1 ${showAgentChat ? 'text-violet-400' : 'text-slate-500'}`}
+                aria-label={locale === 'en' ? 'Assistant' : 'Asistente'}
+              >
+                <span className="text-base leading-none">🤖</span>
+                <span className="text-[8px] font-black uppercase truncate max-w-full">{locale === 'en' ? 'Agent' : 'Agente'}</span>
+              </button>
               <button
                 type="button"
                 onClick={() => {
