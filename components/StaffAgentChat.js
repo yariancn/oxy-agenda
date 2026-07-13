@@ -24,7 +24,7 @@ export default function StaffAgentChat({
     close: labels.close || (locale === 'en' ? 'Close' : 'Cerrar'),
     welcome: labels.welcome || (locale === 'en'
       ? 'Hi. Write naturally — typos and accents are OK. Try: "today\'s schedule", "find patient Garcia", "sales report".'
-      : 'Hola. Escribe natural — entiendo con faltas de ortografía y sin acentos. Prueba: "agenda de hoy", "buscar paciente García", "brenda flores".'),
+      : 'Hola. Pregunta cómo hacer algo («¿cómo cobro a un cliente?») o pídeme acciones: "agenda de hoy", "buscar paciente García".'),
     thinking: labels.thinking || (locale === 'en' ? 'Thinking…' : 'Pensando…'),
     error: labels.error || (locale === 'en' ? 'Could not reach assistant.' : 'No pude contactar al asistente.'),
   };

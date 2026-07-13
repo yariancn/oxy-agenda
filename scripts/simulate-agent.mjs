@@ -161,6 +161,36 @@ await test('typos: maestro busca con errores ortográficos', async () => {
   assert.match(res.reply, /BRENDA FLORES/i);
 });
 
+await test('ayuda: como cobrar a un cliente', async () => {
+  const res = await handleAgentMessage({
+    user: basicStaff,
+    dbRoles,
+    activeClinic: CLINIC_OXYGENDGL,
+    message: 'como puedo cobrar a un cliente?',
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.toolId, AGENT_TOOL_IDS.HELP_GUIDE);
+  assert.match(res.reply, /Expediente/i);
+  assert.match(res.reply, /Cobrar y generar ticket/i);
+});
+
+await test('ayuda: no encuentro paciente', async () => {
+  const mockServices = {
+    clinic: CLINIC_OXYGENDGL,
+    listPatients: async () => [],
+  };
+  const res = await handleAgentMessage({
+    user: basicStaff,
+    dbRoles,
+    activeClinic: CLINIC_OXYGENDGL,
+    message: 'buscar paciente xyz inexistente',
+    services: mockServices,
+  });
+  assert.equal(res.ok, true);
+  assert.match(res.reply, /No encontré pacientes/i);
+  assert.match(res.reply, /cómo cobro/i);
+});
+
 await test('facultades: básico sin ventas ni admin maestro', async () => {
   const caps = await getAgentCapabilitiesForUser({
     user: basicStaff,
