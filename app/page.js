@@ -345,6 +345,28 @@ export default function AppLayout() {
   const presetLabels = useMemo(() => getSessionPresetLabels(locale), [locale]);
   const a = (key, ...args) => staffAlert(locale, key, ...args);
 
+  const formatAppointmentSaveError = (err) => {
+    const msg = err?.message || String(err || '');
+    if (err?.sessionExpired || /unauthorized/i.test(msg)) return L.dbErrorUnauthorized;
+    if (/access denied/i.test(msg)) {
+      return locale === 'en' ? 'You do not have access to this clinic.' : 'No tienes acceso a esta clínica.';
+    }
+    return a('connectionErrorMsg', msg);
+  };
+
+  const refreshStaffSessionForSave = async () => {
+    try {
+      const res = await fetch('/api/auth/me', { credentials: 'include' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.user) return false;
+      const user = normalizeStaffSessionUser(data.user, { roleLevel: data.user?.accessLevel });
+      setCurrentUser(user);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const emailTemplateTabLabels = {
     first: locale === 'en' ? 'First appointment' : 'Primera cita',
     booking: locale === 'en' ? 'Scheduling' : 'Programación',
@@ -3155,6 +3177,17 @@ export default function AppLayout() {
         return alert(staffAlert(locale, 'overlap'));
       }
 
+      const sessionFresh = await refreshStaffSessionForSave();
+      if (!sessionFresh) {
+        setAppointmentSaveFeedback({
+          phase: 'error',
+          title: locale === 'en' ? 'Session expired' : 'Sesión expirada',
+          detail: L.dbErrorUnauthorized,
+          closeForm: false,
+        });
+        return;
+      }
+
       setIsSavingAppointment(true);
       setAppointmentSaveFeedback({
         phase: 'creating',
@@ -3183,7 +3216,9 @@ export default function AppLayout() {
           setAppointmentSaveFeedback({
             phase: 'error',
             title: locale === 'en' ? 'Could not save' : 'No se pudo guardar',
-            detail: staffAlert(locale, 'patientFileError', ensured.error.message),
+            detail: /unauthorized/i.test(ensured.error.message)
+              ? L.dbErrorUnauthorized
+              : staffAlert(locale, 'patientFileError', ensured.error.message),
             closeForm: false,
           });
           return;
@@ -3206,7 +3241,9 @@ export default function AppLayout() {
           setAppointmentSaveFeedback({
             phase: 'error',
             title: locale === 'en' ? 'Could not save' : 'No se pudo guardar',
-            detail: staffAlert(locale, 'patientFileError', contactResult.error.message),
+            detail: /unauthorized/i.test(contactResult.error.message)
+              ? L.dbErrorUnauthorized
+              : staffAlert(locale, 'patientFileError', contactResult.error.message),
             closeForm: false,
           });
           return;
@@ -3266,6 +3303,9 @@ export default function AppLayout() {
           if (error.message === 'SLOT_UNAVAILABLE') {
             skippedCount += 1;
             continue;
+          }
+          if (error.sessionExpired || /unauthorized/i.test(error.message)) {
+            throw Object.assign(new Error(error.message || 'Unauthorized'), { sessionExpired: true });
           }
           throw error;
         }
@@ -3350,7 +3390,7 @@ export default function AppLayout() {
       setAppointmentSaveFeedback({
         phase: 'error',
         title: locale === 'en' ? 'Error' : 'Error',
-        detail: a('connectionErrorMsg', e?.message || String(e)),
+        detail: formatAppointmentSaveError(e),
         closeForm: false,
       });
     } finally {
