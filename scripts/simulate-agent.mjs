@@ -12,6 +12,7 @@ import {
   AGENT_TOOL_IDS,
   ROLE_LEVEL,
 } from '../lib/agent/index.js';
+import { extractPatientSearchQuery } from '../lib/agent/parseParams.js';
 import { CLINIC_OXYGENDGL } from '../lib/clinicRegistry.js';
 
 let passed = 0;
@@ -91,6 +92,32 @@ await test('staff básico no recibe alerta de diseño en sesión normal', async 
     message: 'ver agenda de hoy',
   });
   assert.equal(res.adminAlert, undefined);
+});
+
+await test('maestro no recibe banner de auditoría al buscar paciente', async () => {
+  const mockServices = {
+    clinic: CLINIC_OXYGENDGL,
+    listPatients: async ({ search }) => {
+      assert.equal(search, 'brenda flores');
+      return [{ patient: 'BRENDA FLORES', phone: '+52 3314108510', is_blocked: false }];
+    },
+  };
+  const res = await handleAgentMessage({
+    user: masterUser,
+    dbRoles,
+    activeClinic: CLINIC_OXYGENDGL,
+    message: 'buscar pacientes brenda flores',
+    services: mockServices,
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.toolId, AGENT_TOOL_IDS.SEARCH_PATIENT);
+  assert.match(res.reply, /BRENDA FLORES/i);
+  assert.equal(res.adminAlert, undefined);
+});
+
+await test('extractPatientSearchQuery: plural pacientes', () => {
+  assert.equal(extractPatientSearchQuery('buscar pacientes brenda flores'), 'brenda flores');
+  assert.equal(extractPatientSearchQuery('buscar paciente García'), 'García');
 });
 
 await test('facultades: básico sin ventas ni admin maestro', async () => {
