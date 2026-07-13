@@ -13,6 +13,8 @@ import {
   ROLE_LEVEL,
 } from '../lib/agent/index.js';
 import { extractPatientSearchQuery } from '../lib/agent/parseParams.js';
+import { classifyAgentIntent } from '../lib/agent/intents.js';
+import { foldAgentText, fuzzyMatchToken, stripPatientSearchPrefix } from '../lib/agent/textUnderstand.js';
 import { CLINIC_OXYGENDGL } from '../lib/clinicRegistry.js';
 
 let passed = 0;
@@ -117,7 +119,46 @@ await test('maestro no recibe banner de auditoría al buscar paciente', async ()
 
 await test('extractPatientSearchQuery: plural pacientes', () => {
   assert.equal(extractPatientSearchQuery('buscar pacientes brenda flores'), 'brenda flores');
-  assert.equal(extractPatientSearchQuery('buscar paciente García'), 'García');
+  assert.equal(extractPatientSearchQuery('buscar paciente García'), 'garcia');
+});
+
+await test('comprensión: typos y mayúsculas en búsqueda', () => {
+  assert.equal(extractPatientSearchQuery('BUSCAR PACINETE brenda flores'), 'brenda flores');
+  assert.equal(extractPatientSearchQuery('busacr pacientes brenda flores'), 'brenda flores');
+  assert.equal(extractPatientSearchQuery('brenda flores'), 'brenda flores');
+  const intent = classifyAgentIntent('busacr pacinete brenda flores');
+  assert.equal(intent.toolId, AGENT_TOOL_IDS.SEARCH_PATIENT);
+});
+
+await test('comprensión: agenda con typos', () => {
+  assert.equal(classifyAgentIntent('ver agemda de hoy').toolId, AGENT_TOOL_IDS.VIEW_TODAY_SCHEDULE);
+  assert.equal(classifyAgentIntent('CITAS DE HOY').toolId, AGENT_TOOL_IDS.VIEW_TODAY_SCHEDULE);
+});
+
+await test('comprensión: sin acentos', () => {
+  assert.equal(foldAgentText('García Pérez'), 'garcia perez');
+  assert.ok(fuzzyMatchToken('pacinete', ['paciente', 'pacientes']));
+  assert.equal(stripPatientSearchPrefix('buscar paciente garcia'), 'garcia');
+});
+
+await test('typos: maestro busca con errores ortográficos', async () => {
+  const mockServices = {
+    clinic: CLINIC_OXYGENDGL,
+    listPatients: async ({ search }) => {
+      assert.equal(search, 'brenda flores');
+      return [{ patient: 'BRENDA FLORES', phone: '+52 3314108510', is_blocked: false }];
+    },
+  };
+  const res = await handleAgentMessage({
+    user: masterUser,
+    dbRoles,
+    activeClinic: CLINIC_OXYGENDGL,
+    message: 'busacr pacinete brenda flores',
+    services: mockServices,
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.toolId, AGENT_TOOL_IDS.SEARCH_PATIENT);
+  assert.match(res.reply, /BRENDA FLORES/i);
 });
 
 await test('facultades: básico sin ventas ni admin maestro', async () => {

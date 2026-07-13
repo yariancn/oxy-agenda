@@ -23,8 +23,8 @@ export default function StaffAgentChat({
     send: labels.send || (locale === 'en' ? 'Send' : 'Enviar'),
     close: labels.close || (locale === 'en' ? 'Close' : 'Cerrar'),
     welcome: labels.welcome || (locale === 'en'
-      ? 'Hi. Try: "agenda de hoy", "buscar paciente García", "reporte de ventas".'
-      : 'Hola. Prueba: "agenda de hoy", "buscar paciente García", "reporte de ventas".'),
+      ? 'Hi. Write naturally — typos and accents are OK. Try: "today\'s schedule", "find patient Garcia", "sales report".'
+      : 'Hola. Escribe natural — entiendo con faltas de ortografía y sin acentos. Prueba: "agenda de hoy", "buscar paciente García", "brenda flores".'),
     thinking: labels.thinking || (locale === 'en' ? 'Thinking…' : 'Pensando…'),
     error: labels.error || (locale === 'en' ? 'Could not reach assistant.' : 'No pude contactar al asistente.'),
   };
