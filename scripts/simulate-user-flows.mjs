@@ -47,6 +47,7 @@ import {
   CONFIRMATION_STATUS,
 } from '../lib/appointmentConfirmation.js';
 import { buildPromoterNoShowEmail } from '../lib/promoterNoShowNotify.js';
+import { reverseNoShowWalletImpact, adjustWalletSessions } from '../lib/sessionWallet.js';
 
 let passed = 0;
 function test(name, fn) {
@@ -403,6 +404,19 @@ test('promotor: correo no-show en inglés (Houston)', () => {
   assert.match(subject, /No-show: Ruth Kelly/i);
   assert.match(emailHtml, /marked as a <strong>no-show<\/strong>/i);
   assert.match(emailHtml, /MARKTR/);
+});
+
+test('no-show: revertir baja adeudo o regresa sesión a cartera', () => {
+  const fromDebt = reverseNoShowWalletImpact({}, 2, { equipment: 'Chamber 1', servicePrice: 115 });
+  assert.equal(fromDebt.restored, 'adeudo');
+  assert.equal(fromDebt.adeudo, 1);
+
+  const fromWallet = reverseNoShowWalletImpact({ price_115: 0 }, 0, { equipment: 'Chamber 1', servicePrice: 115 });
+  assert.equal(fromWallet.restored, 'wallet');
+  assert.ok(Object.values(fromWallet.wallets).some((n) => Number(n) > 0));
+
+  const adjusted = adjustWalletSessions({ price_115: 2 }, { servicePrice: 115, delta: -1 });
+  assert.equal(adjusted.price_115, 1);
 });
 
 console.log(`\n${passed} pruebas OK\n`);

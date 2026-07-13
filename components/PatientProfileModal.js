@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useStaffLocale } from './StaffLocaleContext';
 import PosReceiptModal from './PosReceiptModal';
-import { applyPurchaseSessions, priceWalletKey, reversePurchaseSessions, sumWalletBalance, resolveWalletStorageKey, formatWalletKeyLabel, repairLegacyWalletKeys } from '../lib/sessionWallet';
+import { adjustWalletSessions, applyPurchaseSessions, priceWalletKey, reversePurchaseSessions, sumWalletBalance, resolveWalletStorageKey, formatWalletKeyLabel, repairLegacyWalletKeys } from '../lib/sessionWallet';
 import { sumPurchasedSessions } from '../lib/sessionSummary';
 import { canCreateSessionGroup, canJoinSessionGroup, isGroupTitular } from '../lib/sessionGroup';
 import { sanitizePatientNotesForDisplay } from '../lib/patientNotes';
@@ -61,6 +61,9 @@ export default function PatientProfileModal({
   const [posPrice, setPosPrice] = useState('');
   const [posPaymentMethod, setPosPaymentMethod] = useState(locale === 'en' ? 'Credit Card' : 'Tarjeta de Crédito');
   const [posNotes, setPosNotes] = useState('');
+  const [posPartial, setPosPartial] = useState(false);
+  const [posPackageTotal, setPosPackageTotal] = useState('');
+  const [posBalanceDue, setPosBalanceDue] = useState('');
   const [receipt, setReceipt] = useState(null);
   const [charging, setCharging] = useState(false);
   const [lastPurchaseNote, setLastPurchaseNote] = useState('');
@@ -74,6 +77,8 @@ export default function PatientProfileModal({
   const isMember = inGroup && !isTitular;
   const groupPurchased = sumPurchasedSessions(sessionGroup?.packageHistory || formData.packageHistory);
   const groupPending = sumWalletBalance(sessionGroup?.wallets || (isTitular ? {} : formData.wallets));
+  const historyForBalance = (isTitular && sessionGroup ? sessionGroup.packageHistory : formData.packageHistory) || [];
+  const openPackageBalanceDue = historyForBalance.reduce((sum, tx) => sum + (Number(tx.balanceDue) || 0), 0);
 
   const paymentOptions = locale === 'en'
     ? [
@@ -196,7 +201,20 @@ export default function PatientProfileModal({
       protocol: formData.protocol,
       debtCleared: 0,
       addedToWallet: 0,
+      partialPayment: false,
+      packageTotalSessions: null,
+      balanceDue: 0,
     };
+
+    if (posPartial) {
+      const packageTotal = Math.max(sessions, Number(posPackageTotal) || sessions);
+      const balanceDue = Math.max(0, parseFloat(posBalanceDue) || 0);
+      newTransaction.partialPayment = true;
+      newTransaction.packageTotalSessions = packageTotal;
+      newTransaction.balanceDue = balanceDue;
+      const partialNote = t.partialTicketNote(sessions, packageTotal, balanceDue.toFixed(2));
+      newTransaction.ticketNotes = [posNotes.trim(), partialNote].filter(Boolean).join(' · ');
+    }
 
     const useGroup = isTitular && sessionGroup?.id && onGroupPurchase;
     const walletKey = useGroup
@@ -270,6 +288,9 @@ export default function PatientProfileModal({
     setPosUnitPrice('');
     setPosPrice('');
     setPosNotes('');
+    setPosPartial(false);
+    setPosPackageTotal('');
+    setPosBalanceDue('');
     setPosPaymentMethod(paymentOptions[0].value);
   };
 
@@ -545,6 +566,11 @@ export default function PatientProfileModal({
                 <span>{t.adeudoSessions(inGroup && sessionGroup ? sessionGroup.adeudo : formData.adeudo)}</span>
               </div>
             )}
+            {openPackageBalanceDue > 0 && (
+              <div className="flex justify-between bg-amber-50 border border-amber-300 p-2 rounded-lg text-[10px] font-black mb-2 text-amber-900">
+                <span>{t.balanceDueBadge(openPackageBalanceDue.toFixed(2))}</span>
+              </div>
+            )}
             <div className="flex justify-between bg-white p-2 rounded border text-[10px] font-black mb-2">
               <span>{t.sessionsTaken}</span>
               <span>{formData.historicoSesiones || 0}</span>
@@ -573,6 +599,136 @@ export default function PatientProfileModal({
             ) : (
               <p className="text-[10px] italic text-slate-400 uppercase">{t.noBalance}</p>
             )}
+            {!isMember && (
+              <div className="mt-3 pt-3 border-t space-y-2">
+                <p className="text-[10px] font-black text-slate-500 uppercase">{t.adjustWalletTitle}</p>
+                <p className="text-[8px] font-bold text-slate-500 normal-case leading-snug">{t.adjustWalletHint}</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={!posService && !servicios?.[0]}
+                    onClick={async () => {
+                      const serviceName = posService || servicios?.[0]?.name || '';
+                      if (!serviceName) return alert(t.selectValidService);
+                      const svc = servicios?.find((s) => s.name === serviceName);
+                      const unitPrice = Number(svc?.price) || 0;
+                      const base = svc?.equipment || serviceName;
+                      const nextWallets = adjustWalletSessions(
+                        isTitular && sessionGroup ? (sessionGroup.wallets || {}) : formData.wallets,
+                        {
+                          equipment: base,
+                          serviceName,
+                          servicePrice: unitPrice,
+                          packageHistory: isTitular && sessionGroup ? sessionGroup.packageHistory : formData.packageHistory,
+                          delta: 1,
+                        },
+                      );
+                      if (isTitular && sessionGroup?.id && onGroupPurchase) {
+                        onGroupPurchase({
+                          groupId: sessionGroup.id,
+                          wallets: nextWallets,
+                          adeudo: sessionGroup.adeudo || 0,
+                          transaction: null,
+                          adjustOnly: true,
+                        });
+                      } else {
+                        setFormData((prev) => ({ ...prev, wallets: nextWallets }));
+                        try {
+                          await onPersistPurchase?.({
+                            patientId: formData.id,
+                            wallets: nextWallets,
+                            adeudo: formData.adeudo,
+                            packageHistory: formData.packageHistory,
+                          });
+                        } catch (err) {
+                          alert(err?.message || String(err));
+                        }
+                      }
+                    }}
+                    className="bg-emerald-100 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase"
+                  >
+                    {t.adjustAdd}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const serviceName = posService || servicios?.[0]?.name || '';
+                      if (!serviceName) return alert(t.selectValidService);
+                      const svc = servicios?.find((s) => s.name === serviceName);
+                      const unitPrice = Number(svc?.price) || 0;
+                      const base = svc?.equipment || serviceName;
+                      const nextWallets = adjustWalletSessions(
+                        isTitular && sessionGroup ? (sessionGroup.wallets || {}) : formData.wallets,
+                        {
+                          equipment: base,
+                          serviceName,
+                          servicePrice: unitPrice,
+                          packageHistory: isTitular && sessionGroup ? sessionGroup.packageHistory : formData.packageHistory,
+                          delta: -1,
+                        },
+                      );
+                      if (isTitular && sessionGroup?.id && onGroupPurchase) {
+                        onGroupPurchase({
+                          groupId: sessionGroup.id,
+                          wallets: nextWallets,
+                          adeudo: sessionGroup.adeudo || 0,
+                          transaction: null,
+                          adjustOnly: true,
+                        });
+                      } else {
+                        setFormData((prev) => ({ ...prev, wallets: nextWallets }));
+                        try {
+                          await onPersistPurchase?.({
+                            patientId: formData.id,
+                            wallets: nextWallets,
+                            adeudo: formData.adeudo,
+                            packageHistory: formData.packageHistory,
+                          });
+                        } catch (err) {
+                          alert(err?.message || String(err));
+                        }
+                      }
+                    }}
+                    className="bg-slate-100 text-slate-800 border border-slate-200 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase"
+                  >
+                    {t.adjustRemove}
+                  </button>
+                  {((isTitular && sessionGroup ? sessionGroup.adeudo : formData.adeudo) || 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const currentAdeudo = Number(isTitular && sessionGroup ? sessionGroup.adeudo : formData.adeudo) || 0;
+                        const nextAdeudo = Math.max(0, currentAdeudo - 1);
+                        if (isTitular && sessionGroup?.id && onGroupPurchase) {
+                          onGroupPurchase({
+                            groupId: sessionGroup.id,
+                            wallets: sessionGroup.wallets || {},
+                            adeudo: nextAdeudo,
+                            transaction: null,
+                            adjustOnly: true,
+                          });
+                        } else {
+                          setFormData((prev) => ({ ...prev, adeudo: nextAdeudo }));
+                          try {
+                            await onPersistPurchase?.({
+                              patientId: formData.id,
+                              wallets: formData.wallets,
+                              adeudo: nextAdeudo,
+                              packageHistory: formData.packageHistory,
+                            });
+                          } catch (err) {
+                            alert(err?.message || String(err));
+                          }
+                        }
+                      }}
+                      className="bg-orange-100 text-orange-800 border border-orange-200 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase"
+                    >
+                      {t.forgiveDebt}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="mt-3 pt-3 border-t">
               <span className="text-[10px] font-black text-slate-500 uppercase block mb-2">{t.paymentHistory}</span>
               {(isTitular && sessionGroup ? sessionGroup.packageHistory : formData.packageHistory)?.length ? (
@@ -584,6 +740,12 @@ export default function PatientProfileModal({
                           #{tx.ticketNumber || tx.ticket_number || String(tx.id).slice(-6)} · {tx.serviceName} ({tx.sessions} {t.sessionsShort})
                         </p>
                         <p className="text-[8px] text-slate-400 uppercase">{tx.date} · ${tx.price}</p>
+                        {(Number(tx.balanceDue) || 0) > 0 && (
+                          <p className="text-[8px] font-black text-amber-700 uppercase mt-0.5">
+                            {t.balanceDueBadge(Number(tx.balanceDue).toFixed(2))}
+                            {tx.packageTotalSessions ? ` · ${tx.sessions}/${tx.packageTotalSessions}` : ''}
+                          </p>
+                        )}
                       </div>
                       <div className="flex flex-col gap-1 shrink-0">
                         <button type="button" onClick={() => setReceipt({ ...tx, phone: tx.phone || formData.phone })} className="text-[9px] font-black text-slate-700 uppercase px-2 py-1 border border-slate-200 rounded bg-slate-50">
@@ -644,6 +806,44 @@ export default function PatientProfileModal({
                 <p className="text-[9px] font-bold text-blue-800 mt-1 uppercase">
                   {t.posTotalPreview(posQty, parseFloat(posUnitPrice).toFixed(2), parseFloat(posPrice).toFixed(2), currency)}
                 </p>
+              )}
+              <label className="flex items-start gap-2 mt-2 bg-white border border-blue-200 rounded-lg px-3 py-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={posPartial}
+                  onChange={(e) => setPosPartial(e.target.checked)}
+                  className="w-4 h-4 mt-0.5 shrink-0"
+                />
+                <span>
+                  <span className="block text-[9px] font-black uppercase text-blue-900">{t.partialPayment}</span>
+                  <span className="block text-[8px] font-bold text-blue-700/90 normal-case leading-snug mt-0.5">{t.partialPaymentHint}</span>
+                </span>
+              </label>
+              {posPartial && (
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div>
+                    <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.packageTotalSessions}</label>
+                    <input
+                      type="number"
+                      min={posQty || 1}
+                      value={posPackageTotal}
+                      onChange={(e) => setPosPackageTotal(e.target.value)}
+                      placeholder={String(posQty || 10)}
+                      className="w-full p-2 font-black border rounded"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.balanceDue}</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={posBalanceDue}
+                      onChange={(e) => setPosBalanceDue(e.target.value)}
+                      className="w-full p-2 font-black border rounded"
+                    />
+                  </div>
+                </div>
               )}
               {(formData.adeudo || 0) > 0 && (
                 <p className="text-[9px] font-bold text-orange-700 mt-1 normal-case">

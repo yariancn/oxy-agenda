@@ -123,6 +123,7 @@ import { buildPromoterBookingUrl, normalizePromoCode, resolvePromoterContext } f
 import { resolveNextTicketNumber } from '../lib/ticketNumber';
 import { formatSaleAuditDetail, formatSaleCancelAuditDetail } from '../lib/saleAudit';
 import {
+  adjustWalletSessions,
   applyPurchaseSessions,
   consumeSessionFromWallet,
   creditSessionToWallet,
@@ -130,6 +131,7 @@ import {
   persistWalletAfterConsume,
   repairLegacyWalletKeys,
   resolveWalletContext,
+  reverseNoShowWalletImpact,
   reversePurchaseSessions,
 } from '../lib/sessionWallet';
 import {
@@ -2874,12 +2876,26 @@ export default function AppLayout() {
         }
 
         await activeSupabase.from('appointments').update({ check_in_status: 'No Asistió' }).eq('id', id);
-        fetch('/api/staff/promoter-no-show', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ appointmentId: id, clinic: activeClinic }),
-        }).catch(() => {});
+        try {
+          const promoRes = await fetch('/api/staff/promoter-no-show', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ appointmentId: id, clinic: activeClinic }),
+          });
+          const promoData = await promoRes.json().catch(() => ({}));
+          if (promoData.ok && !promoData.skipped) {
+            alert(a('promoterNoShowSent'));
+          } else if (promoData.skipped && promoData.reason === 'no_email') {
+            alert(a('promoterNoShowNoEmail'));
+          } else if (promoData.skipped && (promoData.reason === 'no_promoter' || promoData.reason === 'promoter_inactive' || promoData.reason === 'not_no_show')) {
+            /* silent — no promoter */
+          } else if (!promoRes.ok || promoData.ok === false) {
+            alert(a('promoterNoShowError', promoData.error || promoData.message || promoRes.status));
+          }
+        } catch (promoErr) {
+          alert(a('promoterNoShowError', promoErr?.message || 'network'));
+        }
       } else if (status === 'Falta Justificada') {
         if (app.check_in_status === 'Falta Justificada') return alert(a('alreadyExcused'));
         await activeSupabase.from('appointments').update({ check_in_status: 'Falta Justificada' }).eq('id', id);
@@ -2919,6 +2935,58 @@ export default function AppLayout() {
       await activeSupabase.from('appointments').update({ check_in_status: 'Devuelto' }).eq('id', app.id);
       await logAudit(app.id, app.patient, 'DEVOLUCIÓN DE SESIÓN', `Sesión devuelta a cartera por cancelación de cobro.`);
       fetchAllData();
+    }
+  };
+
+  const undoNoShow = async (app) => {
+    if (!app?.id || app.check_in_status !== 'No Asistió') return;
+    if (!window.confirm(a('undoNoShowConfirm'))) return;
+    try {
+      const patientName = app.patient;
+      const eq = app.equipment;
+      const p = resolvePatientForAppointment(app, dbPatients)
+        || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(patientName));
+
+      if (p && !isAssessmentService(eq)) {
+        const servicePrice = getServicePrice(dbServices, eq);
+        const walletContext = resolveWalletContext({
+          patient: p,
+          sessionGroup: getPatientSessionGroup(p),
+          equipment: eq,
+          servicePrice,
+        });
+        const reversed = reverseNoShowWalletImpact(walletContext.wallets, walletContext.adeudo, {
+          equipment: eq,
+          servicePrice,
+          packageHistory: walletContext.packageHistory,
+        });
+        const nextHistorico = Math.max(0, (p.historicoSesiones || 0) - 1);
+        await persistWalletAfterConsume({
+          supabase: activeSupabase,
+          walletContext,
+          consumed: { wallets: reversed.wallets, deducted: true },
+          nextAdeudo: reversed.adeudo,
+          patientId: p.id,
+          historicoSesiones: nextHistorico,
+        });
+        await logAudit(
+          app.id,
+          patientName,
+          'REVERTIR NO-SHOW',
+          reversed.restored === 'adeudo'
+            ? `No-show revertido. Adeudo −1 (ahora ${reversed.adeudo}).`
+            : `No-show revertido. +1 sesión devuelta a cartera (${eq}).`,
+        );
+      } else {
+        await logAudit(app.id, patientName, 'REVERTIR NO-SHOW', 'No-show revertido (valoración o sin expediente).');
+      }
+
+      await activeSupabase.from('appointments').update({ check_in_status: 'Agendado' }).eq('id', app.id);
+      alert(a('undoNoShowOk'));
+      setSelectedSlot(null);
+      fetchAllData();
+    } catch (e) {
+      alert(a('statusUpdateError'));
     }
   };
 
@@ -5925,6 +5993,15 @@ export default function AppLayout() {
                      <button onClick={() => updateAppStatus(selectedSlot.id, 'Falta Justificada', selectedSlot.patient, selectedSlot.equipment)} className="bg-orange-100 text-orange-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-orange-200 transition">{L.p.appt.excused}</button>
                    </>
                  )}
+                 {!isRescheduling && selectedSlot.check_in_status === 'No Asistió' && (
+                   <button
+                     type="button"
+                     onClick={() => undoNoShow(selectedSlot)}
+                     className="bg-sky-100 text-sky-800 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-sky-200 transition border border-sky-200"
+                   >
+                     {L.p.appt.undoNoShow}
+                   </button>
+                 )}
                  
                  {selectedSlot.check_in_status !== 'Finalizado' && selectedSlot.check_in_status !== 'Devuelto' && selectedSlot.check_in_status !== 'Cancelado' && !isRescheduling && (
                      <button onClick={() => { setCancelDeductSession(false); setShowCancelModal(true); }} className="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-200 transition ml-auto border border-red-200">{L.p.appt.cancelAppt}</button>
@@ -6945,9 +7022,11 @@ export default function AppLayout() {
               await removeSessionGroupMember(activeSupabase, memberId);
               await fetchAllData();
             }}
-            onGroupPurchase={async ({ groupId, wallets, adeudo, transaction }) => {
+            onGroupPurchase={async ({ groupId, wallets, adeudo, transaction, adjustOnly }) => {
               const group = dbSessionGroups.find((g) => g.id === groupId);
-              const history = [transaction, ...(group?.packageHistory || [])];
+              const history = adjustOnly || !transaction
+                ? (group?.packageHistory || [])
+                : [transaction, ...(group?.packageHistory || [])];
               await activeSupabase.from('session_groups').update({
                 wallets,
                 adeudo,
