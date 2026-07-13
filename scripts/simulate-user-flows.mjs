@@ -39,6 +39,8 @@ import {
 } from '../lib/screenshotEquipment.js';
 import { getAllowedClinics, normalizeStaffSessionUser } from '../lib/clinicAccess.js';
 import { getMissingAppointmentFields, resolveAppointmentDraft } from '../lib/appointmentFormValidation.js';
+import { isAssessmentService } from '../lib/assessmentService.js';
+import { buildSessionSummary, formatSessionSummaryLines } from '../lib/sessionSummary.js';
 
 let passed = 0;
 function test(name, fn) {
@@ -315,6 +317,27 @@ test('cita: ignora evento de clic pasado por error al guardar', () => {
   assert.equal(resolved.patient, 'BRENDA FLORES');
   assert.equal(resolved.time, '12:00 PM');
   assert.deepEqual(getMissingAppointmentFields(resolved, 'es'), []);
+});
+
+test('valoración: no entra al pool de sesiones ni adeudo', () => {
+  assert.equal(isAssessmentService('VALORACION'), true);
+  assert.equal(isAssessmentService('Valoración inicial'), true);
+  assert.equal(isAssessmentService('CAMARA 2 60 MIN'), false);
+  const summary = buildSessionSummary({
+    equipment: 'VALORACION',
+    historicoSesiones: 3,
+    adeudo: 2,
+    wallets: {},
+    packageHistory: [],
+  });
+  assert.equal(summary.isAssessment, true);
+  assert.equal(summary.isDebtor, false);
+  const lines = formatSessionSummaryLines(summary, {
+    assessmentHeadline: 'Valoración (sin cargo de sesión)',
+    assessmentDetail: 'No descuenta cartera ni genera adeudo al sellar.',
+  });
+  assert.match(lines.headline, /Valoración/i);
+  assert.equal(lines.tone, 'ok');
 });
 
 console.log(`\n${passed} pruebas OK\n`);

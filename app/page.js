@@ -112,6 +112,7 @@ import { getMissingAppointmentFields, resolveAppointmentDraft } from '../lib/app
 import { normalizeAppointmentTime } from '../lib/screenshotAppointmentParse';
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
 import { formatClinicDateIso, getClinicNow } from '../lib/clinicClock';
+import { isAssessmentService } from '../lib/assessmentService';
 import {
   buildCalendarFeedUrl,
   buildGoogleCalendarSubscribeUrl,
@@ -2263,6 +2264,15 @@ export default function AppLayout() {
       equipment,
       servicePrice,
     });
+    if (isAssessmentService(equipment)) {
+      return {
+        deducted: false,
+        nextAdeudo: walletContext.adeudo,
+        walletContext,
+        consumed: { deducted: false, walletKey: null },
+        skippedAssessment: true,
+      };
+    }
     const consumed = consumeSessionFromWallet(walletContext.wallets, equipment, servicePrice);
     let nextAdeudo = walletContext.adeudo;
     if (!consumed.deducted) nextAdeudo += 1;
@@ -2799,17 +2809,22 @@ export default function AppLayout() {
 
       if (status === 'No Asistió') {
         if (app.check_in_status === 'No Asistió') return alert(a('alreadyNoShow'));
-        if (!window.confirm(a('noShowConfirm'))) return;
+        const eq = equipment || app.equipment;
+        if (isAssessmentService(eq)) {
+          if (!window.confirm(a('noShowAssessmentConfirm'))) return;
+          await logAudit(id, patientName, 'NO ASISTIÓ', 'Valoración: no afecta cartera ni adeudo.');
+        } else {
+          if (!window.confirm(a('noShowConfirm'))) return;
 
-        const p = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(patientName));
-        if (p) {
-          const eq = equipment || app.equipment;
-          const servicePrice = getServicePrice(dbServices, eq);
-          const { deducted, nextAdeudo } = await processSessionDeduction(p, eq, servicePrice);
+          const p = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(patientName));
+          if (p) {
+            const servicePrice = getServicePrice(dbServices, eq);
+            const { deducted, nextAdeudo } = await processSessionDeduction(p, eq, servicePrice);
 
-          await logAudit(id, patientName, 'NO ASISTIÓ', deducted
-            ? `No asistió. Se descontó 1 sesión pagada de cartera (${eq}).`
-            : `No asistió. Sin saldo pagado: adeudo +1 (total adeudo: ${nextAdeudo}).`);
+            await logAudit(id, patientName, 'NO ASISTIÓ', deducted
+              ? `No asistió. Se descontó 1 sesión pagada de cartera (${eq}).`
+              : `No asistió. Sin saldo pagado: adeudo +1 (total adeudo: ${nextAdeudo}).`);
+          }
         }
 
         await activeSupabase.from('appointments').update({ check_in_status: 'No Asistió' }).eq('id', id);
@@ -2860,6 +2875,9 @@ export default function AppLayout() {
     if (!p) return { deducted: false, detail: 'Paciente no encontrado en expediente.' };
 
     const eq = equipment;
+    if (isAssessmentService(eq)) {
+      return { deducted: false, detail: 'Valoración: no afecta cartera ni adeudo.' };
+    }
     const servicePrice = getServicePrice(dbServices, eq);
     const { deducted, nextAdeudo, consumed } = await processSessionDeduction(p, eq, servicePrice);
 
@@ -5763,10 +5781,16 @@ export default function AppLayout() {
                 )}
                 <span className="block text-[10px] font-bold text-slate-500 mt-1 uppercase">{selectedSlot.equipment} · {selectedSlot.time} · {selectedSlot.full_date || selectedSlot.fullDate}</span>
               </div>
+              {!isAssessmentService(selectedSlot.equipment) ? (
               <label className="flex items-start gap-3 bg-amber-50 border border-amber-200 p-4 rounded-xl cursor-pointer">
                 <input type="checkbox" checked={cancelDeductSession} onChange={e => setCancelDeductSession(e.target.checked)} className="w-4 h-4 mt-0.5" />
                 <span className="text-xs font-black uppercase text-amber-900">{L.p.appt.cancelDeductSession}</span>
               </label>
+              ) : (
+                <p className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl p-3 normal-case">
+                  {L.modals.bitacora.assessmentDetail}
+                </p>
+              )}
               <div className="flex gap-2 pt-2">
                 <button onClick={() => { setShowCancelModal(false); setCancelDeductSession(false); }} className="flex-1 bg-white border border-slate-300 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-50">{L.p.common.cancel}</button>
                 <button onClick={handleCancelAppointment} className="flex-1 bg-red-600 text-white font-black py-3 rounded-xl uppercase text-xs hover:bg-red-700 shadow-md">{L.p.appt.cancelConfirm}</button>
@@ -6140,12 +6164,20 @@ export default function AppLayout() {
                   )}
                   <div className="flex justify-between items-center bg-white p-3 rounded-xl border border-blue-100">
                     <span className="text-xs font-black text-slate-500 uppercase">
-                      {selectedSlotSessionSummary?.isDebtor
-                        ? L.modals.bitacora.debtHeadline(selectedSlotSessionSummary.adeudo)
-                        : L.p.appt.sessionsPaidSummary(selectedSlotSessionSummary?.used || 0, selectedSlotSessionSummary?.totalPurchased || 0)}
+                      {selectedSlotSessionSummary?.isAssessment
+                        ? L.modals.bitacora.assessmentHeadline
+                        : selectedSlotSessionSummary?.isDebtor
+                          ? L.modals.bitacora.debtHeadline(selectedSlotSessionSummary.adeudo)
+                          : L.p.appt.sessionsPaidSummary(selectedSlotSessionSummary?.used || 0, selectedSlotSessionSummary?.totalPurchased || 0)}
                     </span>
                     <span className="text-sm font-black text-slate-800 bg-slate-100 px-2 rounded">{selectedSlot.historicoSesiones || 0}</span>
                   </div>
+                  {selectedSlotSessionSummary?.isAssessment ? (
+                    <p className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 normal-case">
+                      {L.modals.bitacora.assessmentDetail}
+                    </p>
+                  ) : (
+                  <>
                   <div className={`p-3 rounded-lg flex justify-between items-center text-white shadow-sm ${selectedSlotWalletBalance ? 'bg-emerald-600' : 'bg-red-600'}`}>
                     <span className="text-xs font-black uppercase">{L.p.appt.pendingForEquipment(selectedSlot.equipment)}</span>
                     <span className="text-lg font-black">
@@ -6162,6 +6194,8 @@ export default function AppLayout() {
                     <p className="text-[9px] font-bold text-amber-700 uppercase bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
                       ⚠️ {L.p.appt.noBalanceBitacora}
                     </p>
+                  )}
+                  </>
                   )}
                   {isShenandoah(activeClinic) && selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE && (
                     <div className={`rounded-xl border p-3 space-y-1 ${confirmationStatusClass(selectedSlot.confirmation_status)}`}>
@@ -7032,6 +7066,7 @@ export default function AppLayout() {
             onSeal={async (sd, vt, summaryLines) => {
               const eq = selectedSlot.equipment;
               const servicePrice = selectedSlot.servicePrice || getServicePrice(dbServices, eq);
+              const isAssessment = isAssessmentService(eq);
               const pat = (selectedSlot.patientId
                 ? dbPatients.find((x) => String(x.id) === String(selectedSlot.patientId))
                 : null)
@@ -7048,17 +7083,21 @@ export default function AppLayout() {
                 servicePrice,
               });
 
-              if (!hasPaidSessionBalance(walletContext.wallets, eq, servicePrice)) {
+              if (!isAssessment && !hasPaidSessionBalance(walletContext.wallets, eq, servicePrice)) {
                 if (!window.confirm(a('bitacoraNoBalanceConfirm', walletContext.adeudo + 1))) return;
               }
 
-              const { deducted, nextAdeudo, consumed } = await processSessionDeduction(pat, eq, servicePrice);
+              const { deducted, nextAdeudo, consumed, skippedAssessment } = await processSessionDeduction(pat, eq, servicePrice);
 
               await activeSupabase.from('appointments').update({ check_in_status: 'Finalizado', attendant: selectedSlot.attendant, signature: sd }).eq('id', selectedSlot.id);
               
               let auditStr = a('bitacoraSealedAuditDetail', selectedSlot.attendant);
               if (summaryLines?.headline) auditStr += ` ${summaryLines.headline}.`;
-              if (!deducted) {
+              if (skippedAssessment) {
+                auditStr += locale === 'en'
+                  ? ' Assessment: no wallet or debt movement.'
+                  : ' Valoración: sin movimiento de cartera ni adeudo.';
+              } else if (!deducted) {
                 auditStr += locale === 'en'
                   ? ` No paid balance: debt +1 (total debt: ${nextAdeudo}).`
                   : ` Sin saldo pagado: adeudo +1 (total adeudo: ${nextAdeudo}).`;
