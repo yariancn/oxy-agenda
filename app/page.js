@@ -2938,51 +2938,77 @@ export default function AppLayout() {
     }
   };
 
-  const undoNoShow = async (app) => {
+  const restoreNoShowSessionImpact = async (app, { nextStatus = null, auditLabel = 'RESTAURAR SESIÓN NO-SHOW' } = {}) => {
+    if (!app?.id || app.check_in_status !== 'No Asistió') return false;
+    const patientName = app.patient;
+    const eq = app.equipment;
+    const p = resolvePatientForAppointment(app, dbPatients)
+      || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(patientName));
+
+    if (p && !isAssessmentService(eq)) {
+      const servicePrice = getServicePrice(dbServices, eq);
+      const walletContext = resolveWalletContext({
+        patient: p,
+        sessionGroup: getPatientSessionGroup(p),
+        equipment: eq,
+        servicePrice,
+      });
+      const reversed = reverseNoShowWalletImpact(walletContext.wallets, walletContext.adeudo, {
+        equipment: eq,
+        servicePrice,
+        packageHistory: walletContext.packageHistory,
+      });
+      const nextHistorico = Math.max(0, (p.historicoSesiones || 0) - 1);
+      await persistWalletAfterConsume({
+        supabase: activeSupabase,
+        walletContext,
+        consumed: { wallets: reversed.wallets, deducted: true },
+        nextAdeudo: reversed.adeudo,
+        patientId: p.id,
+        historicoSesiones: nextHistorico,
+      });
+      await logAudit(
+        app.id,
+        patientName,
+        auditLabel,
+        reversed.restored === 'adeudo'
+          ? `Sesión de no-show no cobrada. Adeudo −1 (ahora ${reversed.adeudo}).`
+          : `Sesión de no-show no cobrada. +1 sesión a cartera (${eq}).`,
+      );
+    } else {
+      await logAudit(app.id, patientName, auditLabel, 'Ajuste de no-show (valoración o sin expediente).');
+    }
+
+    if (nextStatus) {
+      await activeSupabase.from('appointments').update({ check_in_status: nextStatus }).eq('id', app.id);
+    }
+    return true;
+  };
+
+  /** Keep no-show status; only undo the wallet/debt charge so another visit is not double-charged. */
+  const restoreNoShowSession = async (app) => {
     if (!app?.id || app.check_in_status !== 'No Asistió') return;
     if (!window.confirm(a('undoNoShowConfirm'))) return;
     try {
-      const patientName = app.patient;
-      const eq = app.equipment;
-      const p = resolvePatientForAppointment(app, dbPatients)
-        || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(patientName));
-
-      if (p && !isAssessmentService(eq)) {
-        const servicePrice = getServicePrice(dbServices, eq);
-        const walletContext = resolveWalletContext({
-          patient: p,
-          sessionGroup: getPatientSessionGroup(p),
-          equipment: eq,
-          servicePrice,
-        });
-        const reversed = reverseNoShowWalletImpact(walletContext.wallets, walletContext.adeudo, {
-          equipment: eq,
-          servicePrice,
-          packageHistory: walletContext.packageHistory,
-        });
-        const nextHistorico = Math.max(0, (p.historicoSesiones || 0) - 1);
-        await persistWalletAfterConsume({
-          supabase: activeSupabase,
-          walletContext,
-          consumed: { wallets: reversed.wallets, deducted: true },
-          nextAdeudo: reversed.adeudo,
-          patientId: p.id,
-          historicoSesiones: nextHistorico,
-        });
-        await logAudit(
-          app.id,
-          patientName,
-          'REVERTIR NO-SHOW',
-          reversed.restored === 'adeudo'
-            ? `No-show revertido. Adeudo −1 (ahora ${reversed.adeudo}).`
-            : `No-show revertido. +1 sesión devuelta a cartera (${eq}).`,
-        );
-      } else {
-        await logAudit(app.id, patientName, 'REVERTIR NO-SHOW', 'No-show revertido (valoración o sin expediente).');
-      }
-
-      await activeSupabase.from('appointments').update({ check_in_status: 'Agendado' }).eq('id', app.id);
+      await restoreNoShowSessionImpact(app, { auditLabel: 'NO COBRAR NO-SHOW' });
       alert(a('undoNoShowOk'));
+      setSelectedSlot(null);
+      fetchAllData();
+    } catch (e) {
+      alert(a('statusUpdateError'));
+    }
+  };
+
+  /** Convert unjustified no-show → excused; restore session (same as Falta Justificada going forward). */
+  const excuseNoShow = async (app) => {
+    if (!app?.id || app.check_in_status !== 'No Asistió') return;
+    if (!window.confirm(a('excuseNoShowConfirm'))) return;
+    try {
+      await restoreNoShowSessionImpact(app, {
+        nextStatus: 'Falta Justificada',
+        auditLabel: 'JUSTIFICAR NO-SHOW',
+      });
+      alert(a('excuseNoShowOk'));
       setSelectedSlot(null);
       fetchAllData();
     } catch (e) {
@@ -5994,13 +6020,22 @@ export default function AppLayout() {
                    </>
                  )}
                  {!isRescheduling && selectedSlot.check_in_status === 'No Asistió' && (
-                   <button
-                     type="button"
-                     onClick={() => undoNoShow(selectedSlot)}
-                     className="bg-sky-100 text-sky-800 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-sky-200 transition border border-sky-200"
-                   >
-                     {L.p.appt.undoNoShow}
-                   </button>
+                   <>
+                     <button
+                       type="button"
+                       onClick={() => restoreNoShowSession(selectedSlot)}
+                       className="bg-sky-100 text-sky-800 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-sky-200 transition border border-sky-200"
+                     >
+                       {L.p.appt.undoNoShow}
+                     </button>
+                     <button
+                       type="button"
+                       onClick={() => excuseNoShow(selectedSlot)}
+                       className="bg-orange-100 text-orange-800 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-orange-200 transition border border-orange-200"
+                     >
+                       {L.p.appt.excuseNoShow}
+                     </button>
+                   </>
                  )}
                  
                  {selectedSlot.check_in_status !== 'Finalizado' && selectedSlot.check_in_status !== 'Devuelto' && selectedSlot.check_in_status !== 'Cancelado' && !isRescheduling && (
