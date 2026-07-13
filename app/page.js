@@ -174,6 +174,7 @@ import {
   CONFIRMATION_STATUS,
   confirmationStatusClass,
   confirmationStatusLabel,
+  explainConfirmationState,
 } from '../lib/appointmentConfirmation';
 
 export default function AppLayout() {
@@ -2172,6 +2173,16 @@ export default function AppLayout() {
       patientName: selectedSlot.patient,
     });
   }, [selectedSlot, dbServices]);
+
+  const selectedSlotConfirmationInfo = useMemo(() => {
+    if (!selectedSlot || !isShenandoah(activeClinic)) return null;
+    return explainConfirmationState({
+      appointment: selectedSlot,
+      allAppointments: dbAppointments,
+      companyConfig: dbCompanyConfig,
+      clinicName: activeClinic,
+    });
+  }, [selectedSlot, activeClinic, dbAppointments, dbCompanyConfig]);
 
   const selectedSlotWalletBalance = useMemo(() => {
     if (!selectedSlot) return 0;
@@ -6197,13 +6208,26 @@ export default function AppLayout() {
                   )}
                   </>
                   )}
-                  {isShenandoah(activeClinic) && selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE && (
-                    <div className={`rounded-xl border p-3 space-y-1 ${confirmationStatusClass(selectedSlot.confirmation_status)}`}>
+                  {isShenandoah(activeClinic) && selectedSlotConfirmationInfo ? (
+                    <div className={`rounded-xl border p-3 space-y-1 ${
+                      selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE
+                        ? confirmationStatusClass(selectedSlot.confirmation_status)
+                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                    }`}>
                       <p className="text-[10px] font-black uppercase">
-                        {locale === 'en' ? 'SMS confirmation' : 'Confirmación SMS'}
-                        {' · '}
-                        {confirmationStatusLabel(selectedSlot.confirmation_status, locale)}
+                        {locale === 'en' ? 'SMS confirmation (first session)' : 'Confirmación SMS (primera sesión)'}
+                        {selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE ? (
+                          <>
+                            {' · '}
+                            {confirmationStatusLabel(selectedSlot.confirmation_status, locale)}
+                          </>
+                        ) : null}
                       </p>
+                      {(!selectedSlot.confirmation_status || selectedSlot.confirmation_status === CONFIRMATION_STATUS.NONE) ? (
+                        <p className="text-[10px] font-bold normal-case opacity-90">
+                          {locale === 'en' ? selectedSlotConfirmationInfo.summaryEn : selectedSlotConfirmationInfo.summaryEs}
+                        </p>
+                      ) : null}
                       {selectedSlot.confirmation_reply && (
                         <p className="text-xs font-bold normal-case">
                           {locale === 'en' ? 'Reply:' : 'Respuesta:'} &quot;{selectedSlot.confirmation_reply}&quot;
@@ -6220,7 +6244,7 @@ export default function AppLayout() {
                         </p>
                       )}
                     </div>
-                  )}
+                  ) : null}
               </div>
 
               <div className="pt-4 pb-2 border-t text-slate-900">

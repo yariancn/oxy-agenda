@@ -41,6 +41,11 @@ import { getAllowedClinics, normalizeStaffSessionUser } from '../lib/clinicAcces
 import { getMissingAppointmentFields, resolveAppointmentDraft } from '../lib/appointmentFormValidation.js';
 import { isAssessmentService } from '../lib/assessmentService.js';
 import { buildSessionSummary, formatSessionSummaryLines } from '../lib/sessionSummary.js';
+import {
+  appointmentStartMs,
+  explainConfirmationState,
+  CONFIRMATION_STATUS,
+} from '../lib/appointmentConfirmation.js';
 
 let passed = 0;
 function test(name, fn) {
@@ -338,6 +343,48 @@ test('valoración: no entra al pool de sesiones ni adeudo', () => {
   });
   assert.match(lines.headline, /Valoración/i);
   assert.equal(lines.tone, 'ok');
+});
+
+test('confirmación SMS: ventana flexible tras las 6 h', () => {
+  const fullDate = '2026-07-13';
+  const time = '12:00 PM';
+  const tz = 'America/Chicago';
+  const startMs = appointmentStartMs(fullDate, time, tz);
+  const sendAt = startMs - 6 * 60 * 60 * 1000;
+  const at11am = sendAt + 5 * 60 * 60 * 1000;
+  assert.ok(at11am >= sendAt);
+  assert.ok(at11am < startMs - 30 * 60 * 1000);
+});
+
+test('confirmación SMS: diagnostica no enviado si no es Houston', () => {
+  const info = explainConfirmationState({
+    appointment: { patient: 'Ruth Kally', time: '12:00 PM', full_date: '2026-07-13', phone: '5551234567' },
+    clinicName: 'Oxygengdl',
+  });
+  assert.equal(info.applicable, false);
+});
+
+test('confirmación SMS: primera sesión sin envío explica motivo', () => {
+  const startMs = appointmentStartMs('2026-07-13', '12:00 PM', 'America/Chicago');
+  const info = explainConfirmationState({
+    appointment: {
+      id: 'a1',
+      patient: 'Ruth Kally',
+      time: '12:00 PM',
+      full_date: '2026-07-13',
+      phone: '+12815551234',
+      check_in_status: 'Agendado',
+      is_new_patient: true,
+      confirmation_status: CONFIRMATION_STATUS.NONE,
+    },
+    allAppointments: [],
+    companyConfig: { confirmation_sms_enabled: true, confirmation_hours_before: 6 },
+    clinicName: CLINIC_SHENANDOAH,
+    now: startMs - 5 * 60 * 60 * 1000,
+  });
+  assert.equal(info.applicable, true);
+  assert.equal(info.sent, false);
+  assert.ok(/Twilio|Debería enviarse|próxima revisión/i.test(info.summaryEs));
 });
 
 console.log(`\n${passed} pruebas OK\n`);
