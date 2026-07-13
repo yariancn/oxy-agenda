@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { CLINIC_SHENANDOAH } from '../../../../lib/clinicRegistry.js';
+import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
 import { getResendApiKey } from '../../../../lib/resendConfig.js';
 import {
   isTwilioConfigured,
@@ -38,6 +40,7 @@ export async function GET(request) {
   const payload = {
     host: request.headers.get('host'),
     buildSha: (process.env.VERCEL_GIT_COMMIT_SHA || 'dev').slice(0, 7),
+    cronSecretConfigured: Boolean(String(process.env.CRON_SECRET || '').trim()),
     resendConfigured: resend,
     twilioConfigured: isTwilioConfigured(),
     twilioPartial: {
@@ -116,6 +119,31 @@ export async function GET(request) {
         ok: false,
         error: error.message || 'WhatsApp probe failed',
       };
+    }
+  }
+
+  if (searchParams.get('tx') === '1') {
+    try {
+      const supabase = getSupabaseAdmin(CLINIC_SHENANDOAH);
+      const [
+        { error: apptErr },
+        { data: config, error: cfgErr },
+        { error: promoErr },
+      ] = await Promise.all([
+        supabase.from('appointments').select('id, confirmation_status, confirmation_sent_at').limit(1),
+        supabase.from('company_config').select('clinic, confirmation_sms_enabled, confirmation_hours_before').eq('clinic', CLINIC_SHENANDOAH).maybeSingle(),
+        supabase.from('promoters').select('code, email').limit(1),
+      ]);
+      payload.txSchema = {
+        appointmentsConfirmation: !apptErr,
+        companyConfigConfirmation: !cfgErr,
+        promotersEmail: !promoErr,
+        confirmationSmsEnabled: config?.confirmation_sms_enabled === true,
+        confirmationHoursBefore: config?.confirmation_hours_before ?? null,
+        errors: [apptErr?.message, cfgErr?.message, promoErr?.message].filter(Boolean),
+      };
+    } catch (error) {
+      payload.txSchema = { ok: false, error: error.message };
     }
   }
 

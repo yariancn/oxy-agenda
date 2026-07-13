@@ -243,6 +243,7 @@ export default function AppLayout() {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelDeductSession, setCancelDeductSession] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
+  const [confirmationSending, setConfirmationSending] = useState(false);
   const [draggedApp, setDraggedApp] = useState(null);
   const [moveConfirmation, setMoveConfirmation] = useState(null);
   const [isRescheduling, setIsRescheduling] = useState(false);
@@ -316,7 +317,7 @@ export default function AppLayout() {
 
   const [dbPromoters, setDbPromoters] = useState([]);
   const [promotersLoadError, setPromotersLoadError] = useState('');
-  const [newPromoter, setNewPromoter] = useState({ id: null, code: '', name: '', notes: '', is_active: true });
+  const [newPromoter, setNewPromoter] = useState({ id: null, code: '', name: '', email: '', notes: '', is_active: true });
   const [isEditingPromoter, setIsEditingPromoter] = useState(false);
 
   const [newRole, setNewRole] = useState({ id: null, name: '', level: 3 });
@@ -931,9 +932,9 @@ export default function AppLayout() {
       const fetchPromotersWithFallback = async () => {
         let res = await clinicDb
           .from('promoters')
-          .select('id, code, name, notes, calendar_feed_token, is_active, created_at')
+          .select('id, code, name, email, notes, calendar_feed_token, is_active, created_at')
           .order('code');
-        if (res.error && /notes|calendar_feed_token|column|schema cache/i.test(res.error.message || '')) {
+        if (res.error && /notes|calendar_feed_token|email|column|schema cache/i.test(res.error.message || '')) {
           res = await clinicDb
             .from('promoters')
             .select('id, code, name, is_active, created_at')
@@ -2354,6 +2355,40 @@ export default function AppLayout() {
     }, patInfo));
   };
 
+  const handleSendConfirmationNow = async () => {
+    if (!selectedSlot?.id || confirmationSending) return;
+    setConfirmationSending(true);
+    try {
+      const res = await fetch('/api/staff/send-confirmation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ appointmentId: selectedSlot.id, clinic: activeClinic }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        alert(data.message || data.error || (locale === 'en' ? 'Could not send confirmation SMS.' : 'No se pudo enviar la confirmación SMS.'));
+        return;
+      }
+      const sentAt = data.sentAt || new Date().toISOString();
+      setSelectedSlot((prev) => (prev ? {
+        ...prev,
+        confirmation_status: CONFIRMATION_STATUS.PENDING,
+        confirmation_sent_at: sentAt,
+      } : prev));
+      setDbAppointments((prev) => prev.map((row) => (
+        row.id === selectedSlot.id
+          ? { ...row, confirmation_status: CONFIRMATION_STATUS.PENDING, confirmation_sent_at: sentAt }
+          : row
+      )));
+      broadcastLiveDataUpdated(activeClinic);
+    } catch (err) {
+      alert(err?.message || (locale === 'en' ? 'Could not send confirmation SMS.' : 'No se pudo enviar la confirmación SMS.'));
+    } finally {
+      setConfirmationSending(false);
+    }
+  };
+
   const resolveSlotContact = (slot) => {
     const pat = slot?.patientId
       ? dbPatients.find((p) => String(p.id) === String(slot.patientId))
@@ -2839,6 +2874,12 @@ export default function AppLayout() {
         }
 
         await activeSupabase.from('appointments').update({ check_in_status: 'No Asistió' }).eq('id', id);
+        fetch('/api/staff/promoter-no-show', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ appointmentId: id, clinic: activeClinic }),
+        }).catch(() => {});
       } else if (status === 'Falta Justificada') {
         if (app.check_in_status === 'Falta Justificada') return alert(a('alreadyExcused'));
         await activeSupabase.from('appointments').update({ check_in_status: 'Falta Justificada' }).eq('id', id);
@@ -3465,6 +3506,7 @@ export default function AppLayout() {
       name,
       is_active: newPromoter.is_active !== false,
       notes: String(newPromoter.notes || '').trim(),
+      email: String(newPromoter.email || '').trim().toLowerCase(),
     };
     if (!isEditingPromoter || !newPromoter.id) {
       payload.calendar_feed_token = generateCalendarFeedToken();
@@ -3480,8 +3522,8 @@ export default function AppLayout() {
     };
 
     let res = await savePayload(payload);
-    if (res.error && /notes|calendar_feed_token|column|schema cache/i.test(res.error.message || '')) {
-      const { notes, calendar_feed_token, ...coreRow } = payload;
+    if (res.error && /notes|calendar_feed_token|email|column|schema cache/i.test(res.error.message || '')) {
+      const { notes, calendar_feed_token, email, ...coreRow } = payload;
       res = await savePayload(coreRow);
       if (!res.error && calendar_feed_token !== undefined) {
         alert(L.p.admin.promoterCalendarFeedBroken);
@@ -3489,6 +3531,9 @@ export default function AppLayout() {
       }
       if (!res.error && notes !== undefined) {
         alert(L.p.admin.promoterNotesColumnMissing);
+      }
+      if (!res.error && email !== undefined && String(newPromoter.email || '').trim()) {
+        alert(L.p.admin.promoterEmailColumnMissing);
       }
     }
     if (res.error) {
@@ -3507,7 +3552,7 @@ export default function AppLayout() {
       `Código ${code} · ${activeClinic}`,
     );
     setIsEditingPromoter(false);
-    setNewPromoter({ id: null, code: '', name: '', notes: '', is_active: true });
+    setNewPromoter({ id: null, code: '', name: '', email: '', notes: '', is_active: true });
     fetchAllData();
   };
 
@@ -5568,6 +5613,17 @@ export default function AppLayout() {
                         />
                       </div>
                       <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.admin.promoterEmail}</label>
+                        <p className="text-[9px] font-bold text-slate-400 mb-1">{L.p.admin.promoterEmailHint}</p>
+                        <input
+                          type="email"
+                          value={newPromoter.email || ''}
+                          onChange={(e) => setNewPromoter({ ...newPromoter, email: e.target.value })}
+                          placeholder={L.p.admin.promoterEmailPh}
+                          className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none focus:border-blue-500 text-slate-900 bg-white"
+                        />
+                      </div>
+                      <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.admin.promoterNotes}</label>
                         <p className="text-[9px] font-bold text-slate-400 mb-1">{L.p.admin.promoterNotesHint}</p>
                         <textarea
@@ -5596,7 +5652,7 @@ export default function AppLayout() {
                         {isEditingPromoter && (
                           <button
                             type="button"
-                            onClick={() => { setIsEditingPromoter(false); setNewPromoter({ id: null, code: '', name: '', notes: '', is_active: true }); }}
+                            onClick={() => { setIsEditingPromoter(false); setNewPromoter({ id: null, code: '', name: '', email: '', notes: '', is_active: true }); }}
                             className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200"
                           >
                             {L.p.common.cancel}
@@ -5623,6 +5679,7 @@ export default function AppLayout() {
                           <tr>
                             <th className="px-4 py-3">{L.p.admin.promoterCode}</th>
                             <th className="px-4 py-3">{L.p.admin.promoterName}</th>
+                            <th className="px-4 py-3">{L.p.admin.promoterEmail}</th>
                             <th className="px-4 py-3">{L.p.admin.promoterNotes}</th>
                             <th className="px-4 py-3">{L.p.admin.promoterLink}</th>
                             <th className="px-4 py-3">{L.p.admin.promoterCalendarLink}</th>
@@ -5634,6 +5691,7 @@ export default function AppLayout() {
                             <tr key={pr.id} className={`hover:bg-slate-50/80 ${!pr.is_active ? 'opacity-50' : ''}`}>
                               <td className="px-4 py-3 font-black text-slate-800 text-xs tracking-wider">{pr.code}</td>
                               <td className="px-4 py-3 font-bold text-slate-700 text-xs">{pr.name}</td>
+                              <td className="px-4 py-3 text-xs text-slate-600 max-w-[10rem] truncate">{pr.email || '—'}</td>
                               <td className="px-4 py-3 text-xs text-slate-600 max-w-[12rem]">
                                 <span className="line-clamp-2 whitespace-pre-wrap">{pr.notes || '—'}</span>
                               </td>
@@ -5683,7 +5741,7 @@ export default function AppLayout() {
                                 <div className="flex justify-end gap-1 flex-wrap">
                                   <button
                                     type="button"
-                                    onClick={() => { setNewPromoter({ ...pr, notes: pr.notes || '' }); setIsEditingPromoter(true); }}
+                                    onClick={() => { setNewPromoter({ ...pr, notes: pr.notes || '', email: pr.email || '' }); setIsEditingPromoter(true); }}
                                     className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-[9px] font-black uppercase hover:bg-blue-100 border border-blue-100"
                                   >
                                     {L.p.common.edit}
@@ -5847,6 +5905,9 @@ export default function AppLayout() {
                 <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight">
                   {isRescheduling ? L.p.appt.reschedule : L.p.appt.detail}
                 </h3>
+                {isShenandoah(activeClinic) && (
+                  <p className="text-[8px] font-bold text-sky-600 uppercase mt-0.5">build {buildSha}</p>
+                )}
                 {isRescheduling && (
                   <p className="text-[9px] font-bold text-blue-600 uppercase mt-1">{L.p.appt.rescheduleHint}</p>
                 )}
@@ -5952,6 +6013,55 @@ export default function AppLayout() {
                   </div>
                   <p className="text-[8px] text-slate-500 font-bold uppercase">{L.p.appt.contactHint}</p>
                 </div>
+
+                {isShenandoah(activeClinic) && selectedSlotConfirmationInfo ? (
+                  <div className={`mt-3 rounded-xl border-2 p-3 space-y-2 ${
+                    selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE
+                      ? confirmationStatusClass(selectedSlot.confirmation_status)
+                      : 'bg-sky-50 text-sky-900 border-sky-300'
+                  }`}>
+                    <p className="text-[10px] font-black uppercase flex items-center gap-1.5">
+                      <span aria-hidden>📱</span>
+                      {locale === 'en' ? 'SMS confirmation (first session)' : 'Confirmación SMS (primera sesión)'}
+                      {selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE ? (
+                        <>
+                          {' · '}
+                          {confirmationStatusLabel(selectedSlot.confirmation_status, locale)}
+                        </>
+                      ) : null}
+                    </p>
+                    <p className="text-[10px] font-bold normal-case leading-relaxed">
+                      {locale === 'en' ? selectedSlotConfirmationInfo.summaryEn : selectedSlotConfirmationInfo.summaryEs}
+                    </p>
+                    {selectedSlot.confirmation_reply && (
+                      <p className="text-xs font-bold normal-case">
+                        {locale === 'en' ? 'Reply:' : 'Respuesta:'} &quot;{selectedSlot.confirmation_reply}&quot;
+                        {selectedSlot.confirmation_replied_at && (
+                          <span className="text-[10px] font-bold opacity-80 block mt-0.5">
+                            {new Date(selectedSlot.confirmation_replied_at).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX')}
+                          </span>
+                        )}
+                      </p>
+                    )}
+                    {selectedSlot.confirmation_sent_at && (
+                      <p className="text-[9px] font-bold opacity-80 normal-case">
+                        {locale === 'en' ? 'Sent' : 'Enviado'}: {new Date(selectedSlot.confirmation_sent_at).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX')}
+                      </p>
+                    )}
+                    {selectedSlotConfirmationInfo.canSendManually && !isRescheduling ? (
+                      <button
+                        type="button"
+                        onClick={handleSendConfirmationNow}
+                        disabled={confirmationSending}
+                        className="w-full mt-1 bg-sky-600 text-white py-2.5 rounded-xl font-black uppercase text-[10px] hover:bg-sky-700 transition disabled:opacity-60"
+                      >
+                        {confirmationSending
+                          ? (locale === 'en' ? 'Sending…' : 'Enviando…')
+                          : (locale === 'en' ? 'Send confirmation SMS now' : 'Enviar confirmación SMS ahora')}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <PatientSessionHistory
                   className="mt-3"
@@ -6208,43 +6318,6 @@ export default function AppLayout() {
                   )}
                   </>
                   )}
-                  {isShenandoah(activeClinic) && selectedSlotConfirmationInfo ? (
-                    <div className={`rounded-xl border p-3 space-y-1 ${
-                      selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE
-                        ? confirmationStatusClass(selectedSlot.confirmation_status)
-                        : 'bg-slate-50 text-slate-600 border-slate-200'
-                    }`}>
-                      <p className="text-[10px] font-black uppercase">
-                        {locale === 'en' ? 'SMS confirmation (first session)' : 'Confirmación SMS (primera sesión)'}
-                        {selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE ? (
-                          <>
-                            {' · '}
-                            {confirmationStatusLabel(selectedSlot.confirmation_status, locale)}
-                          </>
-                        ) : null}
-                      </p>
-                      {(!selectedSlot.confirmation_status || selectedSlot.confirmation_status === CONFIRMATION_STATUS.NONE) ? (
-                        <p className="text-[10px] font-bold normal-case opacity-90">
-                          {locale === 'en' ? selectedSlotConfirmationInfo.summaryEn : selectedSlotConfirmationInfo.summaryEs}
-                        </p>
-                      ) : null}
-                      {selectedSlot.confirmation_reply && (
-                        <p className="text-xs font-bold normal-case">
-                          {locale === 'en' ? 'Reply:' : 'Respuesta:'} &quot;{selectedSlot.confirmation_reply}&quot;
-                          {selectedSlot.confirmation_replied_at && (
-                            <span className="text-[10px] font-bold opacity-80 block mt-0.5">
-                              {new Date(selectedSlot.confirmation_replied_at).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX')}
-                            </span>
-                          )}
-                        </p>
-                      )}
-                      {selectedSlot.confirmation_sent_at && (
-                        <p className="text-[9px] font-bold opacity-80 normal-case">
-                          {locale === 'en' ? 'Sent' : 'Enviado'}: {new Date(selectedSlot.confirmation_sent_at).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX')}
-                        </p>
-                      )}
-                    </div>
-                  ) : null}
               </div>
 
               <div className="pt-4 pb-2 border-t text-slate-900">

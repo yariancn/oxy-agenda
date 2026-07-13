@@ -46,6 +46,7 @@ import {
   explainConfirmationState,
   CONFIRMATION_STATUS,
 } from '../lib/appointmentConfirmation.js';
+import { buildPromoterNoShowEmail } from '../lib/promoterNoShowNotify.js';
 
 let passed = 0;
 function test(name, fn) {
@@ -385,6 +386,23 @@ test('confirmación SMS: primera sesión sin envío explica motivo', () => {
   assert.equal(info.applicable, true);
   assert.equal(info.sent, false);
   assert.ok(/Twilio|Debería enviarse|próxima revisión/i.test(info.summaryEs));
+});
+
+test('promotor: correo no-show en inglés (Houston)', () => {
+  const { subject, emailHtml } = buildPromoterNoShowEmail({
+    patientName: 'Ruth Kelly',
+    date: '2026-07-13',
+    time: '12:00 PM',
+    equipment: 'CHAMBER 1 60 MIN FLAT BED',
+    clinicName: CLINIC_SHENANDOAH,
+    clinicDisplayName: 'REGENOXY LLC',
+    promoterName: 'Marco',
+    promoterCode: 'MARKTR',
+    locale: 'en',
+  });
+  assert.match(subject, /No-show: Ruth Kelly/i);
+  assert.match(emailHtml, /marked as a <strong>no-show<\/strong>/i);
+  assert.match(emailHtml, /MARKTR/);
 });
 
 console.log(`\n${passed} pruebas OK\n`);

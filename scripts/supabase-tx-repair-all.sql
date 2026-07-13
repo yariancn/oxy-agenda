@@ -50,3 +50,25 @@ ALTER TABLE users_staff
 UPDATE users_staff
 SET notify_on_booking = false
 WHERE notify_on_booking IS DISTINCT FROM false;
+
+-- SMS confirmation (first session, Houston)
+ALTER TABLE appointments
+  ADD COLUMN IF NOT EXISTS confirmation_status text DEFAULT 'none',
+  ADD COLUMN IF NOT EXISTS confirmation_sent_at timestamptz,
+  ADD COLUMN IF NOT EXISTS confirmation_replied_at timestamptz,
+  ADD COLUMN IF NOT EXISTS confirmation_reply text;
+
+ALTER TABLE company_config
+  ADD COLUMN IF NOT EXISTS confirmation_sms_enabled boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS confirmation_hours_before integer DEFAULT 6,
+  ADD COLUMN IF NOT EXISTS confirmation_no_reply_hours integer DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS confirmation_sms_body text;
+
+UPDATE company_config
+SET confirmation_sms_enabled = true
+WHERE clinic = 'Shenandoah'
+  AND confirmation_sms_enabled IS DISTINCT FROM true;
+
+-- Promoter email (no-show alerts)
+ALTER TABLE promoters
+  ADD COLUMN IF NOT EXISTS email text;
