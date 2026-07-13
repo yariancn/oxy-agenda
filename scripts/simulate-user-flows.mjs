@@ -38,7 +38,7 @@ import {
   resolveScreenshotEquipment,
 } from '../lib/screenshotEquipment.js';
 import { getAllowedClinics, normalizeStaffSessionUser } from '../lib/clinicAccess.js';
-import { getMissingAppointmentFields } from '../lib/appointmentFormValidation.js';
+import { getMissingAppointmentFields, resolveAppointmentDraft } from '../lib/appointmentFormValidation.js';
 
 let passed = 0;
 function test(name, fn) {
@@ -302,6 +302,19 @@ test('cita: detecta hora faltante al agendar desde paciente', () => {
     time: '',
   }, 'es');
   assert.deepEqual(missing, ['hora']);
+});
+
+test('cita: ignora evento de clic pasado por error al guardar', () => {
+  const selected = {
+    patient: 'BRENDA FLORES',
+    equipment: 'CAMARA 2 60 MIN',
+    time: '12:00 PM',
+  };
+  const fakeClickEvent = { nativeEvent: {}, target: {} };
+  const resolved = resolveAppointmentDraft(fakeClickEvent, selected);
+  assert.equal(resolved.patient, 'BRENDA FLORES');
+  assert.equal(resolved.time, '12:00 PM');
+  assert.deepEqual(getMissingAppointmentFields(resolved, 'es'), []);
 });
 
 console.log(`\n${passed} pruebas OK\n`);

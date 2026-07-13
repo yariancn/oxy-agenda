@@ -108,7 +108,7 @@ import {
 } from '../lib/calendarDisplay';
 import { getWeekScrollLeftForToday } from '../lib/calendarScroll';
 import { defaultEquipmentForClinic } from '../lib/screenshotEquipment';
-import { getMissingAppointmentFields } from '../lib/appointmentFormValidation';
+import { getMissingAppointmentFields, resolveAppointmentDraft } from '../lib/appointmentFormValidation';
 import { normalizeAppointmentTime } from '../lib/screenshotAppointmentParse';
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
 import { formatClinicDateIso, getClinicNow } from '../lib/clinicClock';
@@ -3139,13 +3139,19 @@ export default function AppLayout() {
 
   const handleSaveNewAppointment = async (slotOverride = null) => {
     if (isSavingAppointment) return;
-    const slot = slotOverride || selectedSlot;
+    const slot = resolveAppointmentDraft(slotOverride, selectedSlot);
     const newPatientForSlot = slot?.patient
       && !dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(slot.patient));
     try {
       if (!slot?.patient || !slot?.equipment || !slot?.time) {
         const missing = getMissingAppointmentFields(slot, locale);
-        return alert(staffAlert(locale, 'missingAppointmentFields', missing));
+        setAppointmentSaveFeedback({
+          phase: 'error',
+          title: locale === 'en' ? 'Incomplete appointment' : 'Cita incompleta',
+          detail: staffAlert(locale, 'missingAppointmentFields', missing),
+          closeForm: false,
+        });
+        return;
       }
 
       const apptDate = slot.fullDate || slot.full_date || currentFullDate;
@@ -6252,21 +6258,21 @@ export default function AppLayout() {
                   className="w-full p-3 border border-slate-300 rounded-xl font-bold uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white mt-1"
                   onQueryChange={(pName) => {
                     const exact = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(pName));
-                    setSelectedSlot({
-                      ...(selectedSlot || createEmptyAppointmentDraft()),
+                    setSelectedSlot((prev) => ({
+                      ...(prev || createEmptyAppointmentDraft()),
                       patient: pName,
                       patientId: exact?.id || null,
-                      phone: exact ? exact.phone : (selectedSlot?.phone || ''),
-                      email: exact ? exact.email : (selectedSlot?.email || ''),
-                      protocol: exact ? exact.protocol : (selectedSlot?.protocol || ''),
-                      patientNotes: exact ? exact.notes : (selectedSlot?.patientNotes || ''),
-                      prefers_email: exact ? exact.prefers_email !== false : selectedSlot?.prefers_email !== false,
-                      prefers_sms: exact ? exact.prefers_sms !== false : selectedSlot?.prefers_sms !== false,
-                    });
+                      phone: exact ? exact.phone : (prev?.phone || ''),
+                      email: exact ? exact.email : (prev?.email || ''),
+                      protocol: exact ? exact.protocol : (prev?.protocol || ''),
+                      patientNotes: exact ? exact.notes : (prev?.patientNotes || ''),
+                      prefers_email: exact ? exact.prefers_email !== false : prev?.prefers_email !== false,
+                      prefers_sms: exact ? exact.prefers_sms !== false : prev?.prefers_sms !== false,
+                    }));
                   }}
                   onSelectPatient={(p) => {
-                    setSelectedSlot({
-                      ...(selectedSlot || createEmptyAppointmentDraft()),
+                    setSelectedSlot((prev) => ({
+                      ...(prev || createEmptyAppointmentDraft()),
                       patient: p.patient,
                       patientId: p.id,
                       phone: p.phone || '',
@@ -6275,7 +6281,7 @@ export default function AppLayout() {
                       patientNotes: p.notes || '',
                       prefers_email: p.prefers_email !== false,
                       prefers_sms: p.prefers_sms !== false,
-                    });
+                    }));
                   }}
                 />
               </div>
@@ -6376,28 +6382,24 @@ export default function AppLayout() {
                 <select value={selectedSlot?.serviceId || ''} onChange={e => {
                   const sid = e.target.value; 
                   const srv = dbServices.find(s => String(s.id) === String(sid));
-                  if(srv) {
-                    const extended = !!selectedSlot?.extended_session;
-                    if (extended) {
-                      setSelectedSlot({
-                        ...(selectedSlot || createEmptyAppointmentDraft()),
-                        serviceId: sid,
-                        equipment: srv.name,
-                        time: '',
-                      });
-                    } else {
+                  if (srv) {
+                    setSelectedSlot((prev) => {
+                      const base = prev || createEmptyAppointmentDraft();
+                      if (base.extended_session) {
+                        return { ...base, serviceId: sid, equipment: srv.name, time: '' };
+                      }
                       const dur = Number(srv.duration) || 60;
                       const buf = Number(srv.buffer ?? 30);
-                      setSelectedSlot({
-                        ...(selectedSlot || createEmptyAppointmentDraft()),
+                      return {
+                        ...base,
                         serviceId: sid,
                         equipment: srv.name,
                         duration: dur,
                         buffer: buf,
                         sessionPreset: getPresetFromTimes(dur, buf).id,
                         time: '',
-                      });
-                    }
+                      };
+                    });
                   }
                 }} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none focus:border-emerald-500 text-slate-900 bg-white text-sm">
                   <option value="">Selecciona un servicio...</option>
@@ -6409,8 +6411,8 @@ export default function AppLayout() {
                 slot={selectedSlot}
                 labels={L.p.appt}
                 blockMins={selectedBlockMins}
-                onOutsideHoursChange={(checked) => setSelectedSlot(applyOutsideHours(selectedSlot, checked))}
-                onExtendedChange={(checked) => setSelectedSlot(applyExtendedSession(selectedSlot, checked))}
+                onOutsideHoursChange={(checked) => setSelectedSlot((prev) => applyOutsideHours(prev, checked))}
+                onExtendedChange={(checked) => setSelectedSlot((prev) => applyExtendedSession(prev, checked))}
               />
 
               <div>
@@ -6439,10 +6441,10 @@ export default function AppLayout() {
                 <div className="min-w-0">
                   <label className="text-[10px] font-black uppercase text-slate-400">Hora</label>
                   <select value={selectedSlot?.time || ''} onChange={e => { 
-                    setSelectedSlot({
-                      ...(selectedSlot || {}), 
-                      time: e.target.value
-                    });
+                    setSelectedSlot((prev) => ({
+                      ...(prev || createEmptyAppointmentDraft()),
+                      time: e.target.value,
+                    }));
                   }} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm">
                     <option value="">Hora...</option>
                     {appointmentTimeOptions.map(t => <option key={t} value={t}>{t}</option>)}
@@ -6519,7 +6521,8 @@ export default function AppLayout() {
                 Cancelar
               </button>
               <button
-                onClick={handleSaveNewAppointment}
+                type="button"
+                onClick={() => handleSaveNewAppointment()}
                 disabled={isSavingAppointment || newAppointmentMissing.length > 0}
                 className="w-full sm:flex-1 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-emerald-700 transition disabled:opacity-60"
               >
