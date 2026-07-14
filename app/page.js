@@ -4196,10 +4196,12 @@ export default function AppLayout() {
                         <div
                           key={dayInfo.fullDate}
                           data-cal-day={dayInfo.fullDate}
-                          className={`shrink-0 rounded-lg overflow-hidden shadow-md ring-1 ring-slate-300/80 ${isToday ? 'ring-2 ring-blue-500 shadow-blue-200/40' : ''} ${!dayOpen ? 'opacity-60' : ''} ${dayIndex > 0 ? 'border-l border-slate-200' : ''}`}
+                          className={`shrink-0 rounded-lg shadow-md ring-1 ring-slate-300/80 ${isToday ? 'ring-2 ring-blue-500 shadow-blue-200/40' : ''} ${!dayOpen ? 'opacity-60' : ''} ${dayIndex > 0 ? 'border-l border-slate-200' : ''}`}
                           style={{ width: `${dayWidth}px`, minWidth: `${dayWidth}px`, flex: '0 0 auto' }}
                         >
-                          <div className={`sticky top-0 z-40 border-b-2 border-slate-300 ${isToday ? 'bg-blue-50' : dayOpen ? 'bg-slate-50' : 'bg-slate-200'}`}>
+                          <div
+                            className={`sticky top-0 z-[55] border-b-2 border-slate-300 shadow-md ${isToday ? 'bg-blue-50' : dayOpen ? 'bg-slate-50' : 'bg-slate-200'}`}
+                          >
                             <div className="flex flex-col items-center justify-center h-8 border-b border-slate-200/80">
                               <span className="font-black text-slate-800 uppercase leading-none text-[9px]">{dayInfo.name}</span>
                               <span className={`font-bold leading-none text-[10px] ${dayOpen ? 'text-blue-600' : 'text-slate-500'}`}>
