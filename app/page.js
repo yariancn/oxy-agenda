@@ -2854,17 +2854,31 @@ export default function AppLayout() {
     try {
       const app = dbAppointments.find(a => a.id === id);
       if (!app) return alert(a('apptNotFound'));
+      if (['Finalizado', 'Devuelto'].includes(app.check_in_status)) {
+        return alert(a('statusLockedSealed'));
+      }
+      if (app.check_in_status === status) return;
+
+      const prevStatus = app.check_in_status;
+      const eq = equipment || app.equipment;
+
+      // Leaving no-show → restore deducted session before applying new status.
+      if (prevStatus === 'No Asistió' && status !== 'No Asistió') {
+        await restoreNoShowSessionImpact(app, {
+          nextStatus: null,
+          auditLabel: status === 'Falta Justificada' ? 'JUSTIFICAR NO-SHOW' : 'CAMBIO DESDE NO-SHOW',
+        });
+      }
 
       if (status === 'No Asistió') {
-        if (app.check_in_status === 'No Asistió') return alert(a('alreadyNoShow'));
-        const eq = equipment || app.equipment;
         if (isAssessmentService(eq)) {
           if (!window.confirm(a('noShowAssessmentConfirm'))) return;
           await logAudit(id, patientName, 'NO ASISTIÓ', 'Valoración: no afecta cartera ni adeudo.');
         } else {
           if (!window.confirm(a('noShowConfirm'))) return;
 
-          const p = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(patientName));
+          const p = resolvePatientForAppointment(app, dbPatients)
+            || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(patientName));
           if (p) {
             const servicePrice = getServicePrice(dbServices, eq);
             const { deducted, nextAdeudo } = await processSessionDeduction(p, eq, servicePrice);
@@ -2897,15 +2911,21 @@ export default function AppLayout() {
           alert(a('promoterNoShowError', promoErr?.message || 'network'));
         }
       } else if (status === 'Falta Justificada') {
-        if (app.check_in_status === 'Falta Justificada') return alert(a('alreadyExcused'));
         await activeSupabase.from('appointments').update({ check_in_status: 'Falta Justificada' }).eq('id', id);
-        await logAudit(id, patientName, 'FALTA JUSTIFICADA', 'Paciente no atendió (justificado). La sesión pagada se conserva en cartera.');
+        await logAudit(
+          id,
+          patientName,
+          'FALTA JUSTIFICADA',
+          prevStatus === 'No Asistió'
+            ? 'Falta justificada (desde no-show). Sesión restaurada; no se cobra del paquete.'
+            : 'Paciente no atendió (justificado). La sesión pagada se conserva en cartera.',
+        );
       } else {
         await activeSupabase.from('appointments').update({ check_in_status: status }).eq('id', id);
         await logAudit(id, patientName, 'CAMBIO DE ESTATUS', `Estatus actualizado a: ${status}`);
       }
 
-      setSelectedSlot(null);
+      setSelectedSlot((prev) => (prev && prev.id === id ? { ...prev, check_in_status: status } : prev));
       fetchAllData();
     } catch(e) { alert(a('statusUpdateError')); }
   };
@@ -4133,7 +4153,7 @@ export default function AppLayout() {
                           : currentColWidth;
                         return (
                         <div key={eqName} className={`border-r border-slate-300 last:border-r-0 min-w-0 ${getEquipmentBgColor(srvColor)}`} style={equipColStyle}>
-                          <div className={`h-12 border-b border-slate-200 flex flex-col items-center justify-center sticky top-0 z-40 ${getEquipmentHeaderColor(srvColor)}`}>
+                          <div className={`h-12 border-b border-slate-200 flex flex-col items-center justify-center sticky top-0 z-[55] shadow-md ${getEquipmentHeaderColor(srvColor)}`}>
                             <span className="text-[8px] font-black uppercase leading-none text-slate-500">{currentDayInfo.name}</span>
                             <span className="text-[9px] sm:text-[10px] font-black uppercase leading-none truncate max-w-full px-0.5">{eqName}</span>
                             <span className="text-[8px] font-bold opacity-80">{currentDayInfo.date}</span>
@@ -6013,12 +6033,32 @@ export default function AppLayout() {
             
             <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-4 sm:space-y-5 min-h-0">
               <div className="flex flex-wrap gap-2 mb-2">
-                 {!isRescheduling && !['Finalizado', 'Devuelto', 'No Asistió', 'Falta Justificada'].includes(selectedSlot.check_in_status) && (
+                 {!isRescheduling && !['Finalizado', 'Devuelto', 'Cancelado'].includes(selectedSlot.check_in_status) && (
                    <>
-                     <button onClick={() => updateAppStatus(selectedSlot.id, 'Llegó', selectedSlot.patient, selectedSlot.equipment)} className="bg-amber-100 text-amber-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-amber-200 transition">{L.p.appt.arrived}</button>
-                     <button onClick={() => updateAppStatus(selectedSlot.id, 'En Sesión', selectedSlot.patient, selectedSlot.equipment)} className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-emerald-200 transition">{L.p.appt.inSession}</button>
-                     <button onClick={() => updateAppStatus(selectedSlot.id, 'No Asistió', selectedSlot.patient, selectedSlot.equipment)} className="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-200 transition">{L.p.appt.noShow}</button>
-                     <button onClick={() => updateAppStatus(selectedSlot.id, 'Falta Justificada', selectedSlot.patient, selectedSlot.equipment)} className="bg-orange-100 text-orange-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-orange-200 transition">{L.p.appt.excused}</button>
+                     <button
+                       onClick={() => updateAppStatus(selectedSlot.id, 'Llegó', selectedSlot.patient, selectedSlot.equipment)}
+                       className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition ${selectedSlot.check_in_status === 'Llegó' ? 'bg-amber-500 text-white ring-2 ring-amber-300' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}
+                     >
+                       {L.p.appt.arrived}
+                     </button>
+                     <button
+                       onClick={() => updateAppStatus(selectedSlot.id, 'En Sesión', selectedSlot.patient, selectedSlot.equipment)}
+                       className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition ${selectedSlot.check_in_status === 'En Sesión' ? 'bg-emerald-600 text-white ring-2 ring-emerald-300' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}
+                     >
+                       {L.p.appt.inSession}
+                     </button>
+                     <button
+                       onClick={() => updateAppStatus(selectedSlot.id, 'No Asistió', selectedSlot.patient, selectedSlot.equipment)}
+                       className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition ${selectedSlot.check_in_status === 'No Asistió' ? 'bg-red-600 text-white ring-2 ring-red-300' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
+                     >
+                       {L.p.appt.noShow}
+                     </button>
+                     <button
+                       onClick={() => updateAppStatus(selectedSlot.id, 'Falta Justificada', selectedSlot.patient, selectedSlot.equipment)}
+                       className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition ${selectedSlot.check_in_status === 'Falta Justificada' ? 'bg-orange-500 text-white ring-2 ring-orange-300' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'}`}
+                     >
+                       {L.p.appt.excused}
+                     </button>
                    </>
                  )}
                  {!isRescheduling && selectedSlot.check_in_status === 'No Asistió' && (
@@ -6453,6 +6493,10 @@ export default function AppLayout() {
                 <button onClick={() => setShowPatientProfile(true)} className="flex-1 bg-slate-100 text-slate-700 py-4 rounded-2xl font-black uppercase text-[10px] hover:bg-slate-200 transition">{L.p.appt.openChart}</button>
                 {selectedSlot.check_in_status === 'Finalizado' ? (
                    <div className="flex-1 bg-emerald-100 text-emerald-800 py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center text-center border border-emerald-300">{L.p.appt.bitacoraSealed}</div>
+                ) : ['No Asistió', 'Falta Justificada', 'Cancelado', 'Devuelto'].includes(selectedSlot.check_in_status) ? (
+                   <div className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center text-center border border-slate-200">
+                     {locale === 'en' ? 'Attendance seal for completed visits only' : 'Bitácora solo para visitas atendidas'}
+                   </div>
                 ) : (
                    <button onClick={() => {
                       if(!selectedSlot.attendant || selectedSlot.attendant === 'Por Asignar') return alert(a('selectAttendant'));
@@ -7289,17 +7333,7 @@ export default function AppLayout() {
 
               const sealPatientName = pat.patient || selectedSlot.patient;
 
-              const walletContext = resolveWalletContext({
-                patient: pat,
-                sessionGroup: getPatientSessionGroup(pat),
-                equipment: eq,
-                servicePrice,
-              });
-
-              if (!isAssessment && !hasPaidSessionBalance(walletContext.wallets, eq, servicePrice)) {
-                if (!window.confirm(a('bitacoraNoBalanceConfirm', walletContext.adeudo + 1))) return;
-              }
-
+              // Adeudo / empty wallet must not block seal — records debt if no paid balance.
               const { deducted, nextAdeudo, consumed, skippedAssessment } = await processSessionDeduction(pat, eq, servicePrice);
 
               await activeSupabase.from('appointments').update({ check_in_status: 'Finalizado', attendant: selectedSlot.attendant, signature: sd }).eq('id', selectedSlot.id);
