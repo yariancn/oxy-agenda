@@ -7329,14 +7329,18 @@ export default function AppLayout() {
                 : null)
                 || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient))
                 || resolvePatientForAppointment(selectedSlot, dbPatients);
-              if (!pat) return alert(a('genericError', 'Paciente no encontrado'));
+              if (!pat) throw new Error(a('genericError', 'Paciente no encontrado'));
 
               const sealPatientName = pat.patient || selectedSlot.patient;
 
               // Adeudo / empty wallet must not block seal — records debt if no paid balance.
               const { deducted, nextAdeudo, consumed, skippedAssessment } = await processSessionDeduction(pat, eq, servicePrice);
 
-              await activeSupabase.from('appointments').update({ check_in_status: 'Finalizado', attendant: selectedSlot.attendant, signature: sd }).eq('id', selectedSlot.id);
+              const sealRes = await activeSupabase
+                .from('appointments')
+                .update({ check_in_status: 'Finalizado', attendant: selectedSlot.attendant, signature: sd })
+                .eq('id', selectedSlot.id);
+              if (sealRes.error) throw sealRes.error;
               
               let auditStr = a('bitacoraSealedAuditDetail', selectedSlot.attendant);
               if (summaryLines?.headline) auditStr += ` ${summaryLines.headline}.`;

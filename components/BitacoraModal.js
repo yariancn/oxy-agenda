@@ -10,6 +10,7 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
+  const [isSealing, setIsSealing] = useState(false);
   const [isAgreed, setIsAgreed] = useState(true);
   const [vitals, setVitals] = useState({ pa: '', temp: '', hr: '' });
 
@@ -63,6 +64,7 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
     const ctx = canvasRef.current.getContext('2d');
     ctx.beginPath();
     ctx.moveTo(x, y);
+    setHasSignature(true);
     setIsDrawing(true);
   };
 
@@ -89,10 +91,17 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
     setHasSignature(false);
   };
 
-  const handleSeal = () => {
+  const handleSeal = async () => {
+    if (isSealing) return;
     if (!isAgreed) return alert(t.needAgreement);
     if (!hasSignature) return alert(t.needSignature);
-    onSeal(canvasRef.current.toDataURL('image/png'), vitals, summaryLines);
+    setIsSealing(true);
+    try {
+      await onSeal(canvasRef.current.toDataURL('image/png'), vitals, summaryLines);
+    } catch (err) {
+      alert(t.sealError?.(err?.message || err) || String(err?.message || err));
+      setIsSealing(false);
+    }
   };
 
   if (!selectedSlot) return null;
@@ -178,7 +187,9 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
           </div>
           <div className="flex space-x-3">
             <button type="button" onClick={onClose} className="px-6 py-3 text-xs font-black uppercase border rounded-xl bg-white">{t.cancel}</button>
-            <button type="button" onClick={handleSeal} className="px-6 py-3 text-xs font-black uppercase text-white bg-emerald-600 rounded-xl">{t.seal}</button>
+            <button type="button" onClick={handleSeal} disabled={isSealing} className="px-6 py-3 text-xs font-black uppercase text-white bg-emerald-600 rounded-xl disabled:opacity-60">
+              {isSealing ? '...' : t.seal}
+            </button>
           </div>
         </div>
       </div>
