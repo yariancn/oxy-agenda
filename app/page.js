@@ -377,11 +377,67 @@ export default function AppLayout() {
 
   const emailTemplateTabLabels = {
     first: locale === 'en' ? 'First appointment' : 'Primera cita',
-    booking: locale === 'en' ? 'Scheduling' : 'Programación',
-    reschedule: locale === 'en' ? 'Reschedule' : 'Reprogramación',
+    booking: locale === 'en' ? 'New booking' : 'Cita nueva',
+    reschedule: locale === 'en' ? 'Reschedule' : 'Cambio de horario',
     cancel: locale === 'en' ? 'Cancellation' : 'Cancelación',
-    reminder: locale === 'en' ? 'Reminder' : 'Recordatorio',
+    reminder: locale === 'en' ? 'Reminder before visit' : 'Recordatorio antes de la cita',
   };
+
+  const messageTypeCards = [
+    {
+      id: 'first',
+      title: locale === 'en' ? '1. First visit' : '1. Primera visita',
+      when: locale === 'en'
+        ? 'Sent when a new patient books (first time at the clinic).'
+        : 'Se envía cuando un paciente nuevo agenda (primera vez en la clínica).',
+      autoKey: 'notify_auto_first',
+      defaultOn: true,
+    },
+    {
+      id: 'booking',
+      title: locale === 'en' ? '2. New appointment' : '2. Cita nueva',
+      when: locale === 'en'
+        ? 'Sent when an existing patient books another appointment.'
+        : 'Se envía cuando un paciente que ya conoce la clínica agenda otra cita.',
+      autoKey: 'notify_auto_booking',
+      defaultOn: true,
+    },
+    {
+      id: 'reschedule',
+      title: locale === 'en' ? '3. Time change' : '3. Cambio de horario',
+      when: locale === 'en'
+        ? 'Sent when the appointment is moved to another day or time.'
+        : 'Se envía cuando la cita se mueve a otro día u hora.',
+      autoKey: 'notify_auto_reschedule',
+      defaultOn: true,
+    },
+    {
+      id: 'cancel',
+      title: locale === 'en' ? '4. Cancellation' : '4. Cancelación',
+      when: locale === 'en'
+        ? 'Sent when the appointment is cancelled.'
+        : 'Se envía cuando la cita se cancela.',
+      autoKey: 'notify_auto_cancel',
+      defaultOn: true,
+    },
+    {
+      id: 'reminder',
+      title: locale === 'en' ? '5. Reminder before the visit' : '5. Recordatorio antes de la cita',
+      when: locale === 'en'
+        ? `Sent automatically about ${dbCompanyConfig.reminder_hours || 24} hours before the appointment (once per day check).`
+        : `Se envía solo, unas ${dbCompanyConfig.reminder_hours || 24} horas antes de la cita (revisión una vez al día).`,
+      autoKey: 'notify_auto_reminder',
+      defaultOn: false,
+    },
+  ];
+
+  const isMessageTypeOn = (card) => (
+    card.defaultOn
+      ? dbCompanyConfig[card.autoKey] !== false
+      : dbCompanyConfig[card.autoKey] === true
+  );
+
+  const activeMessageCard = messageTypeCards.find((c) => c.id === emailTemplateTab) || messageTypeCards[0];
 
   const pickEmailTemplates = (config = dbCompanyConfig) => ({
     notify_subject_first: config.notify_subject_first,
@@ -4976,306 +5032,346 @@ export default function AppLayout() {
                   onClick={() => setAdminSubTab('mensajes')}
                   className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase transition ${adminSubTab === 'mensajes' ? 'bg-emerald-600 text-white shadow' : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'}`}
                 >
-                  ✏️ Editar mensajes
+                  ✏️ Mensajes
                 </button>
               </div>
             </div>
 
             {adminSubTab === 'mensajes' && (
-              <div className="bg-emerald-50/50 p-4 sm:p-8 rounded-2xl border-2 border-emerald-200 shadow-sm mb-8">
-                <h3 className="font-black text-emerald-900 uppercase text-lg mb-1">Notificaciones al paciente</h3>
-                <p className="text-xs font-bold text-emerald-800/80 mb-5 leading-relaxed max-w-3xl">
-                  Todo en un solo lugar: qué avisos se envían, por qué canal (correo/SMS) y qué dice cada uno.
-                  La fecha, hora, servicio y ubicación se agregan solos. Cada clínica (GDL y Houston) tiene sus propios textos.
-                  A nivel de cada paciente puedes activar o desactivar correo/SMS en su perfil.
-                </p>
+              <div className="bg-white p-4 sm:p-8 rounded-2xl border border-slate-200 shadow-sm mb-8 space-y-8">
+                <div>
+                  <h3 className="font-black text-slate-900 text-xl mb-2">
+                    {locale === 'en' ? 'Patient messages' : 'Mensajes al paciente'}
+                  </h3>
+                  <p className="text-sm text-slate-600 leading-relaxed max-w-2xl">
+                    {locale === 'en'
+                      ? 'Two simple steps: (1) choose when we message the patient, (2) edit what the message says. Date, time, service and clinic address are added automatically.'
+                      : 'Dos pasos simples: (1) elige cuándo avisamos al paciente, (2) edita qué dice el mensaje. La fecha, hora, servicio y dirección se agregan solos.'}
+                  </p>
+                </div>
 
-                {/* AJUSTES GENERALES DE ENVÍO */}
-                <div className="bg-white p-4 sm:p-5 rounded-xl border border-emerald-100 shadow-sm mb-6 space-y-3">
-                  <h4 className="text-xs font-black uppercase text-emerald-900">Ajustes generales de envío</h4>
-                  <label className="flex items-center gap-2 bg-emerald-50 p-3 rounded-lg border border-emerald-200 cursor-pointer">
-                    <input type="checkbox" checked={dbCompanyConfig.notify_on_booking !== false} onChange={e => setDbCompanyConfig({ ...dbCompanyConfig, notify_on_booking: e.target.checked })} className="w-4 h-4" />
-                    <span className="text-[10px] font-black text-emerald-900 uppercase">Interruptor maestro: notificaciones automáticas activas</span>
-                  </label>
-                  <p className="text-[9px] font-bold text-slate-500 uppercase">Canales que usa la clínica por defecto</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <label className="flex items-center gap-2 bg-blue-50 p-3 rounded-lg border border-blue-200 cursor-pointer">
-                      <input type="checkbox" checked={dbCompanyConfig.notify_channel_email !== false} onChange={e => setDbCompanyConfig({ ...dbCompanyConfig, notify_channel_email: e.target.checked })} className="w-4 h-4" />
-                      <span className="text-[10px] font-black text-blue-900 uppercase">Correo electrónico</span>
-                    </label>
-                    <label className="flex items-center gap-2 bg-violet-50 p-3 rounded-lg border border-violet-200 cursor-pointer">
-                      <input type="checkbox" checked={dbCompanyConfig.notify_channel_sms !== false} onChange={e => setDbCompanyConfig({ ...dbCompanyConfig, notify_channel_sms: e.target.checked })} className="w-4 h-4" />
-                      <span className="text-[10px] font-black text-violet-900 uppercase">{isShenandoah(activeClinic) ? 'SMS (Twilio — USA)' : 'SMS (México)'}</span>
-                    </label>
-                  </div>
-                  <div>
-                    <label className="flex items-center gap-2 bg-violet-50 p-3 rounded-lg border border-violet-200 cursor-pointer mb-2">
-                      <input
-                        type="checkbox"
-                        checked={dbCompanyConfig.notify_auto_reminder === true}
-                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_auto_reminder: e.target.checked })}
-                        className="w-4 h-4"
-                      />
-                      <span className="text-[10px] font-black text-violet-900 uppercase">
-                        {locale === 'en' ? 'Send automatic appointment reminders' : 'Enviar recordatorios automáticos de cita'}
+                {/* PASO 1 — Canales */}
+                <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5 space-y-3">
+                  <h4 className="text-sm font-black text-slate-900">
+                    {locale === 'en' ? 'Step 1 — How do we send?' : 'Paso 1 — ¿Por dónde enviamos?'}
+                  </h4>
+                  <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-slate-200 cursor-pointer">
+                    <input type="checkbox" checked={dbCompanyConfig.notify_on_booking !== false} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_on_booking: e.target.checked })} className="w-5 h-5 mt-0.5 shrink-0" />
+                    <span>
+                      <span className="block text-sm font-bold text-slate-900">
+                        {locale === 'en' ? 'Automatic messages are ON' : 'Mensajes automáticos ENCENDIDOS'}
                       </span>
-                    </label>
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
-                      {locale === 'en'
-                        ? 'Hours before appointment (SMS/email reminder)'
-                        : 'Horas antes de la cita (recordatorio SMS/correo)'}
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="72"
-                      disabled={dbCompanyConfig.notify_auto_reminder !== true}
-                      value={dbCompanyConfig.reminder_hours ?? 24}
-                      onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, reminder_hours: Number(e.target.value) })}
-                      className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm disabled:opacity-50"
-                    />
-                    <p className="text-[9px] font-bold text-slate-500 mt-1 leading-relaxed">
-                      {locale === 'en'
-                        ? 'Runs once daily with the confirmation cron (Hobby plan). Best with ~24 hours. Edit the Reminder tab texts below.'
-                        : 'Se ejecuta una vez al día junto al cron de confirmación (plan Hobby). Ideal ~24 horas. Edita los textos en la pestaña Recordatorio.'}
-                    </p>
-                  </div>
-                  {isShenandoah(activeClinic) && (
-                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
-                      <p className="text-[10px] font-black uppercase text-blue-900">
-                        {locale === 'en' ? 'First-session SMS confirmation (Houston)' : 'Confirmación SMS primera sesión (Houston)'}
-                      </p>
-                      <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-blue-200 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={dbCompanyConfig.confirmation_sms_enabled === true}
-                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_sms_enabled: e.target.checked })}
-                          className="w-4 h-4"
-                        />
-                        <span className="text-[10px] font-black uppercase text-blue-900">
-                          {locale === 'en' ? 'Send YES/NO request 6h before first sessions' : 'Enviar SI/NO 6 h antes de primeras sesiones'}
-                        </span>
-                      </label>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-[9px] font-black text-blue-800 uppercase">{locale === 'en' ? 'Hours before' : 'Horas antes'}</label>
-                          <input type="number" min="1" max="24" value={dbCompanyConfig.confirmation_hours_before ?? 6} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_hours_before: Number(e.target.value) })} className="w-full p-2 border border-blue-200 rounded-lg font-bold text-sm bg-white" />
-                        </div>
-                        <div>
-                          <label className="text-[9px] font-black text-blue-800 uppercase">{locale === 'en' ? 'No-reply alert (hours)' : 'Alerta sin respuesta (h)'}</label>
-                          <input type="number" min="1" max="6" value={dbCompanyConfig.confirmation_no_reply_hours ?? 1} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_no_reply_hours: Number(e.target.value) })} className="w-full p-2 border border-blue-200 rounded-lg font-bold text-sm bg-white" />
-                        </div>
-                      </div>
-                      <p className="text-[9px] font-bold text-blue-800/90 normal-case leading-snug">
+                      <span className="block text-xs text-slate-500 mt-0.5">
                         {locale === 'en'
-                          ? 'Twilio webhook: POST /api/twilio/inbound-sms on your Messaging Service. Reception sees Confirmed / Declined / Likely no-show on the calendar.'
-                          : 'Webhook Twilio: POST /api/twilio/inbound-sms en el Messaging Service. Recepción ve Confirmada / Declinó / Probable falta en el calendario.'}
-                      </p>
-                    </div>
-                  )}
-                </div>
+                          ? 'If you turn this off, nothing goes out automatically (you can still send manually from an appointment).'
+                          : 'Si lo apagas, no sale nada automático (igual puedes mandar a mano desde una cita).'}
+                      </span>
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 cursor-pointer">
+                      <input type="checkbox" checked={dbCompanyConfig.notify_channel_email !== false} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_channel_email: e.target.checked })} className="w-5 h-5 shrink-0" />
+                      <span className="text-sm font-bold text-slate-900">{locale === 'en' ? 'Email' : 'Correo'}</span>
+                    </label>
+                    <label className="flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 cursor-pointer">
+                      <input type="checkbox" checked={dbCompanyConfig.notify_channel_sms !== false} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_channel_sms: e.target.checked })} className="w-5 h-5 shrink-0" />
+                      <span className="text-sm font-bold text-slate-900">SMS</span>
+                    </label>
+                  </div>
+                </section>
 
-                <h4 className="text-xs font-black uppercase text-emerald-900 mb-2">Contenido por tipo de aviso</h4>
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {[
-                    { id: 'first', label: locale === 'en' ? 'First visit' : 'Primera cita' },
-                    { id: 'booking', label: locale === 'en' ? 'Scheduling' : 'Programación' },
-                    { id: 'reschedule', label: locale === 'en' ? 'Reschedule' : 'Reprogramación' },
-                    { id: 'cancel', label: locale === 'en' ? 'Cancellation' : 'Cancelación' },
-                    { id: 'reminder', label: locale === 'en' ? 'Reminder' : 'Recordatorio' },
-                  ].map((tab) => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setEmailTemplateTab(tab.id)}
-                      className={`px-4 py-2.5 rounded-lg text-[10px] font-black uppercase transition ${emailTemplateTab === tab.id ? 'bg-emerald-600 text-white shadow' : 'bg-white border border-emerald-200 text-emerald-900 hover:bg-emerald-100'}`}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-
-                <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-emerald-100 shadow-sm mb-4 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={
-                      emailTemplateTab === 'reminder'
-                        ? dbCompanyConfig.notify_auto_reminder === true
-                        : dbCompanyConfig[`notify_auto_${emailTemplateTab}`] !== false
-                    }
-                    onChange={(e) => setDbCompanyConfig({
-                      ...dbCompanyConfig,
-                      [`notify_auto_${emailTemplateTab}`]: e.target.checked,
+                {/* PASO 2 — Cuándo */}
+                <section className="space-y-3">
+                  <h4 className="text-sm font-black text-slate-900">
+                    {locale === 'en' ? 'Step 2 — When do we message?' : 'Paso 2 — ¿Cuándo avisamos?'}
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    {locale === 'en'
+                      ? 'Turn each situation on or off. Tap “Edit text” to change what that message says.'
+                      : 'Enciende o apaga cada situación. Toca “Editar texto” para cambiar lo que dice ese mensaje.'}
+                  </p>
+                  <div className="space-y-3">
+                    {messageTypeCards.map((card) => {
+                      const on = isMessageTypeOn(card);
+                      return (
+                        <div
+                          key={card.id}
+                          className={`rounded-2xl border p-4 ${on ? 'border-emerald-300 bg-emerald-50/60' : 'border-slate-200 bg-slate-50'}`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-start gap-3">
+                            <label className="flex items-start gap-3 flex-1 cursor-pointer min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={on}
+                                onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [card.autoKey]: e.target.checked })}
+                                className="w-5 h-5 mt-0.5 shrink-0"
+                              />
+                              <span className="min-w-0">
+                                <span className="block text-sm font-black text-slate-900">{card.title}</span>
+                                <span className="block text-xs text-slate-600 mt-1 leading-relaxed">{card.when}</span>
+                                <span className={`inline-block mt-2 text-[10px] font-black uppercase tracking-wide px-2 py-1 rounded-full ${on ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-700'}`}>
+                                  {on
+                                    ? (locale === 'en' ? 'Sending' : 'Se envía')
+                                    : (locale === 'en' ? 'Off' : 'Apagado')}
+                                </span>
+                              </span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => setEmailTemplateTab(card.id)}
+                              className={`shrink-0 px-4 py-2.5 rounded-xl text-xs font-black uppercase transition ${
+                                emailTemplateTab === card.id
+                                  ? 'bg-slate-900 text-white'
+                                  : 'bg-white border border-slate-300 text-slate-800 hover:bg-slate-100'
+                              }`}
+                            >
+                              {locale === 'en' ? 'Edit text' : 'Editar texto'}
+                            </button>
+                          </div>
+                          {card.id === 'reminder' && (
+                            <div className={`mt-3 pt-3 border-t ${on ? 'border-emerald-200' : 'border-slate-200'}`}>
+                              <label className="text-xs font-bold text-slate-700">
+                                {locale === 'en' ? 'How many hours before the appointment?' : '¿Cuántas horas antes de la cita?'}
+                              </label>
+                              <div className="flex items-center gap-2 mt-1">
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="72"
+                                  disabled={!on}
+                                  value={dbCompanyConfig.reminder_hours ?? 24}
+                                  onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, reminder_hours: Number(e.target.value) })}
+                                  className="w-24 p-2.5 border border-slate-300 rounded-lg font-bold text-slate-900 bg-white disabled:opacity-50"
+                                />
+                                <span className="text-xs text-slate-500">
+                                  {locale === 'en' ? 'hours before (24 is recommended)' : 'horas antes (recomendado: 24)'}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
                     })}
-                    className="w-4 h-4"
-                  />
-                  <span className="text-[10px] font-black text-emerald-900 uppercase">
-                    {emailTemplateTab === 'reminder'
-                      ? (locale === 'en' ? 'Send this reminder automatically' : 'Enviar este recordatorio automáticamente')
-                      : (locale === 'en' ? 'Send this notice automatically' : 'Enviar este aviso automáticamente')}
-                  </span>
-                </label>
+                  </div>
+                </section>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-                  <div className="space-y-3 bg-white p-4 sm:p-5 rounded-xl border border-emerald-100 shadow-sm">
-                    <p className="text-[10px] font-black uppercase text-emerald-800 border-b border-emerald-100 pb-2">📧 Correo</p>
-                    <div>
-                      <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Asunto del correo</label>
-                      <input
-                        type="text"
-                        value={dbCompanyConfig[`notify_subject_${emailTemplateTab}`] || ''}
-                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_subject_${emailTemplateTab}`]: e.target.value })}
-                        className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Mensaje principal</label>
-                      <textarea
-                        rows={8}
-                        value={dbCompanyConfig[`notify_body_${emailTemplateTab}`] || ''}
-                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_body_${emailTemplateTab}`]: e.target.value })}
-                        className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={openEmailPreview}
-                      className="w-full sm:w-auto px-4 py-2.5 bg-blue-50 border border-blue-200 text-blue-800 font-black text-[10px] uppercase rounded-lg hover:bg-blue-100 transition"
-                    >
-                      👁 {locale === 'en' ? 'Preview email' : 'Vista previa del correo'}
-                    </button>
+                {/* PASO 3 — Texto del aviso seleccionado */}
+                <section className="rounded-2xl border-2 border-slate-900 bg-white p-4 sm:p-6 space-y-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
+                      {locale === 'en' ? 'Step 3 — Message wording' : 'Paso 3 — Texto del mensaje'}
+                    </p>
+                    <h4 className="text-lg font-black text-slate-900">{activeMessageCard.title}</h4>
+                    <p className="text-sm text-slate-600 mt-1 leading-relaxed">{activeMessageCard.when}</p>
+                    {!isMessageTypeOn(activeMessageCard) && (
+                      <p className="mt-2 text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        {locale === 'en'
+                          ? 'This situation is OFF above — you can still edit the text for when you turn it on.'
+                          : 'Esta situación está APAGADA arriba — igual puedes editar el texto para cuando la enciendas.'}
+                      </p>
+                    )}
                   </div>
 
-                  <div className="space-y-3">
-                    <div className="bg-white p-4 sm:p-5 rounded-xl border border-violet-100 shadow-sm">
-                      <p className="text-[10px] font-black uppercase text-violet-800 border-b border-violet-100 pb-2 mb-2">💬 SMS</p>
-                      <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Saludo del SMS</label>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="space-y-3 rounded-xl border border-slate-200 p-4 bg-slate-50">
+                      <p className="text-sm font-black text-slate-900">
+                        {locale === 'en' ? 'Email' : 'Correo'}
+                      </p>
+                      <div>
+                        <label className="text-xs font-bold text-slate-600">
+                          {locale === 'en' ? 'Subject line' : 'Asunto'}
+                        </label>
+                        <input
+                          type="text"
+                          value={dbCompanyConfig[`notify_subject_${emailTemplateTab}`] || ''}
+                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_subject_${emailTemplateTab}`]: e.target.value })}
+                          className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-600">
+                          {locale === 'en' ? 'Message body' : 'Cuerpo del mensaje'}
+                        </label>
+                        <textarea
+                          rows={7}
+                          value={dbCompanyConfig[`notify_body_${emailTemplateTab}`] || ''}
+                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_body_${emailTemplateTab}`]: e.target.value })}
+                          className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={openEmailPreview}
+                        className="px-4 py-2.5 bg-white border border-slate-300 text-slate-800 font-black text-xs uppercase rounded-lg hover:bg-slate-100 transition"
+                      >
+                        {locale === 'en' ? 'Preview email' : 'Ver cómo se ve el correo'}
+                      </button>
+                    </div>
+
+                    <div className="space-y-3 rounded-xl border border-violet-200 p-4 bg-violet-50/50">
+                      <p className="text-sm font-black text-slate-900">SMS</p>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        {locale === 'en'
+                          ? 'Write only the greeting. We add date, time, service, location and clinic phone automatically.'
+                          : 'Escribe solo el saludo. Nosotros agregamos fecha, hora, servicio, ubicación y teléfono de la clínica.'}
+                      </p>
                       <textarea
-                        rows={3}
+                        rows={4}
                         value={dbCompanyConfig[`notify_sms_${emailTemplateTab}`] || ''}
                         onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_sms_${emailTemplateTab}`]: e.target.value })}
-                        className="w-full p-3 border border-violet-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
-                        placeholder="Hola {{nombre}}, cita confirmada en {{clinica}}."
+                        className="w-full p-3 border border-violet-200 rounded-lg font-bold outline-none text-slate-900 bg-white text-sm leading-relaxed"
+                        placeholder={locale === 'en' ? 'Hi {{nombre}}, appointment confirmed at {{clinica}}.' : 'Hola {{nombre}}, cita confirmada en {{clinica}}.'}
                       />
-                      <p className="text-[9px] font-bold text-violet-700/90 mt-1 leading-relaxed">
-                        El SMS agrega solo fecha, hora, servicio, ubicación y teléfono de la clínica. Puedes usar {'{{nombre}}'} y {'{{clinica}}'}.
-                        {emailTemplateTab === 'first' ? ' En la primera cita también incluye la liga de indicaciones (abajo).' : ''}
-                      </p>
-                    </div>
-                    <div className="bg-white p-4 sm:p-5 rounded-xl border border-emerald-100 shadow-sm">
-                      <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Datos relevantes (en todos los correos)</label>
-                      <p className="text-[9px] font-bold text-slate-400 mb-2">Estacionamiento, qué traer, políticas, maps, etc.</p>
-                      <textarea
-                        rows={5}
-                        value={dbCompanyConfig.notify_extra_info || ''}
-                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_extra_info: e.target.value })}
-                        className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white text-sm leading-relaxed"
-                        placeholder={locale === 'en' ? 'Free parking in lot B. Wear comfortable clothes.' : 'Estacionamiento gratuito. Traer ropa cómoda y evitar perfumes fuertes.'}
-                      />
-                    </div>
-                    <div className="bg-slate-800 text-slate-200 p-4 rounded-xl text-[10px] font-bold leading-relaxed">
-                      <p className="font-black uppercase text-slate-400 mb-2">Variables que puedes usar</p>
-                      <p className="font-mono text-[9px] break-all">{EMAIL_PLACEHOLDER_HINT}</p>
+                      <details className="text-xs text-slate-500">
+                        <summary className="cursor-pointer font-bold text-slate-600">
+                          {locale === 'en' ? 'Optional placeholders' : 'Textos opcionales ({{nombre}}, etc.)'}
+                        </summary>
+                        <p className="mt-2 font-mono text-[10px] break-all bg-white border border-slate-200 rounded-lg p-2">{EMAIL_PLACEHOLDER_HINT}</p>
+                      </details>
                     </div>
                   </div>
-                </div>
 
-                {emailTemplateTab === 'first' && (
-                  <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 sm:p-5 mb-4">
-                    <h4 className="text-xs font-black uppercase text-amber-900 mb-1">Indicaciones de primera sesión</h4>
-                    <p className="text-[10px] font-bold text-amber-800/90 mb-4 leading-relaxed">
-                      Estas indicaciones son parte del mensaje de PRIMERA CITA (paciente nuevo en la clínica o en un tratamiento distinto). El resto de avisos van sin indicaciones.
-                      Un equipo puede usar sus propias indicaciones si activas la casilla en Catálogo → editar equipo (útil p. ej. para Red Light).
-                      Usa {'{{instrucciones}}'} en el mensaje principal del correo si quieres insertarlo ahí también.
-                    </p>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {emailTemplateTab === 'first' && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 space-y-3">
+                      <h5 className="text-sm font-black text-amber-950">
+                        {locale === 'en' ? 'Only for first visits — session tips' : 'Solo en primera visita — indicaciones de sesión'}
+                      </h5>
+                      <p className="text-xs text-amber-900/90 leading-relaxed">
+                        {locale === 'en'
+                          ? 'These tips go with the first-visit message only. Other messages do not include them.'
+                          : 'Estas indicaciones van solo con el mensaje de primera visita. Los demás avisos no las incluyen.'}
+                      </p>
                       <div>
-                        <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Título del bloque</label>
+                        <label className="text-xs font-bold text-amber-900">{locale === 'en' ? 'Section title' : 'Título'}</label>
                         <input
                           type="text"
                           value={dbCompanyConfig.notify_session_label || ''}
                           onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_label: e.target.value })}
                           className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1"
-                          placeholder="Indicaciones para tu sesión"
+                          placeholder={locale === 'en' ? 'Instructions for your session' : 'Indicaciones para tu sesión'}
                         />
                       </div>
-                      <div className="lg:col-span-2">
-                        <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Texto de indicaciones (completo — se envía por CORREO)</label>
+                      <div>
+                        <label className="text-xs font-bold text-amber-900">
+                          {locale === 'en' ? 'Full tips (email)' : 'Indicaciones completas (correo)'}
+                        </label>
                         <textarea
-                          rows={4}
+                          rows={3}
                           value={dbCompanyConfig.notify_session_default || ''}
                           onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_default: e.target.value })}
                           className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
-                          placeholder="Evitar comidas pesadas 2 horas antes de la sesión."
                         />
                       </div>
-                      <div className="lg:col-span-2">
-                        <label className="text-[10px] font-black text-amber-800 uppercase ml-1">Liga a la página de indicaciones (se envía por SMS)</label>
+                      <div>
+                        <label className="text-xs font-bold text-amber-900">
+                          {locale === 'en' ? 'Link for SMS' : 'Liga para el SMS'}
+                        </label>
                         <input
                           type="url"
                           value={dbCompanyConfig.notify_session_url || ''}
                           onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_url: e.target.value.trim() })}
                           className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm"
-                          placeholder="https://oxygengdl.com/indicaciones-para-sesiones/"
                         />
-                        <p className="text-[9px] font-bold text-amber-700/90 mt-1 leading-relaxed">
-                          En la primera cita, el SMS incluye esta liga (el correo lleva el texto completo). GDL: oxygengdl.com · Houston: oxyhyperbaric.com
-                        </p>
                       </div>
                     </div>
-                  </div>
+                  )}
+                </section>
+
+                {/* Info compartida */}
+                <section className="rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-2">
+                  <h4 className="text-sm font-black text-slate-900">
+                    {locale === 'en' ? 'Extra note on every email' : 'Nota extra en todos los correos'}
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    {locale === 'en'
+                      ? 'Parking, what to bring, maps — shown on all email types.'
+                      : 'Estacionamiento, qué traer, mapas — aparece en todos los tipos de correo.'}
+                  </p>
+                  <textarea
+                    rows={4}
+                    value={dbCompanyConfig.notify_extra_info || ''}
+                    onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_extra_info: e.target.value })}
+                    className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white text-sm leading-relaxed"
+                    placeholder={locale === 'en' ? 'Free parking. Wear comfortable clothes.' : 'Estacionamiento gratuito. Traer ropa cómoda.'}
+                  />
+                </section>
+
+                {isShenandoah(activeClinic) && (
+                  <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 sm:p-5 space-y-3">
+                    <h4 className="text-sm font-black text-blue-950">
+                      {locale === 'en' ? 'Houston only — YES/NO confirmation SMS' : 'Solo Houston — SMS de confirmación SI/NO'}
+                    </h4>
+                    <p className="text-xs text-blue-900/90 leading-relaxed">
+                      {locale === 'en'
+                        ? 'Separate from the messages above. Asks first-session patients to reply YES or NO before the visit.'
+                        : 'Es aparte de los mensajes de arriba. Pide a pacientes de primera sesión que respondan SI o NO antes de la visita.'}
+                    </p>
+                    <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-blue-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={dbCompanyConfig.confirmation_sms_enabled === true}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_sms_enabled: e.target.checked })}
+                        className="w-5 h-5 mt-0.5 shrink-0"
+                      />
+                      <span className="text-sm font-bold text-blue-950">
+                        {locale === 'en' ? 'Ask for YES/NO before first sessions' : 'Pedir SI/NO antes de primeras sesiones'}
+                      </span>
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-bold text-blue-900">
+                          {locale === 'en' ? 'Hours before visit' : 'Horas antes de la visita'}
+                        </label>
+                        <input type="number" min="1" max="24" value={dbCompanyConfig.confirmation_hours_before ?? 6} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_hours_before: Number(e.target.value) })} className="w-full p-2.5 border border-blue-200 rounded-lg font-bold text-sm bg-white mt-1" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-blue-900">
+                          {locale === 'en' ? 'Alert staff if no reply (hours)' : 'Avisar al staff si no responde (horas)'}
+                        </label>
+                        <input type="number" min="1" max="6" value={dbCompanyConfig.confirmation_no_reply_hours ?? 1} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_no_reply_hours: Number(e.target.value) })} className="w-full p-2.5 border border-blue-200 rounded-lg font-bold text-sm bg-white mt-1" />
+                      </div>
+                    </div>
+                  </section>
                 )}
 
-                {/* ALERTAS AL EQUIPO */}
-                <div className="mb-4 p-4 rounded-xl bg-indigo-50 border-2 border-indigo-200">
-                  <h4 className="text-xs font-black uppercase text-indigo-900 mb-2">Alertas al equipo — cita nueva</h4>
-                  <p className="text-[10px] font-bold text-indigo-800/90 mb-3 leading-relaxed">
-                    Cuando un cliente o promotor agenda (web o staff), avisa por SMS y/o correo.
-                    Puedes poner números extra abajo <strong>o</strong> agregar celular y correo en cada empleado (Admin → Personal autorizado).
-                    Requiere {isShenandoah(activeClinic) ? 'Twilio (SMS)' : 'LabsMobile (SMS México)'} y Resend (correo) en Vercel.
+                {/* Alertas al equipo */}
+                <section className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 sm:p-5 space-y-3">
+                  <h4 className="text-sm font-black text-indigo-950">
+                    {locale === 'en' ? 'Staff alerts (not the patient)' : 'Avisos al equipo (no al paciente)'}
+                  </h4>
+                  <p className="text-xs text-indigo-900/90 leading-relaxed">
+                    {locale === 'en'
+                      ? 'Optional: notify reception when someone books. Separate from patient messages.'
+                      : 'Opcional: avisar a recepción cuando alguien agenda. Es aparte de los mensajes al paciente.'}
                   </p>
-                  <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-indigo-200 shadow-sm cursor-pointer mb-3">
+                  <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-indigo-200 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={dbCompanyConfig.notify_staff_on_booking === true}
                       onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_staff_on_booking: e.target.checked })}
-                      className="w-4 h-4"
+                      className="w-5 h-5 mt-0.5 shrink-0"
                     />
-                    <span className="text-[10px] font-black text-indigo-900 uppercase">Avisar al equipo cuando hay cita nueva</span>
+                    <span className="text-sm font-bold text-indigo-950">
+                      {locale === 'en' ? 'Alert the team on new bookings' : 'Avisar al equipo cuando hay cita nueva'}
+                    </span>
                   </label>
-                  <label className={`flex items-start gap-2 bg-white p-3 rounded-lg border border-indigo-200 shadow-sm cursor-pointer mb-3 ${dbCompanyConfig.notify_staff_on_booking !== true ? 'opacity-50' : ''}`}>
+                  <label className={`flex items-start gap-3 bg-white p-3 rounded-xl border border-indigo-200 cursor-pointer ${dbCompanyConfig.notify_staff_on_booking !== true ? 'opacity-50' : ''}`}>
                     <input
                       type="checkbox"
                       disabled={dbCompanyConfig.notify_staff_on_booking !== true}
                       checked={dbCompanyConfig.staff_alert_first_sessions_only === true}
                       onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, staff_alert_first_sessions_only: e.target.checked })}
-                      className="w-4 h-4 mt-0.5 shrink-0"
+                      className="w-5 h-5 mt-0.5 shrink-0"
                     />
-                    <span className="text-[10px] font-black text-indigo-900 uppercase leading-snug">
-                      {locale === 'en'
-                        ? 'Only first sessions (new patient to the clinic)'
-                        : 'Solo primeras citas (paciente nuevo en la clínica)'}
+                    <span className="text-sm font-bold text-indigo-950">
+                      {locale === 'en' ? 'Only for first visits' : 'Solo en primeras visitas'}
                     </span>
                   </label>
-                  <p className="text-[9px] font-bold text-indigo-700/80 mb-3 normal-case leading-snug">
-                    {dbCompanyConfig.staff_alert_first_sessions_only === true
-                      ? (locale === 'en'
-                        ? 'Unchecked above = all new appointments trigger alerts. With this on, only new patients (⭐) or first-ever visit at the clinic.'
-                        : 'Sin el segundo check = aviso en todas las citas nuevas. Con este check = solo ⭐ o primera visita del paciente en la clínica.')
-                      : (locale === 'en'
-                        ? 'Leave unchecked to alert on every new booking.'
-                        : 'Déjalo sin marcar para avisar en cada cita nueva.')}
-                  </p>
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">
+                      <label className="text-xs font-bold text-indigo-900">
                         {locale === 'en' ? 'Clinic phones (SMS)' : 'Teléfonos de la clínica (SMS)'}
                       </label>
-                      <p className="text-[8px] font-bold text-indigo-700/80 normal-case mb-1">
-                        {locale === 'en'
-                          ? 'Main recipients for booking alerts. Staff personal phones only receive alerts if they enable it in their employee profile.'
-                          : 'Destinatarios principales. El celular personal de cada empleado solo alerta si lo activan en su perfil de empleado.'}
-                      </p>
                       <textarea
                         rows={2}
                         value={dbCompanyConfig.staff_alert_phones || ''}
@@ -5285,19 +5381,22 @@ export default function AppLayout() {
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-black text-indigo-800 uppercase ml-1">Correos del equipo</label>
+                      <label className="text-xs font-bold text-indigo-900">
+                        {locale === 'en' ? 'Team emails' : 'Correos del equipo'}
+                      </label>
                       <textarea
                         rows={2}
                         value={dbCompanyConfig.staff_alert_emails || ''}
                         onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, staff_alert_emails: e.target.value })}
-                        placeholder="recepcion@oxygengdl.com, gerencia@oxygengdl.com"
+                        placeholder="recepcion@oxygengdl.com"
                         className="w-full p-2.5 border border-indigo-200 rounded-lg font-bold text-sm outline-none bg-white mt-1"
                       />
                     </div>
                   </div>
-                </div>
+                </section>
 
                 <button
+                  type="button"
                   onClick={async () => {
                     try {
                       await saveCompanyConfig();
@@ -5307,7 +5406,7 @@ export default function AppLayout() {
                   }}
                   className="w-full sm:w-auto sm:min-w-[280px] bg-emerald-600 text-white font-black py-4 px-8 rounded-xl uppercase shadow-lg hover:bg-emerald-700 transition"
                 >
-                  Guardar notificaciones
+                  {locale === 'en' ? 'Save messages' : 'Guardar mensajes'}
                 </button>
               </div>
             )}
@@ -5591,22 +5690,24 @@ export default function AppLayout() {
                 </div>
 
                 {/* ACCESO A NOTIFICACIONES (todo se configura en su propia pestaña) */}
-                <h3 className="font-black text-slate-800 uppercase text-sm mb-3 pb-2 border-b mt-6">Notificaciones (correo y SMS)</h3>
-                <div className="w-full mb-6 p-4 rounded-xl border-2 border-emerald-200 bg-emerald-50">
-                  <p className="text-[10px] font-black uppercase text-emerald-800 mb-1">
-                    {locale === 'en' ? 'Message templates & send rules' : 'Plantillas y reglas de envío'}
+                <h3 className="font-black text-slate-800 uppercase text-sm mb-3 pb-2 border-b mt-6">
+                  {locale === 'en' ? 'Patient messages' : 'Mensajes al paciente'}
+                </h3>
+                <div className="w-full mb-6 p-4 rounded-xl border border-emerald-200 bg-emerald-50">
+                  <p className="text-sm font-bold text-emerald-900 mb-1">
+                    {locale === 'en' ? 'When we message & what we say' : 'Cuándo avisamos y qué decimos'}
                   </p>
-                  <p className="text-xs font-bold text-emerald-700 mb-3 leading-relaxed">
+                  <p className="text-xs text-emerald-800 mb-3 leading-relaxed">
                     {locale === 'en'
-                      ? 'Choose when SMS/email go out (new booking, change, cancel, reminder) and edit the exact wording.'
-                      : 'Define cuándo salen SMS/correo (cita nueva, cambio, cancelación, recordatorio) y edita el texto exacto.'}
+                      ? 'New booking, time change, cancel, reminder — each one has an on/off switch and its own text.'
+                      : 'Cita nueva, cambio de horario, cancelación, recordatorio — cada uno tiene su interruptor y su propio texto.'}
                   </p>
                   <button
                     type="button"
                     onClick={() => setAdminSubTab('mensajes')}
                     className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 text-white text-[11px] font-black uppercase shadow hover:bg-emerald-700 transition"
                   >
-                    {locale === 'en' ? '✏️ Edit messages' : '✏️ Editar mensajes'}
+                    {locale === 'en' ? 'Open messages' : 'Abrir mensajes'}
                   </button>
                 </div>
 
