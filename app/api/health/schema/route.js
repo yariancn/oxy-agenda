@@ -64,6 +64,16 @@ async function auditDatabase(clinicName, { includeGdlLocations = false } = {}) {
   );
   set('company_config_full', companyConfig.ok, companyConfig.error);
 
+  const notifyChannels = await probeSelect(
+    supabase,
+    'company_config',
+    'notify_use_email_booking, notify_use_sms_booking, notify_use_email_reminder, notify_use_sms_reminder, notify_auto_reminder, notify_sms_reminder',
+  );
+  set('company_config_notify_channels', notifyChannels.ok, notifyChannels.error);
+
+  const reminderCol = await probeSelect(supabase, 'appointments', 'id, reminder_sent_at');
+  set('appointments_reminder_sent_at', reminderCol.ok, reminderCol.error);
+
   const promoters = await probeSelect(supabase, 'promoters', 'id, calendar_feed_token, notes');
   set('promoters_feed', promoters.ok, promoters.error);
 
