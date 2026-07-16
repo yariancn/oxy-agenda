@@ -437,9 +437,6 @@ export default function AppLayout() {
       ? dbCompanyConfig[card.autoKey] !== false
       : dbCompanyConfig[card.autoKey] === true
   );
-
-  const activeMessageCard = messageTypeCards.find((c) => c.id === emailTemplateTab) || messageTypeCards[0];
-
   const pickEmailTemplates = (config = dbCompanyConfig) => ({
     notify_subject_first: config.notify_subject_first,
     notify_body_first: config.notify_body_first,
@@ -607,7 +604,13 @@ export default function AppLayout() {
       locale,
     });
     if (error) throw new Error(error.message);
-    flashSaveToast(warning || L.p.admin.configSaved);
+    if (warning) {
+      // Full multi-line SQL guidance — toast truncates this.
+      window.alert(warning);
+      flashSaveToast(locale === 'en' ? 'Saved partially — see alert' : 'Guardado parcial — ver aviso');
+    } else {
+      flashSaveToast(L.p.admin.configSaved);
+    }
     fetchAllData();
   };
 
@@ -5047,8 +5050,8 @@ export default function AppLayout() {
                   </h3>
                   <p className="text-sm text-slate-600 leading-relaxed max-w-2xl">
                     {locale === 'en'
-                      ? 'Two simple steps: (1) choose when we message the patient, (2) edit what the message says. Date, time, service and clinic address are added automatically.'
-                      : 'Dos pasos simples: (1) elige cuándo avisamos al paciente, (2) edita qué dice el mensaje. La fecha, hora, servicio y dirección se agregan solos.'}
+                      ? 'Choose when we message, by email and/or SMS. Tap Edit text on a card to change that message right there.'
+                      : 'Elige cuándo avisamos, por correo y/o SMS. Toca Editar texto en una tarjeta para cambiar ese mensaje ahí mismo.'}
                   </p>
                 </div>
 
@@ -5115,10 +5118,12 @@ export default function AppLayout() {
                       const useEmail = dbCompanyConfig[emailKey] !== false;
                       const useSms = dbCompanyConfig[smsKey] !== false;
                       const channels = resolveNotifyChannels(dbCompanyConfig, card.id);
+                      const editing = emailTemplateTab === card.id;
                       return (
                         <div
                           key={card.id}
-                          className={`rounded-2xl border p-4 ${on ? 'border-emerald-300 bg-emerald-50/60' : 'border-slate-200 bg-slate-50'}`}
+                          id={`msg-card-${card.id}`}
+                          className={`rounded-2xl border p-4 ${editing ? 'border-slate-900 bg-white shadow-md' : on ? 'border-emerald-300 bg-emerald-50/60' : 'border-slate-200 bg-slate-50'}`}
                         >
                           <div className="flex flex-col sm:flex-row sm:items-start gap-3">
                             <label className="flex items-start gap-3 flex-1 cursor-pointer min-w-0">
@@ -5149,14 +5154,25 @@ export default function AppLayout() {
                             </label>
                             <button
                               type="button"
-                              onClick={() => setEmailTemplateTab(card.id)}
+                              onClick={() => {
+                                if (editing) {
+                                  setEmailTemplateTab('');
+                                  return;
+                                }
+                                setEmailTemplateTab(card.id);
+                                window.setTimeout(() => {
+                                  document.getElementById(`msg-card-${card.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                }, 50);
+                              }}
                               className={`shrink-0 px-4 py-2.5 rounded-xl text-xs font-black uppercase transition ${
-                                emailTemplateTab === card.id
+                                editing
                                   ? 'bg-slate-900 text-white'
                                   : 'bg-white border border-slate-300 text-slate-800 hover:bg-slate-100'
                               }`}
                             >
-                              {locale === 'en' ? 'Edit text' : 'Editar texto'}
+                              {editing
+                                ? (locale === 'en' ? 'Hide text' : 'Ocultar texto')
+                                : (locale === 'en' ? 'Edit text' : 'Editar texto')}
                             </button>
                           </div>
 
@@ -5216,154 +5232,112 @@ export default function AppLayout() {
                               </div>
                             </div>
                           )}
+
+                          {editing && (
+                            <div className="mt-4 pt-4 border-t border-slate-300 space-y-4">
+                              <p className="text-xs font-black uppercase tracking-wide text-slate-500">
+                                {locale === 'en' ? 'Message text for this notice' : 'Texto de este aviso'}
+                              </p>
+                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                <div className="space-y-3 rounded-xl border border-slate-200 p-4 bg-slate-50">
+                                  <p className="text-sm font-black text-slate-900">
+                                    {locale === 'en' ? 'Email' : 'Correo'}
+                                  </p>
+                                  <div>
+                                    <label className="text-xs font-bold text-slate-600">
+                                      {locale === 'en' ? 'Subject line' : 'Asunto'}
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={dbCompanyConfig[`notify_subject_${card.id}`] || ''}
+                                      onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_subject_${card.id}`]: e.target.value })}
+                                      className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-xs font-bold text-slate-600">
+                                      {locale === 'en' ? 'Message body' : 'Cuerpo del mensaje'}
+                                    </label>
+                                    <textarea
+                                      rows={6}
+                                      value={dbCompanyConfig[`notify_body_${card.id}`] || ''}
+                                      onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_body_${card.id}`]: e.target.value })}
+                                      className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
+                                    />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEmailTemplateTab(card.id);
+                                      openEmailPreview();
+                                    }}
+                                    className="px-4 py-2.5 bg-white border border-slate-300 text-slate-800 font-black text-xs uppercase rounded-lg hover:bg-slate-100 transition"
+                                  >
+                                    {locale === 'en' ? 'Preview email' : 'Ver cómo se ve el correo'}
+                                  </button>
+                                </div>
+
+                                <div className="space-y-3 rounded-xl border border-violet-200 p-4 bg-violet-50/50">
+                                  <p className="text-sm font-black text-slate-900">SMS</p>
+                                  <p className="text-xs text-slate-600 leading-relaxed">
+                                    {locale === 'en'
+                                      ? 'Write only the greeting. We add date, time, service, location and clinic phone automatically.'
+                                      : 'Escribe solo el saludo. Nosotros agregamos fecha, hora, servicio, ubicación y teléfono de la clínica.'}
+                                  </p>
+                                  <textarea
+                                    rows={4}
+                                    value={dbCompanyConfig[`notify_sms_${card.id}`] || ''}
+                                    onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_sms_${card.id}`]: e.target.value })}
+                                    className="w-full p-3 border border-violet-200 rounded-lg font-bold outline-none text-slate-900 bg-white text-sm leading-relaxed"
+                                    placeholder={locale === 'en' ? 'Hi {{nombre}}, appointment confirmed at {{clinica}}.' : 'Hola {{nombre}}, cita confirmada en {{clinica}}.'}
+                                  />
+                                </div>
+                              </div>
+
+                              {card.id === 'first' && (
+                                <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 space-y-3">
+                                  <h5 className="text-sm font-black text-amber-950">
+                                    {locale === 'en' ? 'Only for first visits — session tips' : 'Solo en primera visita — indicaciones de sesión'}
+                                  </h5>
+                                  <div>
+                                    <label className="text-xs font-bold text-amber-900">{locale === 'en' ? 'Section title' : 'Título'}</label>
+                                    <input
+                                      type="text"
+                                      value={dbCompanyConfig.notify_session_label || ''}
+                                      onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_label: e.target.value })}
+                                      className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-xs font-bold text-amber-900">
+                                      {locale === 'en' ? 'Full tips (email)' : 'Indicaciones completas (correo)'}
+                                    </label>
+                                    <textarea
+                                      rows={3}
+                                      value={dbCompanyConfig.notify_session_default || ''}
+                                      onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_default: e.target.value })}
+                                      className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-xs font-bold text-amber-900">
+                                      {locale === 'en' ? 'Link for SMS' : 'Liga para el SMS'}
+                                    </label>
+                                    <input
+                                      type="url"
+                                      value={dbCompanyConfig.notify_session_url || ''}
+                                      onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_url: e.target.value.trim() })}
+                                      className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm"
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
                   </div>
-                </section>
-
-                {/* PASO 3 — Texto del aviso seleccionado */}
-                <section className="rounded-2xl border-2 border-slate-900 bg-white p-4 sm:p-6 space-y-4">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
-                      {locale === 'en' ? 'Step 3 — Message wording' : 'Paso 3 — Texto del mensaje'}
-                    </p>
-                    <h4 className="text-lg font-black text-slate-900">{activeMessageCard.title}</h4>
-                    <p className="text-sm text-slate-600 mt-1 leading-relaxed">{activeMessageCard.when}</p>
-                    {!isMessageTypeOn(activeMessageCard) && (
-                      <p className="mt-2 text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                        {locale === 'en'
-                          ? 'This situation is OFF above — you can still edit the text for when you turn it on.'
-                          : 'Esta situación está APAGADA arriba — igual puedes editar el texto para cuando la enciendas.'}
-                      </p>
-                    )}
-                    {isMessageTypeOn(activeMessageCard) && (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={dbCompanyConfig[`notify_use_email_${emailTemplateTab}`] !== false}
-                            onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_use_email_${emailTemplateTab}`]: e.target.checked })}
-                            className="w-4 h-4"
-                          />
-                          <span className="text-xs font-bold text-slate-900">{locale === 'en' ? 'Send email' : 'Enviar correo'}</span>
-                        </label>
-                        <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-violet-200 bg-violet-50 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={dbCompanyConfig[`notify_use_sms_${emailTemplateTab}`] !== false}
-                            onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_use_sms_${emailTemplateTab}`]: e.target.checked })}
-                            className="w-4 h-4"
-                          />
-                          <span className="text-xs font-bold text-slate-900">{locale === 'en' ? 'Send SMS' : 'Enviar SMS'}</span>
-                        </label>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <div className="space-y-3 rounded-xl border border-slate-200 p-4 bg-slate-50">
-                      <p className="text-sm font-black text-slate-900">
-                        {locale === 'en' ? 'Email' : 'Correo'}
-                      </p>
-                      <div>
-                        <label className="text-xs font-bold text-slate-600">
-                          {locale === 'en' ? 'Subject line' : 'Asunto'}
-                        </label>
-                        <input
-                          type="text"
-                          value={dbCompanyConfig[`notify_subject_${emailTemplateTab}`] || ''}
-                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_subject_${emailTemplateTab}`]: e.target.value })}
-                          className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-slate-600">
-                          {locale === 'en' ? 'Message body' : 'Cuerpo del mensaje'}
-                        </label>
-                        <textarea
-                          rows={7}
-                          value={dbCompanyConfig[`notify_body_${emailTemplateTab}`] || ''}
-                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_body_${emailTemplateTab}`]: e.target.value })}
-                          className="w-full p-3 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={openEmailPreview}
-                        className="px-4 py-2.5 bg-white border border-slate-300 text-slate-800 font-black text-xs uppercase rounded-lg hover:bg-slate-100 transition"
-                      >
-                        {locale === 'en' ? 'Preview email' : 'Ver cómo se ve el correo'}
-                      </button>
-                    </div>
-
-                    <div className="space-y-3 rounded-xl border border-violet-200 p-4 bg-violet-50/50">
-                      <p className="text-sm font-black text-slate-900">SMS</p>
-                      <p className="text-xs text-slate-600 leading-relaxed">
-                        {locale === 'en'
-                          ? 'Write only the greeting. We add date, time, service, location and clinic phone automatically.'
-                          : 'Escribe solo el saludo. Nosotros agregamos fecha, hora, servicio, ubicación y teléfono de la clínica.'}
-                      </p>
-                      <textarea
-                        rows={4}
-                        value={dbCompanyConfig[`notify_sms_${emailTemplateTab}`] || ''}
-                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_sms_${emailTemplateTab}`]: e.target.value })}
-                        className="w-full p-3 border border-violet-200 rounded-lg font-bold outline-none text-slate-900 bg-white text-sm leading-relaxed"
-                        placeholder={locale === 'en' ? 'Hi {{nombre}}, appointment confirmed at {{clinica}}.' : 'Hola {{nombre}}, cita confirmada en {{clinica}}.'}
-                      />
-                      <details className="text-xs text-slate-500">
-                        <summary className="cursor-pointer font-bold text-slate-600">
-                          {locale === 'en' ? 'Optional placeholders' : 'Textos opcionales ({{nombre}}, etc.)'}
-                        </summary>
-                        <p className="mt-2 font-mono text-[10px] break-all bg-white border border-slate-200 rounded-lg p-2">{EMAIL_PLACEHOLDER_HINT}</p>
-                      </details>
-                    </div>
-                  </div>
-
-                  {emailTemplateTab === 'first' && (
-                    <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 space-y-3">
-                      <h5 className="text-sm font-black text-amber-950">
-                        {locale === 'en' ? 'Only for first visits — session tips' : 'Solo en primera visita — indicaciones de sesión'}
-                      </h5>
-                      <p className="text-xs text-amber-900/90 leading-relaxed">
-                        {locale === 'en'
-                          ? 'These tips go with the first-visit message only. Other messages do not include them.'
-                          : 'Estas indicaciones van solo con el mensaje de primera visita. Los demás avisos no las incluyen.'}
-                      </p>
-                      <div>
-                        <label className="text-xs font-bold text-amber-900">{locale === 'en' ? 'Section title' : 'Título'}</label>
-                        <input
-                          type="text"
-                          value={dbCompanyConfig.notify_session_label || ''}
-                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_label: e.target.value })}
-                          className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1"
-                          placeholder={locale === 'en' ? 'Instructions for your session' : 'Indicaciones para tu sesión'}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-amber-900">
-                          {locale === 'en' ? 'Full tips (email)' : 'Indicaciones completas (correo)'}
-                        </label>
-                        <textarea
-                          rows={3}
-                          value={dbCompanyConfig.notify_session_default || ''}
-                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_default: e.target.value })}
-                          className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm leading-relaxed"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-amber-900">
-                          {locale === 'en' ? 'Link for SMS' : 'Liga para el SMS'}
-                        </label>
-                        <input
-                          type="url"
-                          value={dbCompanyConfig.notify_session_url || ''}
-                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_session_url: e.target.value.trim() })}
-                          className="w-full p-3 border border-amber-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-1 text-sm"
-                        />
-                      </div>
-                    </div>
-                  )}
                 </section>
 
                 {/* Info compartida */}
