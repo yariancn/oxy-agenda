@@ -349,6 +349,8 @@ export default function PublicBookingPortal({
             notifyEnabled: true,
             notifyType,
             emailTemplates: dbConfig || {},
+            appointmentId: result.appointment?.id || '',
+            cancelLimitHours: Number(dbConfig?.cancel_limit_hours) || 24,
             sendEmail: resolveNotifyChannels(dbConfig || {}, notifyType).sendEmail,
             sendSms: resolveNotifyChannels(dbConfig || {}, notifyType).sendSms
               && (locale !== 'en' || formData.smsConsent === true),

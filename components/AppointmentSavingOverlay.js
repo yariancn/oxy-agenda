@@ -10,7 +10,7 @@ export default function AppointmentSavingOverlay({
   onClose,
   autoCloseMs = 0,
 }) {
-  const isCreating = phase === 'creating';
+  const isCreating = phase === 'creating' || phase === 'working';
 
   useEffect(() => {
     if (!open || isCreating || !autoCloseMs || !onClose) return undefined;
@@ -18,10 +18,23 @@ export default function AppointmentSavingOverlay({
     return () => window.clearTimeout(timer);
   }, [open, isCreating, autoCloseMs, onClose]);
 
+  useEffect(() => {
+    if (!open) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[20000] bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div
+      className="fixed inset-0 z-[20000] bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-4"
+      role="alertdialog"
+      aria-modal="true"
+      aria-busy={isCreating}
+      aria-live="assertive"
+    >
       <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 sm:p-8 text-center border border-slate-200">
         {isCreating ? (
           <div className="w-14 h-14 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin mx-auto mb-5" />

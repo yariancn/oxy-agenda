@@ -100,6 +100,7 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
       await onSeal(canvasRef.current.toDataURL('image/png'), vitals, summaryLines);
     } catch (err) {
       alert(t.sealError?.(err?.message || err) || String(err?.message || err));
+    } finally {
       setIsSealing(false);
     }
   };

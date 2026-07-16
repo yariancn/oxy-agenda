@@ -70,3 +70,7 @@ ALTER TABLE company_config
   ADD COLUMN IF NOT EXISTS notify_use_sms_cancel boolean DEFAULT true,
   ADD COLUMN IF NOT EXISTS notify_use_email_reminder boolean DEFAULT true,
   ADD COLUMN IF NOT EXISTS notify_use_sms_reminder boolean DEFAULT true;
+
+-- Live sync ping (open agenda screens)
+ALTER TABLE company_config
+  ADD COLUMN IF NOT EXISTS agenda_rev bigint NOT NULL DEFAULT 1;

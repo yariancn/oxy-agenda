@@ -31,6 +31,8 @@ export async function POST(request) {
       durationMins = 60,
       bufferMins = 0,
       smsIntros = {},
+      appointmentId = '',
+      cancelLimitHours = 24,
     } = body;
 
     let emailStatus = locale === 'en' ? 'Not requested' : 'No solicitado';
@@ -57,8 +59,9 @@ export async function POST(request) {
       durationMins,
       bufferMins,
       smsIntros,
+      appointmentId,
+      cancelLimitHours,
     });
-
     if (email && prefers_email !== false && (type === 'both' || type === 'email')) {
       const resendKey = getResendApiKey();
 

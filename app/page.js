@@ -173,6 +173,7 @@ import {
 } from '../lib/staffBookingAlert';
 import { broadcastLiveDataUpdated } from '../lib/liveSyncBroadcast';
 import { useLiveSyncPoll } from '../lib/useLiveSyncPoll';
+import { liveSyncDateRange } from '../lib/liveSyncToken';
 import {
   CONFIRMATION_STATUS,
   confirmationStatusClass,
@@ -556,6 +557,8 @@ export default function AppLayout() {
       smsIntros: pickSmsIntros(),
       durationMins: previewTimes.duration,
       bufferMins: previewTimes.buffer,
+      appointmentId: 'preview-sample',
+      cancelLimitHours: Number(dbCompanyConfig.cancel_limit_hours) || 24,
     });
   };
 
@@ -604,22 +607,105 @@ export default function AppLayout() {
     saveToastTimerRef.current = window.setTimeout(() => setSaveToast(''), 2200);
   };
 
-  const saveCompanyConfig = async () => {
-    const { error, warning } = await saveCompanyConfigRow(activeSupabase, {
-      id: dbCompanyConfig.id,
-      clinic: activeClinic,
-      payload: buildCompanyConfigPayload(),
-      locale,
+  const closeAppointmentSaveFeedback = () => {
+    setAppointmentSaveFeedback((current) => {
+      const onDone = current?.onDone;
+      const closeForm = current?.closeForm;
+      window.setTimeout(() => {
+        if (typeof onDone === 'function') {
+          try { onDone(); } catch { /* ignore */ }
+        } else if (closeForm) {
+          setShowNewAppointment(false);
+          setSelectedSlot(null);
+          fetchAllData();
+        }
+      }, 0);
+      return null;
     });
-    if (error) throw new Error(error.message);
-    if (warning) {
-      // Full multi-line SQL guidance — toast truncates this.
-      window.alert(warning);
-      flashSaveToast(locale === 'en' ? 'Saved partially — see alert' : 'Guardado parcial — ver aviso');
-    } else {
-      flashSaveToast(L.p.admin.configSaved);
+  };
+
+  /**
+   * Full-screen working → success/error feedback for create/save/change actions.
+   * Returns the action result, or undefined if blocked / cancelled.
+   */
+  const runBusyAction = async ({
+    workingTitle,
+    workingDetail,
+    successTitle,
+    successDetail = '',
+    autoCloseMs = 1200,
+    onDone,
+    action,
+  }) => {
+    if (isSavingAppointment) return undefined;
+    setIsSavingAppointment(true);
+    setAppointmentSaveFeedback({
+      phase: 'creating',
+      title: workingTitle || L.p.common.working,
+      detail: workingDetail || L.p.common.pleaseWait,
+    });
+    try {
+      const result = await action();
+      if (result?.cancelled) {
+        setAppointmentSaveFeedback(null);
+        return result;
+      }
+      if (result?.error) {
+        setAppointmentSaveFeedback({
+          phase: 'error',
+          title: locale === 'en' ? 'Error' : 'Error',
+          detail: String(result.error),
+          closeForm: false,
+        });
+        return result;
+      }
+      setAppointmentSaveFeedback({
+        phase: 'success',
+        title: result?.successTitle || successTitle || L.p.common.doneTitle,
+        detail: result?.detail ?? successDetail,
+        autoCloseMs: result?.autoCloseMs ?? autoCloseMs,
+        onDone: result?.onDone || onDone,
+        closeForm: false,
+      });
+      return result;
+    } catch (e) {
+      setAppointmentSaveFeedback({
+        phase: 'error',
+        title: locale === 'en' ? 'Error' : 'Error',
+        detail: e?.message || String(e),
+        closeForm: false,
+      });
+      return { error: e?.message || String(e) };
+    } finally {
+      setIsSavingAppointment(false);
     }
-    fetchAllData();
+  };
+
+  const saveCompanyConfig = async () => {
+    await runBusyAction({
+      workingTitle: locale === 'en' ? 'Saving settings…' : 'Guardando configuración…',
+      workingDetail: L.p.common.pleaseWait,
+      successTitle: L.p.common.savedOk,
+      autoCloseMs: 1100,
+      action: async () => {
+        const { error, warning } = await saveCompanyConfigRow(activeSupabase, {
+          id: dbCompanyConfig.id,
+          clinic: activeClinic,
+          payload: buildCompanyConfigPayload(),
+          locale,
+        });
+        if (error) return { error: error.message };
+        if (warning) {
+          window.alert(warning);
+          return {
+            detail: locale === 'en' ? 'Saved partially — see alert' : 'Guardado parcial — ver aviso',
+            autoCloseMs: 1800,
+          };
+        }
+        await fetchAllData({ silent: true });
+        return { detail: L.p.admin.configSaved };
+      },
+    });
   };
 
   useEffect(() => {
@@ -937,7 +1023,12 @@ export default function AppLayout() {
       }
 
       // Motor de Paginación para evadir el límite de 1000 de Supabase
-      const fetchPaginated = async (table, { clinicScoped = false } = {}) => {
+      const fetchPaginated = async (table, {
+        clinicScoped = false,
+        dateCol = null,
+        dateFrom = null,
+        dateTo = null,
+      } = {}) => {
         let allData = [];
         let from = 0;
         const step = 1000;
@@ -945,6 +1036,8 @@ export default function AppLayout() {
         while (true) {
           let query = clinicDb.from(table).select('*');
           if (useClinicFilter) query = query.eq('clinic', clinicId);
+          if (dateCol && dateFrom) query = query.gte(dateCol, dateFrom);
+          if (dateCol && dateTo) query = query.lte(dateCol, dateTo);
           let result = await query.range(from, from + step - 1);
           if (result?.error && useClinicFilter && isMissingClinicColumnError(result.error)) {
             useClinicFilter = false;
@@ -966,8 +1059,14 @@ export default function AppLayout() {
       };
 
       if (liveOnly) {
+        const { from: liveFrom, to: liveTo } = liveSyncDateRange(activeClinic);
         const [appointmentsData, resS, resB, resC] = await Promise.all([
-          fetchPaginated('appointments', { clinicScoped: shouldScopeTableByClinic(clinicId) }),
+          fetchPaginated('appointments', {
+            clinicScoped: shouldScopeTableByClinic(clinicId),
+            dateCol: 'full_date',
+            dateFrom: liveFrom,
+            dateTo: liveTo,
+          }),
           shouldScopeTableByClinic(clinicId)
             ? staffDbSelectByClinic(clinicDb, 'services', clinicId, (q) => q)
             : clinicDb.from('services').select('*'),
@@ -984,7 +1083,23 @@ export default function AppLayout() {
 
         setDbServices((resS.data || []).sort((a, b) => (a.name || '').localeCompare(b.name || '')));
         setDbBlockedSlots(resB.data || []);
-        setDbAppointments(appointmentsData || []);
+        setDbAppointments((prev) => {
+          const fresh = appointmentsData || [];
+          const freshIds = new Set(fresh.map((a) => a.id));
+          const keptOutside = (prev || []).filter((a) => {
+            const d = a.full_date || '';
+            return d && (d < liveFrom || d > liveTo);
+          });
+          const merged = new Map();
+          for (const row of keptOutside) merged.set(row.id, row);
+          for (const row of fresh) merged.set(row.id, row);
+          // Drop in-window rows that disappeared (cancelled deleted from active set, etc.)
+          for (const [id, row] of [...merged.entries()]) {
+            const d = row.full_date || '';
+            if (d >= liveFrom && d <= liveTo && !freshIds.has(id)) merged.delete(id);
+          }
+          return [...merged.values()];
+        });
         if (resC.data) {
           const clinicLocale = localeForClinic(activeClinic);
           setDbCompanyConfig((prev) => ({
@@ -1243,6 +1358,8 @@ export default function AppLayout() {
     enabled: Boolean(currentUser),
     clinic: activeClinic,
     endpoint: '/api/staff/live-sync',
+    visibleIntervalMs: 3000,
+    hiddenIntervalMs: 12000,
     onChange: syncCalendarLive,
   });
 
@@ -2605,6 +2722,8 @@ export default function AppLayout() {
         notifyType,
         emailTemplates: pickEmailTemplates(),
         smsIntros: pickSmsIntros(),
+        appointmentId: slot.id || '',
+        cancelLimitHours: Number(dbCompanyConfig.cancel_limit_hours) || 24,
         sendEmail,
         sendSms,
       });
@@ -2923,129 +3042,147 @@ export default function AppLayout() {
   };
 
   const confirmMove = async () => {
-    try {
-      const extended = !!moveConfirmation.extendedSession;
-      const outside = !!moveConfirmation.outsideNormalHours;
-      const times = resolveSessionTimes({
-        ...moveConfirmation.app,
-        extended_session: extended,
-        is_extended_block: extended,
-      });
-      const { error } = await updateStaffAppointment(activeSupabase, moveConfirmation.app.id, { 
-        time: moveConfirmation.newTime, 
-        appointment_time: moveConfirmation.newTime,
-        equipment: moveConfirmation.newEquipment, 
-        day: moveConfirmation.newDay,
-        full_date: moveConfirmation.newFullDate,
-        appointment_date: moveConfirmation.newFullDate,
-        duration: times.duration,
-        buffer: times.buffer,
-        outside_normal_hours: outside,
-        is_extended_block: extended,
-      });
-      
-      if (error) {
-        if (error.message === 'SLOT_UNAVAILABLE') alert(a('overlapLong'));
-        else alert(a('moveError', error.message));
-      }
-      else {
-        await logAudit(moveConfirmation.app.id, moveConfirmation.app.patient, 'REUBICACIÓN', `De ${moveConfirmation.app.full_date} ${moveConfirmation.app.time} (${moveConfirmation.app.equipment}) a ${moveConfirmation.newFullDate} ${moveConfirmation.newTime} (${moveConfirmation.newEquipment})`);
+    if (!moveConfirmation || isSavingAppointment) return;
+    const move = moveConfirmation;
+    await runBusyAction({
+      workingTitle: L.p.common.movingTitle,
+      workingDetail: L.p.common.movingHint,
+      successTitle: L.p.common.movedOk,
+      autoCloseMs: 1200,
+      onDone: () => {
+        setMoveConfirmation(null);
+        closeAppointmentPanel();
+      },
+      action: async () => {
+        const extended = !!move.extendedSession;
+        const outside = !!move.outsideNormalHours;
+        const times = resolveSessionTimes({
+          ...move.app,
+          extended_session: extended,
+          is_extended_block: extended,
+        });
+        const { error } = await updateStaffAppointment(activeSupabase, move.app.id, {
+          time: move.newTime,
+          appointment_time: move.newTime,
+          equipment: move.newEquipment,
+          day: move.newDay,
+          full_date: move.newFullDate,
+          appointment_date: move.newFullDate,
+          duration: times.duration,
+          buffer: times.buffer,
+          outside_normal_hours: outside,
+          is_extended_block: extended,
+        });
+
+        if (error) {
+          if (error.message === 'SLOT_UNAVAILABLE') {
+            return { error: a('overlapLong') };
+          }
+          return { error: a('moveError', error.message) };
+        }
+
+        await logAudit(
+          move.app.id,
+          move.app.patient,
+          'REUBICACIÓN',
+          `De ${move.app.full_date} ${move.app.time} (${move.app.equipment}) a ${move.newFullDate} ${move.newTime} (${move.newEquipment})`,
+        );
         await notifyPatientFromSlot({
-          ...moveConfirmation.app,
-          full_date: moveConfirmation.newFullDate,
-          fullDate: moveConfirmation.newFullDate,
-          time: moveConfirmation.newTime,
-          equipment: moveConfirmation.newEquipment,
+          ...move.app,
+          full_date: move.newFullDate,
+          fullDate: move.newFullDate,
+          time: move.newTime,
+          equipment: move.newEquipment,
         }, { notifyReason: 'reschedule' });
-        pushGoogleCalendarSync(moveConfirmation.app.id, 'upsert');
-      }
-      
-      setMoveConfirmation(null);
-      closeAppointmentPanel();
-      await notifyCalendarChanged();
-    } catch (e) {
-      alert(a('connectionErrorMsg', e.message));
-    }
+        pushGoogleCalendarSync(move.app.id, 'upsert');
+        await notifyCalendarChanged();
+        return {
+          detail: `${move.newFullDate} · ${move.newTime} · ${move.newEquipment}`,
+        };
+      },
+    });
   };
 
   const updateAppStatus = async (id, status, patientName, equipment) => {
-    try {
-      const app = dbAppointments.find(a => a.id === id);
-      if (!app) return alert(a('apptNotFound'));
-      if (['Finalizado', 'Devuelto'].includes(app.check_in_status)) {
-        return alert(a('statusLockedSealed'));
+    if (isSavingAppointment) return;
+    const app = dbAppointments.find((a) => a.id === id);
+    if (!app) return alert(a('apptNotFound'));
+    if (['Finalizado', 'Devuelto'].includes(app.check_in_status)) {
+      return alert(a('statusLockedSealed'));
+    }
+    if (app.check_in_status === status) return;
+
+    const prevStatus = app.check_in_status;
+    const eq = equipment || app.equipment;
+
+    if (status === 'No Asistió') {
+      if (isAssessmentService(eq)) {
+        if (!window.confirm(a('noShowAssessmentConfirm'))) return;
+      } else if (!window.confirm(a('noShowConfirm'))) {
+        return;
       }
-      if (app.check_in_status === status) return;
+    }
 
-      const prevStatus = app.check_in_status;
-      const eq = equipment || app.equipment;
-
-      // Leaving no-show → restore deducted session before applying new status.
-      if (prevStatus === 'No Asistió' && status !== 'No Asistió') {
-        await restoreNoShowSessionImpact(app, {
-          nextStatus: null,
-          auditLabel: status === 'Falta Justificada' ? 'JUSTIFICAR NO-SHOW' : 'CAMBIO DESDE NO-SHOW',
-        });
-      }
-
-      if (status === 'No Asistió') {
-        if (isAssessmentService(eq)) {
-          if (!window.confirm(a('noShowAssessmentConfirm'))) return;
-          await logAudit(id, patientName, 'NO ASISTIÓ', 'Valoración: no afecta cartera ni adeudo.');
-        } else {
-          if (!window.confirm(a('noShowConfirm'))) return;
-
-          const p = resolvePatientForAppointment(app, dbPatients)
-            || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(patientName));
-          if (p) {
-            const servicePrice = getServicePrice(dbServices, eq);
-            const { deducted, nextAdeudo } = await processSessionDeduction(p, eq, servicePrice);
-
-            await logAudit(id, patientName, 'NO ASISTIÓ', deducted
-              ? `No asistió. Se descontó 1 sesión pagada de cartera (${eq}).`
-              : `No asistió. Sin saldo pagado: adeudo +1 (total adeudo: ${nextAdeudo}).`);
-          }
-        }
-
-        await activeSupabase.from('appointments').update({ check_in_status: 'No Asistió' }).eq('id', id);
-        try {
-          const promoRes = await fetch('/api/staff/promoter-no-show', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ appointmentId: id, clinic: activeClinic }),
+    await runBusyAction({
+      workingTitle: L.p.common.statusUpdating,
+      workingDetail: L.p.common.pleaseWait,
+      successTitle: L.p.common.statusUpdatedOk,
+      autoCloseMs: 1000,
+      action: async () => {
+        if (prevStatus === 'No Asistió' && status !== 'No Asistió') {
+          await restoreNoShowSessionImpact(app, {
+            nextStatus: null,
+            auditLabel: status === 'Falta Justificada' ? 'JUSTIFICAR NO-SHOW' : 'CAMBIO DESDE NO-SHOW',
           });
-          const promoData = await promoRes.json().catch(() => ({}));
-          if (promoData.ok && !promoData.skipped) {
-            alert(a('promoterNoShowSent'));
-          } else if (promoData.skipped && promoData.reason === 'no_email') {
-            alert(a('promoterNoShowNoEmail'));
-          } else if (promoData.skipped && (promoData.reason === 'no_promoter' || promoData.reason === 'promoter_inactive' || promoData.reason === 'not_no_show')) {
-            /* silent — no promoter */
-          } else if (!promoRes.ok || promoData.ok === false) {
-            alert(a('promoterNoShowError', promoData.error || promoData.message || promoRes.status));
-          }
-        } catch (promoErr) {
-          alert(a('promoterNoShowError', promoErr?.message || 'network'));
         }
-      } else if (status === 'Falta Justificada') {
-        await activeSupabase.from('appointments').update({ check_in_status: 'Falta Justificada' }).eq('id', id);
-        await logAudit(
-          id,
-          patientName,
-          'FALTA JUSTIFICADA',
-          prevStatus === 'No Asistió'
-            ? 'Falta justificada (desde no-show). Sesión restaurada; no se cobra del paquete.'
-            : 'Paciente no atendió (justificado). La sesión pagada se conserva en cartera.',
-        );
-      } else {
-        await activeSupabase.from('appointments').update({ check_in_status: status }).eq('id', id);
-        await logAudit(id, patientName, 'CAMBIO DE ESTATUS', `Estatus actualizado a: ${status}`);
-      }
 
-      setSelectedSlot((prev) => (prev && prev.id === id ? { ...prev, check_in_status: status } : prev));
-      fetchAllData();
-    } catch(e) { alert(a('statusUpdateError')); }
+        if (status === 'No Asistió') {
+          if (isAssessmentService(eq)) {
+            await logAudit(id, patientName, 'NO ASISTIÓ', 'Valoración: no afecta cartera ni adeudo.');
+          } else {
+            const p = resolvePatientForAppointment(app, dbPatients)
+              || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(patientName));
+            if (p) {
+              const servicePrice = getServicePrice(dbServices, eq);
+              const { deducted, nextAdeudo } = await processSessionDeduction(p, eq, servicePrice);
+
+              await logAudit(id, patientName, 'NO ASISTIÓ', deducted
+                ? `No asistió. Se descontó 1 sesión pagada de cartera (${eq}).`
+                : `No asistió. Sin saldo pagado: adeudo +1 (total adeudo: ${nextAdeudo}).`);
+            }
+          }
+
+          await activeSupabase.from('appointments').update({ check_in_status: 'No Asistió' }).eq('id', id);
+          try {
+            await fetch('/api/staff/promoter-no-show', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ appointmentId: id, clinic: activeClinic }),
+            });
+          } catch {
+            /* non-fatal */
+          }
+        } else if (status === 'Falta Justificada') {
+          await activeSupabase.from('appointments').update({ check_in_status: 'Falta Justificada' }).eq('id', id);
+          await logAudit(
+            id,
+            patientName,
+            'FALTA JUSTIFICADA',
+            prevStatus === 'No Asistió'
+              ? 'Falta justificada (desde no-show). Sesión restaurada; no se cobra del paquete.'
+              : 'Paciente no atendió (justificado). La sesión pagada se conserva en cartera.',
+          );
+        } else {
+          await activeSupabase.from('appointments').update({ check_in_status: status }).eq('id', id);
+          await logAudit(id, patientName, 'CAMBIO DE ESTATUS', `Estatus actualizado a: ${status}`);
+        }
+
+        setSelectedSlot((prev) => (prev && prev.id === id ? { ...prev, check_in_status: status } : prev));
+        await fetchAllData({ silent: true, liveOnly: true });
+        return { detail: status };
+      },
+    });
   };
 
   const handleRefund = async (app) => {
@@ -3174,35 +3311,43 @@ export default function AppLayout() {
   };
 
   const handleCancelAppointment = async () => {
-    if (!selectedSlot?.id || !activeSupabase) return;
-    try {
-      const app = selectedSlot;
-      const patientName = app.patient;
-      let auditDetail = `Cancelada por ${currentUser?.name || 'staff'}. Descuento de sesión: ${cancelDeductSession ? 'Sí' : 'No'}.`;
+    if (!selectedSlot?.id || !activeSupabase || isSavingAppointment) return;
+    const app = selectedSlot;
+    await runBusyAction({
+      workingTitle: L.p.common.cancellingTitle,
+      workingDetail: L.p.common.cancellingHint,
+      successTitle: L.p.common.cancelledOk,
+      autoCloseMs: 1200,
+      onDone: () => {
+        setShowCancelModal(false);
+        setCancelDeductSession(false);
+        closeAppointmentPanel();
+      },
+      action: async () => {
+        const patientName = app.patient;
+        let auditDetail = `Cancelada por ${currentUser?.name || 'staff'}. Descuento de sesión: ${cancelDeductSession ? 'Sí' : 'No'}.`;
 
-      if (cancelDeductSession) {
-        const result = await deductPatientSession(patientName, app.equipment, app.id);
-        auditDetail += ` ${result.detail}`;
-      }
+        if (cancelDeductSession) {
+          const result = await deductPatientSession(patientName, app.equipment, app.id);
+          auditDetail += ` ${result.detail}`;
+        }
 
-      const cancelNote = `[CANCELADA ${new Date().toLocaleString()}] ${auditDetail}`;
-      const newNotes = app.notes ? `${app.notes}\n${cancelNote}` : cancelNote;
+        const cancelNote = `[CANCELADA ${new Date().toLocaleString()}] ${auditDetail}`;
+        const newNotes = app.notes ? `${app.notes}\n${cancelNote}` : cancelNote;
 
-      await activeSupabase.from('appointments').update({
-        check_in_status: 'Cancelado',
-        notes: newNotes,
-      }).eq('id', app.id);
+        const { error } = await activeSupabase.from('appointments').update({
+          check_in_status: 'Cancelado',
+          notes: newNotes,
+        }).eq('id', app.id);
+        if (error) return { error: error.message };
 
-      await logAudit(app.id, patientName, 'CITA CANCELADA', auditDetail);
-      await notifyPatientFromSlot(app, { notifyReason: 'cancel' });
-      pushGoogleCalendarSync(app.id, 'delete');
-      setShowCancelModal(false);
-      setCancelDeductSession(false);
-      closeAppointmentPanel();
-      fetchAllData();
-    } catch (e) {
-      alert(a('connectionErrorMsg', e.message));
-    }
+        await logAudit(app.id, patientName, 'CITA CANCELADA', auditDetail);
+        await notifyPatientFromSlot(app, { notifyReason: 'cancel' });
+        pushGoogleCalendarSync(app.id, 'delete');
+        await notifyCalendarChanged();
+        return { detail: patientName };
+      },
+    });
   };
 
   // --- MOTOR DE IMPRESIÓN CON IFRAME (Anti-bloqueo) ---
@@ -3427,17 +3572,6 @@ export default function AppLayout() {
   };
 
   const isNewPatientInline = selectedSlot?.patient && selectedSlot.patient.length > 0 && !dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient));
-
-  const closeAppointmentSaveFeedback = () => {
-    setAppointmentSaveFeedback((current) => {
-      if (current?.closeForm) {
-        setShowNewAppointment(false);
-        setSelectedSlot(null);
-        fetchAllData();
-      }
-      return null;
-    });
-  };
 
   const handleSaveNewAppointment = async (slotOverride = null) => {
     if (isSavingAppointment) return;
@@ -4130,9 +4264,11 @@ export default function AppLayout() {
                       ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
                       : 'text-slate-400 bg-slate-50 border-slate-200'
                   }`}
-                  title={locale === 'en' ? 'Calendar refreshes every 5 seconds when this tab is open' : 'El calendario se actualiza cada 5 s con esta pestaña abierta'}
+                  title={locale === 'en'
+                    ? 'Ping every 3s; calendar reloads only when data changes'
+                    : 'Ping cada 3 s; la agenda solo se recarga si hay cambios'}
                 >
-                  {liveSyncAt && Date.now() - liveSyncAt < 20000 ? '● Live 5s' : '○ Sync'}
+                  {liveSyncAt && Date.now() - liveSyncAt < 20000 ? '● Live' : '○ Sync'}
                 </span>
                 <div className="flex-1 min-w-[0.5rem]" />
                 {currentUserLevel <= 2 && (
@@ -6270,8 +6406,8 @@ export default function AppLayout() {
                 </p>
               )}
               <div className="flex gap-2 pt-2">
-                <button onClick={() => { setShowCancelModal(false); setCancelDeductSession(false); }} className="flex-1 bg-white border border-slate-300 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-50">{L.p.common.cancel}</button>
-                <button onClick={handleCancelAppointment} className="flex-1 bg-red-600 text-white font-black py-3 rounded-xl uppercase text-xs hover:bg-red-700 shadow-md">{L.p.appt.cancelConfirm}</button>
+                <button disabled={isSavingAppointment} onClick={() => { setShowCancelModal(false); setCancelDeductSession(false); }} className="flex-1 bg-white border border-slate-300 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-50 disabled:opacity-50">{L.p.common.cancel}</button>
+                <button disabled={isSavingAppointment} onClick={handleCancelAppointment} className="flex-1 bg-red-600 text-white font-black py-3 rounded-xl uppercase text-xs hover:bg-red-700 shadow-md disabled:opacity-50">{isSavingAppointment ? L.p.common.working : L.p.appt.cancelConfirm}</button>
               </div>
             </div>
           </div>
@@ -6543,67 +6679,65 @@ export default function AppLayout() {
                         rows="2" placeholder={L.p.appt.noteTodayPh}
                       />
                    </div>
-                   <button onClick={async () => {
-                      try {
-                        const contactResult = await persistPatientContactFromSlot(selectedSlot);
-                        if (contactResult.error) return alert(staffAlert(locale, 'patientFileError', contactResult.error.message));
+                   <button
+                     disabled={isSavingAppointment}
+                     onClick={async () => {
+                      await runBusyAction({
+                        workingTitle: L.p.common.savingNotes,
+                        workingDetail: L.p.common.pleaseWait,
+                        successTitle: L.p.common.notesSavedOk,
+                        autoCloseMs: 1000,
+                        action: async () => {
+                          const contactResult = await persistPatientContactFromSlot(selectedSlot);
+                          if (contactResult.error) {
+                            return { error: staffAlert(locale, 'patientFileError', contactResult.error.message) };
+                          }
 
-                        const savedPhone = contactResult.phone || selectedSlot.phone || '';
-                        const savedEmail = contactResult.email || selectedSlot.email || '';
-                        const savedPatientId = contactResult.patientId || selectedSlot.patientId;
+                          const savedPhone = contactResult.phone || selectedSlot.phone || '';
+                          const savedEmail = contactResult.email || selectedSlot.email || '';
+                          const savedPatientId = contactResult.patientId || selectedSlot.patientId;
 
-                        const apptRes = await updateAppointmentNotesAndContact(activeSupabase, selectedSlot.id, {
-                          notes: selectedSlot.notes,
-                          phone: savedPhone,
-                          email: savedEmail,
-                          promoter_code: normalizePromoCode(selectedSlot.promoter_code) || null,
-                        });
-                        if (apptRes.error) throw apptRes.error;
+                          const apptRes = await updateAppointmentNotesAndContact(activeSupabase, selectedSlot.id, {
+                            notes: selectedSlot.notes,
+                            phone: savedPhone,
+                            email: savedEmail,
+                            promoter_code: normalizePromoCode(selectedSlot.promoter_code) || null,
+                          });
+                          if (apptRes.error) return { error: apptRes.error.message || a('notesSaveError') };
 
-                        if (savedPatientId) {
-                          setDbPatients((prev) => prev.map((p) => (
-                            String(p.id) === String(savedPatientId)
-                              ? {
-                                ...p,
-                                phone: savedPhone,
-                                email: savedEmail,
-                                notes: selectedSlot.patientNotes ?? p.notes,
-                                prefers_email: selectedSlot.prefers_email !== false,
-                                prefers_sms: selectedSlot.prefers_sms !== false,
-                              }
-                              : p
+                          if (savedPatientId) {
+                            setDbPatients((prev) => prev.map((p) => (
+                              String(p.id) === String(savedPatientId)
+                                ? {
+                                  ...p,
+                                  phone: savedPhone,
+                                  email: savedEmail,
+                                  notes: selectedSlot.patientNotes ?? p.notes,
+                                  prefers_email: selectedSlot.prefers_email !== false,
+                                  prefers_sms: selectedSlot.prefers_sms !== false,
+                                }
+                                : p
+                            )));
+                          }
+                          setDbAppointments((prev) => prev.map((a) => (
+                            a.id === selectedSlot.id
+                              ? { ...a, phone: savedPhone, email: savedEmail, notes: selectedSlot.notes }
+                              : a
                           )));
-                        }
-                        setDbAppointments((prev) => prev.map((a) => (
-                          a.id === selectedSlot.id
-                            ? { ...a, phone: savedPhone, email: savedEmail, notes: selectedSlot.notes }
-                            : a
-                        )));
-                        setSelectedSlot((prev) => ({
-                          ...prev,
-                          phone: savedPhone,
-                          email: savedEmail,
-                          patientId: savedPatientId || prev.patientId,
-                          patientNotes: selectedSlot.patientNotes ?? prev.patientNotes,
-                        }));
+                          setSelectedSlot((prev) => ({
+                            ...prev,
+                            phone: savedPhone,
+                            email: savedEmail,
+                            patientId: savedPatientId || prev.patientId,
+                            patientNotes: selectedSlot.patientNotes ?? prev.patientNotes,
+                          }));
 
-                        slotNotesDirtyRef.current = false;
-                        flashSaveToast(a('notesSavedOk'));
-                        await notifyCalendarChanged();
-                        setDbAppointments((prev) => prev.map((a) => (
-                          a.id === selectedSlot.id
-                            ? { ...a, phone: savedPhone, email: savedEmail, notes: selectedSlot.notes }
-                            : a
-                        )));
-                        if (savedPatientId) {
-                          setDbPatients((prev) => prev.map((p) => (
-                            String(p.id) === String(savedPatientId)
-                              ? { ...p, phone: savedPhone, email: savedEmail }
-                              : p
-                          )));
-                        }
-                      } catch(e) { alert(a('notesSaveError')); }
-                   }} className="w-full bg-slate-800 text-white font-black py-2 rounded-lg text-[10px] uppercase hover:bg-slate-700 shadow-sm transition">{L.p.appt.saveNotesAndContact}</button>
+                          slotNotesDirtyRef.current = false;
+                          await notifyCalendarChanged();
+                          return {};
+                        },
+                      });
+                   }} className="w-full bg-slate-800 text-white font-black py-2 rounded-lg text-[10px] uppercase hover:bg-slate-700 shadow-sm transition disabled:opacity-50">{isSavingAppointment ? L.p.common.working : L.p.appt.saveNotesAndContact}</button>
                 </div>
               </div>
 
@@ -7207,62 +7341,81 @@ export default function AppLayout() {
             </div>
 
             <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-t shrink-0 flex flex-col sm:flex-row gap-2 sm:gap-2">
-              <button onClick={async () => {
+              <button
+                disabled={isSavingAppointment}
+                onClick={async () => {
                 const trimmedName = newPatientData.name.trim();
                 if (!trimmedName) return alert(a('nameRequired'));
-                
-                const { error } = await savePatientToDB(activeSupabase, {
-                    name: trimmedName,
-                    phone: newPatientData.phone.trim(),
-                    email: newPatientData.email.trim(),
-                    protocol: newPatientData.protocol,
-                    notes: newPatientData.notes,
-                    prefers_email: newPatientData.prefers_email,
-                    prefers_sms: newPatientData.prefers_sms
+                await runBusyAction({
+                  workingTitle: L.p.common.savingPatient,
+                  workingDetail: L.p.common.pleaseWait,
+                  successTitle: L.p.common.patientSavedOk,
+                  autoCloseMs: 1000,
+                  onDone: () => {
+                    setShowNewPatientModal(false);
+                    setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true });
+                  },
+                  action: async () => {
+                    const { error } = await savePatientToDB(activeSupabase, {
+                      name: trimmedName,
+                      phone: newPatientData.phone.trim(),
+                      email: newPatientData.email.trim(),
+                      protocol: newPatientData.protocol,
+                      notes: newPatientData.notes,
+                      prefers_email: newPatientData.prefers_email,
+                      prefers_sms: newPatientData.prefers_sms,
+                    });
+                    if (error && error.message === 'CLON_DETECTADO') return { error: a('cloneDetected') };
+                    if (error) return { error: a('saveClientError', error.message) };
+                    await fetchAllData({ silent: true });
+                    return { detail: trimmedName };
+                  },
                 });
-                
-                if (error && error.message === "CLON_DETECTADO") return alert(a('cloneDetected'));
-                if (error) return alert(a('saveClientError', error.message)); 
-                
-                setShowNewPatientModal(false); 
-                setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true }); 
-                await fetchAllData(); 
-              }} className="w-full sm:w-1/2 bg-white border border-slate-300 text-slate-700 font-black py-3 sm:py-4 rounded-xl uppercase text-[10px] shadow-sm hover:bg-slate-50">Solo Guardar</button>
+              }} className="w-full sm:w-1/2 bg-white border border-slate-300 text-slate-700 font-black py-3 sm:py-4 rounded-xl uppercase text-[10px] shadow-sm hover:bg-slate-50 disabled:opacity-50">{isSavingAppointment ? L.p.common.working : 'Solo Guardar'}</button>
               
-              <button onClick={async () => {
+              <button
+                disabled={isSavingAppointment}
+                onClick={async () => {
                 const trimmedName = newPatientData.name.trim();
                 if (!trimmedName) return alert(a('nameRequired'));
-                
-                const { error } = await savePatientToDB(activeSupabase, {
-                    name: trimmedName,
-                    phone: newPatientData.phone.trim(),
-                    email: newPatientData.email.trim(),
-                    protocol: newPatientData.protocol,
-                    notes: newPatientData.notes,
-                    prefers_email: newPatientData.prefers_email,
-                    prefers_sms: newPatientData.prefers_sms
+                await runBusyAction({
+                  workingTitle: L.p.common.savingPatient,
+                  workingDetail: L.p.common.pleaseWait,
+                  successTitle: L.p.common.patientSavedOk,
+                  autoCloseMs: 900,
+                  onDone: () => {
+                    setShowNewPatientModal(false);
+                    setSelectedSlot({
+                      patient: trimmedName,
+                      phone: newPatientData.phone.trim(),
+                      email: newPatientData.email.trim(),
+                      protocol: newPatientData.protocol,
+                      patientNotes: newPatientData.notes,
+                      prefers_email: newPatientData.prefers_email,
+                      prefers_sms: newPatientData.prefers_sms,
+                      status: 'available',
+                      is_new_patient: true,
+                    });
+                    setShowNewAppointment(true);
+                    setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true });
+                  },
+                  action: async () => {
+                    const { error } = await savePatientToDB(activeSupabase, {
+                      name: trimmedName,
+                      phone: newPatientData.phone.trim(),
+                      email: newPatientData.email.trim(),
+                      protocol: newPatientData.protocol,
+                      notes: newPatientData.notes,
+                      prefers_email: newPatientData.prefers_email,
+                      prefers_sms: newPatientData.prefers_sms,
+                    });
+                    if (error && error.message === 'CLON_DETECTADO') return { error: a('cloneDetected') };
+                    if (error) return { error: a('saveClientError', error.message) };
+                    await fetchAllData({ silent: true });
+                    return { detail: trimmedName };
+                  },
                 });
-                
-                if (error && error.message === "CLON_DETECTADO") return alert(a('cloneDetected'));
-                if (error) return alert(a('saveClientError', error.message)); 
-                
-                setShowNewPatientModal(false); 
-                setSelectedSlot({
-                  patient: trimmedName,
-                  phone: newPatientData.phone.trim(),
-                  email: newPatientData.email.trim(),
-                  protocol: newPatientData.protocol,
-                  patientNotes: newPatientData.notes,
-                  prefers_email: newPatientData.prefers_email,
-                  prefers_sms: newPatientData.prefers_sms,
-                  status: 'available',
-                  is_new_patient: true
-                });
-                setShowNewAppointment(true);
-
-                setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true }); 
-                await fetchAllData(); 
-              }} className="w-full sm:w-1/2 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-[10px] shadow-lg hover:bg-emerald-700">Guardar y Agendar</button>
+              }} className="w-full sm:w-1/2 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-[10px] shadow-lg hover:bg-emerald-700 disabled:opacity-50">{isSavingAppointment ? L.p.common.working : 'Guardar y Agendar'}</button>
             </div>
           </div>
         </div>
@@ -7331,22 +7484,34 @@ export default function AppLayout() {
             </div>
             
             <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-t shrink-0 flex flex-col sm:flex-row gap-2 sm:gap-3">
-              <button onClick={() => setShowOOOModal(false)} className="w-full sm:w-1/3 bg-white border border-slate-300 font-black py-3 sm:py-4 rounded-xl uppercase text-xs hover:bg-slate-50">Cancelar</button>
-              <button onClick={async () => {
+              <button disabled={isSavingAppointment} onClick={() => setShowOOOModal(false)} className="w-full sm:w-1/3 bg-white border border-slate-300 font-black py-3 sm:py-4 rounded-xl uppercase text-xs hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
+              <button
+                disabled={isSavingAppointment}
+                onClick={async () => {
                 if (!oooData.date) return alert(a('selectDate'));
                 if (!oooData.is_global && !oooData.equipment) return alert(L.blockSelectEquipmentRequired);
-                await activeSupabase.from('blocked_slots').insert([{ 
-                  date: oooData.date, 
-                  start_time: oooData.start_time, 
-                  end_time: oooData.end_time, 
-                  equipment: oooData.is_global ? null : oooData.equipment, 
-                  reason: oooData.reason, 
-                  is_global: oooData.is_global,
-                  clinic: normalizeClinicId(activeClinic),
-                }]);
-                setShowOOOModal(false); 
-                await notifyCalendarChanged();
-              }} className="w-full sm:flex-1 bg-red-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-red-700">Aplicar Bloqueo</button>
+                await runBusyAction({
+                  workingTitle: L.p.common.blockingTitle,
+                  workingDetail: L.p.common.pleaseWait,
+                  successTitle: L.p.common.blockedOk,
+                  autoCloseMs: 1000,
+                  onDone: () => setShowOOOModal(false),
+                  action: async () => {
+                    const { error } = await activeSupabase.from('blocked_slots').insert([{
+                      date: oooData.date,
+                      start_time: oooData.start_time,
+                      end_time: oooData.end_time,
+                      equipment: oooData.is_global ? null : oooData.equipment,
+                      reason: oooData.reason,
+                      is_global: oooData.is_global,
+                      clinic: normalizeClinicId(activeClinic),
+                    }]);
+                    if (error) return { error: error.message };
+                    await notifyCalendarChanged();
+                    return { detail: oooData.date };
+                  },
+                });
+              }} className="w-full sm:flex-1 bg-red-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-red-700 disabled:opacity-50">{isSavingAppointment ? L.p.common.working : 'Aplicar Bloqueo'}</button>
             </div>
           </div>
         </div>
@@ -7379,8 +7544,8 @@ export default function AppLayout() {
               </div>
             )}
             <div className="flex flex-col sm:flex-row gap-2 sm:space-x-3 sm:gap-0">
-              <button onClick={() => setMoveConfirmation(null)} className="w-full sm:flex-1 bg-slate-100 font-black py-3 sm:py-4 rounded-2xl uppercase text-xs hover:bg-slate-200">Cancelar</button>
-              <button onClick={confirmMove} className="w-full sm:flex-1 bg-blue-600 text-white font-black py-3 sm:py-4 rounded-2xl uppercase text-xs shadow-lg hover:bg-blue-700">Confirmar</button>
+              <button disabled={isSavingAppointment} onClick={() => setMoveConfirmation(null)} className="w-full sm:flex-1 bg-slate-100 font-black py-3 sm:py-4 rounded-2xl uppercase text-xs hover:bg-slate-200 disabled:opacity-50">Cancelar</button>
+              <button disabled={isSavingAppointment} onClick={confirmMove} className="w-full sm:flex-1 bg-blue-600 text-white font-black py-3 sm:py-4 rounded-2xl uppercase text-xs shadow-lg hover:bg-blue-700 disabled:opacity-50">{isSavingAppointment ? L.p.common.working : 'Confirmar'}</button>
             </div>
           </div>
         </div>
@@ -7654,50 +7819,102 @@ export default function AppLayout() {
             selectedSlot={selectedSlot} 
             onClose={() => setShowBitacora(false)} 
             onSeal={async (sd, vt, summaryLines) => {
+              const appointmentId = selectedSlot?.id;
+              if (!appointmentId) {
+                throw new Error(locale === 'en'
+                  ? 'Missing appointment ID. Close and open the visit again.'
+                  : 'Falta el ID de la cita. Cierra y vuelve a abrir la visita.');
+              }
+
               const eq = selectedSlot.equipment;
               const servicePrice = selectedSlot.servicePrice || getServicePrice(dbServices, eq);
-              const isAssessment = isAssessmentService(eq);
               const pat = (selectedSlot.patientId
                 ? dbPatients.find((x) => String(x.id) === String(selectedSlot.patientId))
                 : null)
                 || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient))
                 || resolvePatientForAppointment(selectedSlot, dbPatients);
-              if (!pat) throw new Error(a('genericError', 'Paciente no encontrado'));
+              if (!pat?.id) {
+                throw new Error(locale === 'en'
+                  ? 'Patient record not found (missing ID). Open the chart and save the profile first.'
+                  : 'No se encontró el expediente (falta ID). Abre el expediente y guárdalo primero.');
+              }
 
               const sealPatientName = pat.patient || selectedSlot.patient;
+              const attendantName = selectedSlot.attendant || currentUser?.name || '';
 
-              // Adeudo / empty wallet must not block seal — records debt if no paid balance.
-              const { deducted, nextAdeudo, consumed, skippedAssessment } = await processSessionDeduction(pat, eq, servicePrice);
+              await runBusyAction({
+                workingTitle: locale === 'en' ? 'Sealing attendance…' : 'Sellando asistencia…',
+                workingDetail: L.p.common.pleaseWait,
+                successTitle: locale === 'en' ? 'Attendance sealed' : 'Asistencia sellada',
+                autoCloseMs: 1200,
+                onDone: () => {
+                  setShowBitacora(false);
+                  setSelectedSlot(null);
+                },
+                action: async () => {
+                  // Adeudo / empty wallet must not block seal — records debt if no paid balance.
+                  const { deducted, nextAdeudo, consumed, skippedAssessment } = await processSessionDeduction(
+                    pat,
+                    eq,
+                    servicePrice,
+                  );
 
-              const sealRes = await activeSupabase
-                .from('appointments')
-                .update({ check_in_status: 'Finalizado', attendant: selectedSlot.attendant, signature: sd })
-                .eq('id', selectedSlot.id);
-              if (sealRes.error) throw sealRes.error;
-              
-              let auditStr = a('bitacoraSealedAuditDetail', selectedSlot.attendant);
-              if (summaryLines?.headline) auditStr += ` ${summaryLines.headline}.`;
-              if (skippedAssessment) {
-                auditStr += locale === 'en'
-                  ? ' Assessment: no wallet or debt movement.'
-                  : ' Valoración: sin movimiento de cartera ni adeudo.';
-              } else if (!deducted) {
-                auditStr += locale === 'en'
-                  ? ` No paid balance: debt +1 (total debt: ${nextAdeudo}).`
-                  : ` Sin saldo pagado: adeudo +1 (total adeudo: ${nextAdeudo}).`;
-              } else {
-                auditStr += locale === 'en'
-                  ? ` Deducted 1 session from wallet (${consumed?.walletKey || eq}).`
-                  : ` Se descontó 1 sesión de cartera (${consumed?.walletKey || eq}).`;
-              }
-              if (selectedSlot.protocol === 'Médico' && vt) {
-                 auditStr += locale === 'en'
-                   ? ` Vitals: BP ${vt.pa}, Temp ${vt.temp}, HR ${vt.hr}.`
-                   : ` Signos: PA ${vt.pa}, Temp ${vt.temp}, HR ${vt.hr}.`;
-              }
-              await logAudit(selectedSlot.id, sealPatientName, a('bitacoraSealedAuditAction'), auditStr);
+                  const sealPayload = {
+                    check_in_status: 'Finalizado',
+                    attendant: attendantName,
+                    signature: sd,
+                  };
+                  let sealRes = await activeSupabase
+                    .from('appointments')
+                    .update(sealPayload)
+                    .eq('id', appointmentId);
 
-              setShowBitacora(false); setSelectedSlot(null); fetchAllData();
+                  // Fallback if signature column is missing or update lost its filter.
+                  if (sealRes.error && /signature|column|schema cache|WHERE clause/i.test(sealRes.error.message || '')) {
+                    const noteLine = `[FIRMA ${new Date().toLocaleString()}] Bitácora sellada (firma en auditoría).`;
+                    const prevNotes = String(selectedSlot.notes || '').trim();
+                    sealRes = await activeSupabase
+                      .from('appointments')
+                      .update({
+                        check_in_status: 'Finalizado',
+                        attendant: attendantName,
+                        notes: prevNotes ? `${prevNotes}\n${noteLine}` : noteLine,
+                      })
+                      .eq('id', appointmentId);
+                  }
+                  if (sealRes.error) throw sealRes.error;
+
+                  let auditStr = a('bitacoraSealedAuditDetail', attendantName);
+                  if (summaryLines?.headline) auditStr += ` ${summaryLines.headline}.`;
+                  if (skippedAssessment) {
+                    auditStr += locale === 'en'
+                      ? ' Assessment: no wallet or debt movement.'
+                      : ' Valoración: sin movimiento de cartera ni adeudo.';
+                  } else if (!deducted) {
+                    auditStr += locale === 'en'
+                      ? ` No paid balance: debt +1 (total debt: ${nextAdeudo}).`
+                      : ` Sin saldo pagado: adeudo +1 (total adeudo: ${nextAdeudo}).`;
+                  } else {
+                    auditStr += locale === 'en'
+                      ? ` Deducted 1 session from wallet (${consumed?.walletKey || eq}).`
+                      : ` Se descontó 1 sesión de cartera (${consumed?.walletKey || eq}).`;
+                  }
+                  if (selectedSlot.protocol === 'Médico' && vt) {
+                    auditStr += locale === 'en'
+                      ? ` Vitals: BP ${vt.pa}, Temp ${vt.temp}, HR ${vt.hr}.`
+                      : ` Signos: PA ${vt.pa}, Temp ${vt.temp}, HR ${vt.hr}.`;
+                  }
+                  // Keep a short fingerprint of the signature in audit (not the full PNG).
+                  if (sd) {
+                    auditStr += locale === 'en'
+                      ? ` Signature captured (${Math.round(String(sd).length / 1024)} KB).`
+                      : ` Firma capturada (${Math.round(String(sd).length / 1024)} KB).`;
+                  }
+                  await logAudit(appointmentId, sealPatientName, a('bitacoraSealedAuditAction'), auditStr);
+                  await notifyCalendarChanged();
+                  return { detail: sealPatientName };
+                },
+              });
             }} 
           />
         </div>
