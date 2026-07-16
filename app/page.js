@@ -582,9 +582,12 @@ export default function AppLayout() {
     financial_pin: dbCompanyConfig.financial_pin,
     notify_on_booking: dbCompanyConfig.notify_on_booking,
     reminder_hours: dbCompanyConfig.reminder_hours,
-    confirmation_sms_enabled: dbCompanyConfig.confirmation_sms_enabled === true,
-    confirmation_hours_before: Number(dbCompanyConfig.confirmation_hours_before) || 6,
-    confirmation_no_reply_hours: Number(dbCompanyConfig.confirmation_no_reply_hours) || 1,
+    // Houston-only confirmation SMS columns — omit on GDL so save does not warn.
+    ...(isShenandoah(activeClinic) ? {
+      confirmation_sms_enabled: dbCompanyConfig.confirmation_sms_enabled === true,
+      confirmation_hours_before: Number(dbCompanyConfig.confirmation_hours_before) || 6,
+      confirmation_no_reply_hours: Number(dbCompanyConfig.confirmation_no_reply_hours) || 1,
+    } : {}),
     calendar_feed_enabled: dbCompanyConfig.calendar_feed_enabled === true,
     calendar_feed_token: String(dbCompanyConfig.calendar_feed_token || '').trim(),
     ...pickEmailTemplates(),
