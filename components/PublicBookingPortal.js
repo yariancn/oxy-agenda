@@ -41,6 +41,72 @@ export default function PublicBookingPortal({
   useEffect(() => {
     document.documentElement.lang = locale === 'en' ? 'en' : 'es';
   }, [locale]);
+
+  useEffect(() => {
+    if (clinicName !== 'Shenandoah') return undefined;
+    let pending = null;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const packed = params.get('oxy_funnel');
+      if (packed) {
+        const b64 = packed.replace(/-/g, '+').replace(/_/g, '/');
+        const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - (b64.length % 4));
+        pending = JSON.parse(decodeURIComponent(escape(atob(b64 + pad))));
+      }
+    } catch {
+      pending = null;
+    }
+    if (!pending) {
+      try {
+        pending = JSON.parse(sessionStorage.getItem('oxy_funnel_pending') || '');
+      } catch {
+        pending = null;
+      }
+    }
+    if (!pending?.email && !pending?.phone) return undefined;
+    funnelPendingRef.current = pending;
+    try {
+      sessionStorage.setItem('oxy_funnel_pending', JSON.stringify(pending));
+    } catch {
+      /* ignore */
+    }
+
+    // Prefill contact fields from the funnel lead when empty.
+    setFormData((prev) => ({
+      ...prev,
+      name: prev.name || pending.name || '',
+      phone: prev.phone || pending.phone || '',
+      email: prev.email || pending.email || '',
+    }));
+
+    const sendAbandon = () => {
+      if (funnelBookedRef.current || funnelAbandonSentRef.current) return;
+      const lead = funnelPendingRef.current;
+      if (!lead) return;
+      funnelAbandonSentRef.current = true;
+      const body = JSON.stringify(lead);
+      try {
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(
+            '/api/public/funnel-lead-abandon',
+            new Blob([body], { type: 'application/json' }),
+          );
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
+      fetch('/api/public/funnel-lead-abandon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: true,
+      }).catch(() => {});
+    };
+
+    window.addEventListener('pagehide', sendAbandon);
+    return () => window.removeEventListener('pagehide', sendAbandon);
+  }, [clinicName]);
   const [step, setStep] = useState(1);
   const [selectedService, setSelectedService] = useState(null);
   const [selectedDate, setSelectedDate] = useState('');
@@ -63,6 +129,9 @@ export default function PublicBookingPortal({
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const serviceFromLinkApplied = useRef(false);
+  const funnelBookedRef = useRef(false);
+  const funnelAbandonSentRef = useRef(false);
+  const funnelPendingRef = useRef(null);
 
   const activePromoter = useMemo(
     () => resolvePromoter(formData.promoterCode, promoterList),
@@ -312,6 +381,9 @@ export default function PublicBookingPortal({
           console.warn('Staff alert failed', staffErr);
         }
       }
+
+      funnelBookedRef.current = true;
+      try { sessionStorage.removeItem('oxy_funnel_pending'); } catch { /* ignore */ }
 
       setStep(4);
     } catch (error) {
