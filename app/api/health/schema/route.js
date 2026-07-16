@@ -64,12 +64,38 @@ async function auditDatabase(clinicName, { includeGdlLocations = false } = {}) {
   );
   set('company_config_full', companyConfig.ok, companyConfig.error);
 
-  const notifyChannels = await probeSelect(
-    supabase,
-    'company_config',
-    'notify_use_email_booking, notify_use_sms_booking, notify_use_email_reminder, notify_use_sms_reminder, notify_auto_reminder, notify_sms_reminder',
+  const notifyProbeCols = [
+    'notify_use_email_first',
+    'notify_use_sms_first',
+    'notify_use_email_booking',
+    'notify_use_sms_booking',
+    'notify_use_email_reschedule',
+    'notify_use_sms_reschedule',
+    'notify_use_email_cancel',
+    'notify_use_sms_cancel',
+    'notify_use_email_reminder',
+    'notify_use_sms_reminder',
+    'notify_auto_reminder',
+    'notify_sms_reminder',
+    'notify_subject_reminder',
+    'notify_body_reminder',
+    'notify_auto_first',
+    'notify_auto_booking',
+    'notify_channel_email',
+    'notify_channel_sms',
+    'notify_sms_booking',
+    'staff_alert_first_sessions_only',
+  ];
+  const notifyMissing = [];
+  for (const col of notifyProbeCols) {
+    const probe = await probeSelect(supabase, 'company_config', col);
+    if (!probe.ok) notifyMissing.push(col);
+  }
+  set(
+    'company_config_notify_channels',
+    notifyMissing.length === 0,
+    notifyMissing.length ? `missing: ${notifyMissing.join(', ')}` : null,
   );
-  set('company_config_notify_channels', notifyChannels.ok, notifyChannels.error);
 
   const reminderCol = await probeSelect(supabase, 'appointments', 'id, reminder_sent_at');
   set('appointments_reminder_sent_at', reminderCol.ok, reminderCol.error);
