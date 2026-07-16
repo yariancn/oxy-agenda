@@ -164,6 +164,7 @@ import {
   getSessionInstructionsUrl,
   isAutoNotifyEnabled,
   NOTIFY_SETTING_FIELDS,
+  resolveNotifyChannels,
   resolveSessionInstructions,
 } from '../lib/notifySettings';
 import {
@@ -2545,12 +2546,11 @@ export default function AppLayout() {
       return reportResult ? { skipped: true, reason } : null;
     }
 
-    const sendEmail = dbCompanyConfig.notify_channel_email !== false;
-    const sendSms = dbCompanyConfig.notify_channel_sms !== false;
+    const { sendEmail, sendSms } = resolveNotifyChannels(dbCompanyConfig, notifyType);
     if (!sendEmail && !sendSms) {
       const reason = locale === 'en'
-        ? 'Email and SMS channels are disabled in Admin.'
-        : 'Correo y SMS están desactivados en Admin.';
+        ? 'Email and SMS are both off for this notice in Admin → Messages.'
+        : 'Correo y SMS están apagados para este aviso en Admin → Mensajes.';
       if (showSuccess) alert(reason);
       return reportResult ? { skipped: true, reason } : null;
     }
@@ -5070,14 +5070,29 @@ export default function AppLayout() {
                       </span>
                     </span>
                   </label>
+                  <p className="text-xs text-slate-500">
+                    {locale === 'en'
+                      ? 'Below you can also allow email/SMS clinic-wide. The real control is per message: each situation chooses Correo and/or SMS.'
+                      : 'Abajo puedes permitir correo/SMS a nivel clínica. El control fino es por aviso: cada situación elige Correo y/o SMS.'}
+                  </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <label className="flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 cursor-pointer">
-                      <input type="checkbox" checked={dbCompanyConfig.notify_channel_email !== false} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_channel_email: e.target.checked })} className="w-5 h-5 shrink-0" />
-                      <span className="text-sm font-bold text-slate-900">{locale === 'en' ? 'Email' : 'Correo'}</span>
+                    <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-slate-200 cursor-pointer">
+                      <input type="checkbox" checked={dbCompanyConfig.notify_channel_email !== false} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_channel_email: e.target.checked })} className="w-5 h-5 mt-0.5 shrink-0" />
+                      <span>
+                        <span className="block text-sm font-bold text-slate-900">{locale === 'en' ? 'Allow email' : 'Permitir correo'}</span>
+                        <span className="block text-xs text-slate-500 mt-0.5">
+                          {locale === 'en' ? 'If off, no notice can use email.' : 'Si está apagado, ningún aviso puede usar correo.'}
+                        </span>
+                      </span>
                     </label>
-                    <label className="flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 cursor-pointer">
-                      <input type="checkbox" checked={dbCompanyConfig.notify_channel_sms !== false} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_channel_sms: e.target.checked })} className="w-5 h-5 shrink-0" />
-                      <span className="text-sm font-bold text-slate-900">SMS</span>
+                    <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-slate-200 cursor-pointer">
+                      <input type="checkbox" checked={dbCompanyConfig.notify_channel_sms !== false} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_channel_sms: e.target.checked })} className="w-5 h-5 mt-0.5 shrink-0" />
+                      <span>
+                        <span className="block text-sm font-bold text-slate-900">{locale === 'en' ? 'Allow SMS' : 'Permitir SMS'}</span>
+                        <span className="block text-xs text-slate-500 mt-0.5">
+                          {locale === 'en' ? 'If off, no notice can use SMS.' : 'Si está apagado, ningún aviso puede usar SMS.'}
+                        </span>
+                      </span>
                     </label>
                   </div>
                 </section>
@@ -5089,12 +5104,17 @@ export default function AppLayout() {
                   </h4>
                   <p className="text-xs text-slate-500">
                     {locale === 'en'
-                      ? 'Turn each situation on or off. Tap “Edit text” to change what that message says.'
-                      : 'Enciende o apaga cada situación. Toca “Editar texto” para cambiar lo que dice ese mensaje.'}
+                      ? 'Turn each situation on/off, then choose Correo and/or SMS for that situation only.'
+                      : 'Enciende o apaga cada situación y elige Correo y/o SMS solo para esa situación.'}
                   </p>
                   <div className="space-y-3">
                     {messageTypeCards.map((card) => {
                       const on = isMessageTypeOn(card);
+                      const emailKey = `notify_use_email_${card.id}`;
+                      const smsKey = `notify_use_sms_${card.id}`;
+                      const useEmail = dbCompanyConfig[emailKey] !== false;
+                      const useSms = dbCompanyConfig[smsKey] !== false;
+                      const channels = resolveNotifyChannels(dbCompanyConfig, card.id);
                       return (
                         <div
                           key={card.id}
@@ -5116,6 +5136,15 @@ export default function AppLayout() {
                                     ? (locale === 'en' ? 'Sending' : 'Se envía')
                                     : (locale === 'en' ? 'Off' : 'Apagado')}
                                 </span>
+                                {on && (
+                                  <span className="ml-2 inline-block mt-2 text-[10px] font-bold text-slate-600">
+                                    {[
+                                      channels.sendEmail ? (locale === 'en' ? 'Email' : 'Correo') : null,
+                                      channels.sendSms ? 'SMS' : null,
+                                    ].filter(Boolean).join(' + ')
+                                      || (locale === 'en' ? 'No channel selected' : 'Sin canal elegido')}
+                                  </span>
+                                )}
                               </span>
                             </label>
                             <button
@@ -5130,6 +5159,42 @@ export default function AppLayout() {
                               {locale === 'en' ? 'Edit text' : 'Editar texto'}
                             </button>
                           </div>
+
+                          {on && (
+                            <div className={`mt-3 pt-3 border-t ${on ? 'border-emerald-200' : 'border-slate-200'}`}>
+                              <p className="text-xs font-bold text-slate-700 mb-2">
+                                {locale === 'en' ? 'Send this notice by:' : 'Enviar este aviso por:'}
+                              </p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <label className={`flex items-center gap-2 p-3 rounded-xl border cursor-pointer ${useEmail ? 'bg-white border-blue-300' : 'bg-slate-100 border-slate-200 opacity-70'}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={useEmail}
+                                    onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [emailKey]: e.target.checked })}
+                                    className="w-4 h-4 shrink-0"
+                                  />
+                                  <span className="text-sm font-bold text-slate-900">{locale === 'en' ? 'Email' : 'Correo'}</span>
+                                </label>
+                                <label className={`flex items-center gap-2 p-3 rounded-xl border cursor-pointer ${useSms ? 'bg-white border-violet-300' : 'bg-slate-100 border-slate-200 opacity-70'}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={useSms}
+                                    onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [smsKey]: e.target.checked })}
+                                    className="w-4 h-4 shrink-0"
+                                  />
+                                  <span className="text-sm font-bold text-slate-900">SMS</span>
+                                </label>
+                              </div>
+                              {!channels.sendEmail && !channels.sendSms && (
+                                <p className="mt-2 text-xs font-bold text-amber-800">
+                                  {locale === 'en'
+                                    ? 'Pick at least email or SMS, or turn the notice off.'
+                                    : 'Elige al menos correo o SMS, o apaga el aviso.'}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
                           {card.id === 'reminder' && (
                             <div className={`mt-3 pt-3 border-t ${on ? 'border-emerald-200' : 'border-slate-200'}`}>
                               <label className="text-xs font-bold text-slate-700">
@@ -5171,6 +5236,28 @@ export default function AppLayout() {
                           ? 'This situation is OFF above — you can still edit the text for when you turn it on.'
                           : 'Esta situación está APAGADA arriba — igual puedes editar el texto para cuando la enciendas.'}
                       </p>
+                    )}
+                    {isMessageTypeOn(activeMessageCard) && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={dbCompanyConfig[`notify_use_email_${emailTemplateTab}`] !== false}
+                            onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_use_email_${emailTemplateTab}`]: e.target.checked })}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-xs font-bold text-slate-900">{locale === 'en' ? 'Send email' : 'Enviar correo'}</span>
+                        </label>
+                        <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-violet-200 bg-violet-50 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={dbCompanyConfig[`notify_use_sms_${emailTemplateTab}`] !== false}
+                            onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_use_sms_${emailTemplateTab}`]: e.target.checked })}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-xs font-bold text-slate-900">{locale === 'en' ? 'Send SMS' : 'Enviar SMS'}</span>
+                        </label>
+                      </div>
                     )}
                   </div>
 

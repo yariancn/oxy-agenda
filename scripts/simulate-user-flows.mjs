@@ -52,6 +52,7 @@ import { normalizeClientIp } from '../lib/requestClientIp.js';
 import { buildPatientSmsMessage } from '../lib/patientStaffSms.js';
 import { isAppointmentInReminderWindow } from '../lib/appointmentReminder.js';
 import { canAutoLoginWithoutPin, hashClientIp } from '../lib/staffDeviceTrust.js';
+import { resolveNotifyChannels } from '../lib/notifySettings.js';
 
 process.env.STAFF_SESSION_SECRET = process.env.STAFF_SESSION_SECRET || 'test-secret-for-simulations';
 let passed = 0;
@@ -456,6 +457,28 @@ test('SMS staff: plantilla waiting incluye STOP y bloquea spam', () => {
   });
   assert.equal(blocked.ok, false);
   assert.equal(blocked.error, 'custom_note_blocked');
+});
+
+test('mensajes: canales Correo/SMS por tipo de aviso', () => {
+  const bookingEmailOnly = resolveNotifyChannels({
+    notify_use_email_booking: true,
+    notify_use_sms_booking: false,
+  }, 'booking');
+  assert.equal(bookingEmailOnly.sendEmail, true);
+  assert.equal(bookingEmailOnly.sendSms, false);
+
+  const reminderSmsOnly = resolveNotifyChannels({
+    notify_use_email_reminder: false,
+    notify_use_sms_reminder: true,
+  }, 'reminder');
+  assert.equal(reminderSmsOnly.sendEmail, false);
+  assert.equal(reminderSmsOnly.sendSms, true);
+
+  const clinicSmsOff = resolveNotifyChannels({
+    notify_channel_sms: false,
+    notify_use_sms_booking: true,
+  }, 'booking');
+  assert.equal(clinicSmsOff.sendSms, false);
 });
 
 test('recordatorio: ventana diaria según horas antes', () => {

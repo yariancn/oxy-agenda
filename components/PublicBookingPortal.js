@@ -21,6 +21,7 @@ import {
   getSessionInstructionsLabel,
   getSessionInstructionsUrl,
   isAutoNotifyEnabled,
+  resolveNotifyChannels,
   resolveSessionInstructions,
 } from '../lib/notifySettings';
 import { notifyStaffNewBooking } from '../lib/staffBookingAlert';
@@ -348,8 +349,9 @@ export default function PublicBookingPortal({
             notifyEnabled: true,
             notifyType,
             emailTemplates: dbConfig || {},
-            sendEmail: dbConfig?.notify_channel_email !== false,
-            sendSms: dbConfig?.notify_channel_sms !== false && (locale !== 'en' || formData.smsConsent === true),
+            sendEmail: resolveNotifyChannels(dbConfig || {}, notifyType).sendEmail,
+            sendSms: resolveNotifyChannels(dbConfig || {}, notifyType).sendSms
+              && (locale !== 'en' || formData.smsConsent === true),
           });
           if (notifyHadFailure(notifyData.report)) {
             console.warn('Booking notify partial failure', notifyData.report);
