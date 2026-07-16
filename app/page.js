@@ -4270,6 +4270,12 @@ export default function AppLayout() {
                 >
                   {liveSyncAt && Date.now() - liveSyncAt < 20000 ? '● Live' : '○ Sync'}
                 </span>
+                <span
+                  className="text-[8px] font-black uppercase shrink-0 px-1.5 py-0.5 rounded border text-slate-400 bg-slate-50 border-slate-200"
+                  title={locale === 'en' ? `App build ${buildSha}` : `Versión de la app ${buildSha}`}
+                >
+                  v{buildSha}
+                </span>
                 <div className="flex-1 min-w-[0.5rem]" />
                 {currentUserLevel <= 2 && (
                   <button onClick={openBlockSlotModal} className="bg-red-100 text-red-700 border border-red-300 px-2 py-1 text-[9px] font-black rounded-lg hover:bg-red-200 transition uppercase shrink-0 flex items-center gap-1" title={L.blockSlot}>
@@ -7869,8 +7875,9 @@ export default function AppLayout() {
                     .update(sealPayload)
                     .eq('id', appointmentId);
 
-                  // Fallback if signature column is missing or update lost its filter.
-                  if (sealRes.error && /signature|column|schema cache|WHERE clause/i.test(sealRes.error.message || '')) {
+                  // Fallback if signature column is missing (do NOT treat trigger WHERE errors as signature issues).
+                  if (sealRes.error && /signature|column|schema cache/i.test(sealRes.error.message || '')
+                    && !/WHERE clause/i.test(sealRes.error.message || '')) {
                     const noteLine = `[FIRMA ${new Date().toLocaleString()}] Bitácora sellada (firma en auditoría).`;
                     const prevNotes = String(selectedSlot.notes || '').trim();
                     sealRes = await activeSupabase
