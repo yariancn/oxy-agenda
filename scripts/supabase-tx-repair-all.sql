@@ -72,3 +72,13 @@ WHERE clinic = 'Shenandoah'
 -- Promoter email (no-show alerts)
 ALTER TABLE promoters
   ADD COLUMN IF NOT EXISTS email text;
+
+-- Appointment reminders
+ALTER TABLE appointments
+  ADD COLUMN IF NOT EXISTS reminder_sent_at timestamptz;
+
+ALTER TABLE company_config
+  ADD COLUMN IF NOT EXISTS notify_auto_reminder boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS notify_sms_reminder text,
+  ADD COLUMN IF NOT EXISTS notify_subject_reminder text,
+  ADD COLUMN IF NOT EXISTS notify_body_reminder text;

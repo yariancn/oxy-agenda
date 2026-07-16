@@ -50,3 +50,13 @@ ALTER TABLE users_staff
 UPDATE users_staff
 SET notify_on_booking = false
 WHERE notify_on_booking IS DISTINCT FROM false;
+
+-- Appointment reminders
+ALTER TABLE appointments
+  ADD COLUMN IF NOT EXISTS reminder_sent_at timestamptz;
+
+ALTER TABLE company_config
+  ADD COLUMN IF NOT EXISTS notify_auto_reminder boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS notify_sms_reminder text,
+  ADD COLUMN IF NOT EXISTS notify_subject_reminder text,
+  ADD COLUMN IF NOT EXISTS notify_body_reminder text;

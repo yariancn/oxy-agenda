@@ -246,6 +246,9 @@ export default function AppLayout() {
   const [cancelDeductSession, setCancelDeductSession] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [confirmationSending, setConfirmationSending] = useState(false);
+  const [staffSmsPreset, setStaffSmsPreset] = useState('waiting');
+  const [staffSmsNote, setStaffSmsNote] = useState('');
+  const [staffSmsSending, setStaffSmsSending] = useState(false);
   const [draggedApp, setDraggedApp] = useState(null);
   const [moveConfirmation, setMoveConfirmation] = useState(null);
   const [isRescheduling, setIsRescheduling] = useState(false);
@@ -377,6 +380,7 @@ export default function AppLayout() {
     booking: locale === 'en' ? 'Scheduling' : 'Programación',
     reschedule: locale === 'en' ? 'Reschedule' : 'Reprogramación',
     cancel: locale === 'en' ? 'Cancellation' : 'Cancelación',
+    reminder: locale === 'en' ? 'Reminder' : 'Recordatorio',
   };
 
   const pickEmailTemplates = (config = dbCompanyConfig) => ({
@@ -388,6 +392,8 @@ export default function AppLayout() {
     notify_body_reschedule: config.notify_body_reschedule,
     notify_subject_cancel: config.notify_subject_cancel,
     notify_body_cancel: config.notify_body_cancel,
+    notify_subject_reminder: config.notify_subject_reminder,
+    notify_body_reminder: config.notify_body_reminder,
     notify_extra_info: config.notify_extra_info,
   });
 
@@ -445,6 +451,7 @@ export default function AppLayout() {
     booking: config.notify_sms_booking,
     reschedule: config.notify_sms_reschedule,
     cancel: config.notify_sms_cancel,
+    reminder: config.notify_sms_reminder,
   });
 
   const pickGoogleCalendarSettings = (config = dbCompanyConfig) => {
@@ -514,6 +521,9 @@ export default function AppLayout() {
     financial_pin: dbCompanyConfig.financial_pin,
     notify_on_booking: dbCompanyConfig.notify_on_booking,
     reminder_hours: dbCompanyConfig.reminder_hours,
+    confirmation_sms_enabled: dbCompanyConfig.confirmation_sms_enabled === true,
+    confirmation_hours_before: Number(dbCompanyConfig.confirmation_hours_before) || 6,
+    confirmation_no_reply_hours: Number(dbCompanyConfig.confirmation_no_reply_hours) || 1,
     calendar_feed_enabled: dbCompanyConfig.calendar_feed_enabled === true,
     calendar_feed_token: String(dbCompanyConfig.calendar_feed_token || '').trim(),
     ...pickEmailTemplates(),
@@ -922,6 +932,7 @@ export default function AppLayout() {
             notify_sms_booking: resC.data.notify_sms_booking || prev.notify_sms_booking || defaultNotifySettings(clinicLocale).notify_sms_booking,
             notify_sms_reschedule: resC.data.notify_sms_reschedule || prev.notify_sms_reschedule || defaultNotifySettings(clinicLocale).notify_sms_reschedule,
             notify_sms_cancel: resC.data.notify_sms_cancel || prev.notify_sms_cancel || defaultNotifySettings(clinicLocale).notify_sms_cancel,
+            notify_sms_reminder: resC.data.notify_sms_reminder || prev.notify_sms_reminder || defaultNotifySettings(clinicLocale).notify_sms_reminder,
           }));
         }
         if (dbStatus === 'error') {
@@ -1050,10 +1061,12 @@ export default function AppLayout() {
           notify_sms_booking: resC.data.notify_sms_booking || defaultNotifySettings(clinicLocale).notify_sms_booking,
           notify_sms_reschedule: resC.data.notify_sms_reschedule || defaultNotifySettings(clinicLocale).notify_sms_reschedule,
           notify_sms_cancel: resC.data.notify_sms_cancel || defaultNotifySettings(clinicLocale).notify_sms_cancel,
+          notify_sms_reminder: resC.data.notify_sms_reminder || defaultNotifySettings(clinicLocale).notify_sms_reminder,
           notify_auto_first: resC.data.notify_auto_first !== false,
           notify_auto_booking: resC.data.notify_auto_booking !== false,
           notify_auto_reschedule: resC.data.notify_auto_reschedule !== false,
           notify_auto_cancel: resC.data.notify_auto_cancel !== false,
+          notify_auto_reminder: resC.data.notify_auto_reminder === true,
           notify_channel_email: resC.data.notify_channel_email !== false,
           notify_channel_sms: resC.data.notify_channel_sms !== false,
           notify_on_booking: resC.data.notify_on_booking !== false,
@@ -2391,6 +2404,42 @@ export default function AppLayout() {
     }
   };
 
+  const handleSendStaffSms = async () => {
+    if (!selectedSlot?.id || staffSmsSending) return;
+    if (staffSmsPreset === 'custom' && !String(staffSmsNote || '').trim()) {
+      return alert(locale === 'en' ? 'Write a short note for the custom SMS.' : 'Escribe una nota corta para el SMS personalizado.');
+    }
+    setStaffSmsSending(true);
+    try {
+      const res = await fetch('/api/staff/patient-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          appointmentId: selectedSlot.id,
+          clinic: activeClinic,
+          preset: staffSmsPreset,
+          customNote: staffSmsNote,
+          locale,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        alert(data.message || data.error || (locale === 'en' ? 'Could not send SMS.' : 'No se pudo enviar el SMS.'));
+        return;
+      }
+      alert(locale === 'en'
+        ? `SMS sent.\n\n${data.body || ''}`
+        : `SMS enviado.\n\n${data.body || ''}`);
+      setStaffSmsNote('');
+      await logAudit(selectedSlot.id, selectedSlot.patient, locale === 'en' ? 'Staff SMS' : 'SMS staff', data.body || staffSmsPreset);
+    } catch (err) {
+      alert(err?.message || (locale === 'en' ? 'Could not send SMS.' : 'No se pudo enviar el SMS.'));
+    } finally {
+      setStaffSmsSending(false);
+    }
+  };
+
   const resolveSlotContact = (slot) => {
     const pat = slot?.patientId
       ? dbPatients.find((p) => String(p.id) === String(slot.patientId))
@@ -3536,7 +3585,7 @@ export default function AppLayout() {
           prefers_email: slot.prefers_email ?? resolvedContact.prefers_email,
           prefers_sms: slot.prefers_sms ?? resolvedContact.prefers_sms,
           is_new_patient: isNewForAppointment,
-        }, { reportResult: true, forceNotify: true });
+        }, { reportResult: true });
         const staffNotifyResult = await alertStaffNewBooking({
           ...basePayload,
           full_date: firstCreated.full_date || apptDate,
@@ -4927,7 +4976,7 @@ export default function AppLayout() {
                   onClick={() => setAdminSubTab('mensajes')}
                   className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase transition ${adminSubTab === 'mensajes' ? 'bg-emerald-600 text-white shadow' : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'}`}
                 >
-                  🔔 Notificaciones
+                  ✏️ Editar mensajes
                 </button>
               </div>
             </div>
@@ -4960,8 +5009,36 @@ export default function AppLayout() {
                     </label>
                   </div>
                   <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Horas previas (recordatorio automático por correo — próximamente)</label>
-                    <input type="number" value={dbCompanyConfig.reminder_hours} onChange={e => setDbCompanyConfig({ ...dbCompanyConfig, reminder_hours: Number(e.target.value) })} className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm" />
+                    <label className="flex items-center gap-2 bg-violet-50 p-3 rounded-lg border border-violet-200 cursor-pointer mb-2">
+                      <input
+                        type="checkbox"
+                        checked={dbCompanyConfig.notify_auto_reminder === true}
+                        onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, notify_auto_reminder: e.target.checked })}
+                        className="w-4 h-4"
+                      />
+                      <span className="text-[10px] font-black text-violet-900 uppercase">
+                        {locale === 'en' ? 'Send automatic appointment reminders' : 'Enviar recordatorios automáticos de cita'}
+                      </span>
+                    </label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-1">
+                      {locale === 'en'
+                        ? 'Hours before appointment (SMS/email reminder)'
+                        : 'Horas antes de la cita (recordatorio SMS/correo)'}
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="72"
+                      disabled={dbCompanyConfig.notify_auto_reminder !== true}
+                      value={dbCompanyConfig.reminder_hours ?? 24}
+                      onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, reminder_hours: Number(e.target.value) })}
+                      className="w-full p-2.5 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white shadow-sm disabled:opacity-50"
+                    />
+                    <p className="text-[9px] font-bold text-slate-500 mt-1 leading-relaxed">
+                      {locale === 'en'
+                        ? 'Runs once daily with the confirmation cron (Hobby plan). Best with ~24 hours. Edit the Reminder tab texts below.'
+                        : 'Se ejecuta una vez al día junto al cron de confirmación (plan Hobby). Ideal ~24 horas. Edita los textos en la pestaña Recordatorio.'}
+                    </p>
                   </div>
                   {isShenandoah(activeClinic) && (
                     <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
@@ -5005,6 +5082,7 @@ export default function AppLayout() {
                     { id: 'booking', label: locale === 'en' ? 'Scheduling' : 'Programación' },
                     { id: 'reschedule', label: locale === 'en' ? 'Reschedule' : 'Reprogramación' },
                     { id: 'cancel', label: locale === 'en' ? 'Cancellation' : 'Cancelación' },
+                    { id: 'reminder', label: locale === 'en' ? 'Reminder' : 'Recordatorio' },
                   ].map((tab) => (
                     <button
                       key={tab.id}
@@ -5020,11 +5098,22 @@ export default function AppLayout() {
                 <label className="flex items-center gap-2 bg-white p-3 rounded-lg border border-emerald-100 shadow-sm mb-4 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={dbCompanyConfig[`notify_auto_${emailTemplateTab}`] !== false}
-                    onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_auto_${emailTemplateTab}`]: e.target.checked })}
+                    checked={
+                      emailTemplateTab === 'reminder'
+                        ? dbCompanyConfig.notify_auto_reminder === true
+                        : dbCompanyConfig[`notify_auto_${emailTemplateTab}`] !== false
+                    }
+                    onChange={(e) => setDbCompanyConfig({
+                      ...dbCompanyConfig,
+                      [`notify_auto_${emailTemplateTab}`]: e.target.checked,
+                    })}
                     className="w-4 h-4"
                   />
-                  <span className="text-[10px] font-black text-emerald-900 uppercase">Enviar este aviso automáticamente</span>
+                  <span className="text-[10px] font-black text-emerald-900 uppercase">
+                    {emailTemplateTab === 'reminder'
+                      ? (locale === 'en' ? 'Send this reminder automatically' : 'Enviar este recordatorio automáticamente')
+                      : (locale === 'en' ? 'Send this notice automatically' : 'Enviar este aviso automáticamente')}
+                  </span>
                 </label>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
@@ -5503,14 +5592,23 @@ export default function AppLayout() {
 
                 {/* ACCESO A NOTIFICACIONES (todo se configura en su propia pestaña) */}
                 <h3 className="font-black text-slate-800 uppercase text-sm mb-3 pb-2 border-b mt-6">Notificaciones (correo y SMS)</h3>
-                <button
-                  type="button"
-                  onClick={() => setAdminSubTab('mensajes')}
-                  className="w-full mb-6 p-4 rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50 text-left hover:bg-emerald-100 transition group"
-                >
-                  <span className="block text-[10px] font-black uppercase text-emerald-800">🔔 Ir a Notificaciones</span>
-                  <span className="block text-xs font-bold text-emerald-700 mt-1">Interruptor maestro, canales, textos de correo y SMS, indicaciones de primera sesión y alertas al equipo — todo en un solo lugar.</span>
-                </button>
+                <div className="w-full mb-6 p-4 rounded-xl border-2 border-emerald-200 bg-emerald-50">
+                  <p className="text-[10px] font-black uppercase text-emerald-800 mb-1">
+                    {locale === 'en' ? 'Message templates & send rules' : 'Plantillas y reglas de envío'}
+                  </p>
+                  <p className="text-xs font-bold text-emerald-700 mb-3 leading-relaxed">
+                    {locale === 'en'
+                      ? 'Choose when SMS/email go out (new booking, change, cancel, reminder) and edit the exact wording.'
+                      : 'Define cuándo salen SMS/correo (cita nueva, cambio, cancelación, recordatorio) y edita el texto exacto.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setAdminSubTab('mensajes')}
+                    className="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-600 text-white text-[11px] font-black uppercase shadow hover:bg-emerald-700 transition"
+                  >
+                    {locale === 'en' ? '✏️ Edit messages' : '✏️ Editar mensajes'}
+                  </button>
+                </div>
 
                 {currentUserLevel <= 1 && (
                   <DemoOccupancyPanel clinicName={activeClinic} locale={locale} />
@@ -6515,6 +6613,46 @@ export default function AppLayout() {
               >
                 {L.p.appt.sendInstructions}
               </button>
+
+              <div className="mt-3 p-3 rounded-2xl border border-violet-200 bg-violet-50 space-y-2">
+                <p className="text-[10px] font-black uppercase text-violet-900">
+                  {locale === 'en' ? 'Send SMS to patient' : 'Enviar SMS al paciente'}
+                </p>
+                <p className="text-[9px] font-bold text-violet-800/90 leading-relaxed">
+                  {locale === 'en'
+                    ? 'Uses clinic-branded transactional templates (STOP footer). Keep custom notes short and appointment-related to stay carrier-compliant.'
+                    : 'Usa plantillas transaccionales con nombre de la clínica (incluye STOP). Mantén notas cortas y relacionadas con la cita para cumplir políticas de carriers.'}
+                </p>
+                <select
+                  value={staffSmsPreset}
+                  onChange={(e) => setStaffSmsPreset(e.target.value)}
+                  className="w-full p-2.5 border border-violet-200 rounded-xl font-bold text-xs bg-white text-slate-900"
+                >
+                  <option value="waiting">{locale === 'en' ? 'Waiting / has not arrived' : 'Esperando / no ha llegado'}</option>
+                  <option value="reminder">{locale === 'en' ? 'Appointment reminder' : 'Recordatorio de cita'}</option>
+                  <option value="custom">{locale === 'en' ? 'Short custom note' : 'Nota corta personalizada'}</option>
+                </select>
+                {staffSmsPreset === 'custom' && (
+                  <textarea
+                    rows={2}
+                    maxLength={120}
+                    value={staffSmsNote}
+                    onChange={(e) => setStaffSmsNote(e.target.value)}
+                    placeholder={locale === 'en' ? 'Short note (max 120 chars)' : 'Nota corta (máx. 120 caracteres)'}
+                    className="w-full p-2.5 border border-violet-200 rounded-xl font-bold text-xs bg-white text-slate-900"
+                  />
+                )}
+                <button
+                  type="button"
+                  disabled={staffSmsSending}
+                  onClick={handleSendStaffSms}
+                  className="w-full bg-violet-700 text-white py-3 rounded-2xl font-black uppercase text-[10px] hover:bg-violet-800 transition disabled:opacity-60"
+                >
+                  {staffSmsSending
+                    ? (locale === 'en' ? 'Sending…' : 'Enviando…')
+                    : (locale === 'en' ? '📱 Send SMS now' : '📱 Enviar SMS ahora')}
+                </button>
+              </div>
               </>
               )}
             </div>

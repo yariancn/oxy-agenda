@@ -48,7 +48,12 @@ import {
 } from '../lib/appointmentConfirmation.js';
 import { buildPromoterNoShowEmail } from '../lib/promoterNoShowNotify.js';
 import { reverseNoShowWalletImpact, adjustWalletSessions } from '../lib/sessionWallet.js';
+import { normalizeClientIp } from '../lib/requestClientIp.js';
+import { buildPatientSmsMessage } from '../lib/patientStaffSms.js';
+import { isAppointmentInReminderWindow } from '../lib/appointmentReminder.js';
+import { canAutoLoginWithoutPin, hashClientIp } from '../lib/staffDeviceTrust.js';
 
+process.env.STAFF_SESSION_SECRET = process.env.STAFF_SESSION_SECRET || 'test-secret-for-simulations';
 let passed = 0;
 function test(name, fn) {
   try {
@@ -417,6 +422,50 @@ test('no-show: revertir baja adeudo o regresa sesión a cartera', () => {
 
   const adjusted = adjustWalletSessions({ price_115: 2 }, { servicePrice: 115, delta: -1 });
   assert.equal(adjusted.price_115, 1);
+});
+
+test('login: IP conocida no pide NIP en dispositivo recordado', () => {
+  const ip = '203.0.113.10';
+  const device = { email: 'staff@clinic.com', pinVerifiedAt: Date.now() - 48 * 3600 * 1000, ipHash: hashClientIp(ip) };
+  assert.equal(canAutoLoginWithoutPin(device, ip), true);
+  assert.equal(canAutoLoginWithoutPin(device, '198.51.100.1'), false);
+  assert.equal(normalizeClientIp('::ffff:203.0.113.10'), '203.0.113.10');
+});
+
+test('SMS staff: plantilla waiting incluye STOP y bloquea spam', () => {
+  const ok = buildPatientSmsMessage({
+    preset: 'waiting',
+    locale: 'en',
+    patientName: 'Ruth Kelly',
+    clinicDisplayName: 'REGENOXY',
+    date: '2026-07-16',
+    time: '12:00 PM',
+    clinicPhone: '7135913379',
+  });
+  assert.equal(ok.ok, true);
+  assert.match(ok.body, /STOP/i);
+  assert.match(ok.body, /REGENOXY/);
+
+  const blocked = buildPatientSmsMessage({
+    preset: 'custom',
+    locale: 'en',
+    patientName: 'Ruth',
+    clinicDisplayName: 'REGENOXY',
+    clinicPhone: '7135913379',
+    customNote: 'buy crypto now bit.ly/x',
+  });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.error, 'custom_note_blocked');
+});
+
+test('recordatorio: ventana diaria según horas antes', () => {
+  const now = new Date('2026-07-16T15:00:00');
+  const inWindow = {
+    full_date: '2026-07-17',
+    time: '15:00',
+  };
+  assert.equal(isAppointmentInReminderWindow(inWindow, 24, now), true);
+  assert.equal(isAppointmentInReminderWindow({ full_date: '2026-07-20', time: '15:00' }, 24, now), false);
 });
 
 console.log(`\n${passed} pruebas OK\n`);
