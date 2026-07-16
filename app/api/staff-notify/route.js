@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { dispatchStaffBookingAlert } from '../../../lib/staffBookingAlert.js';
+import { markFunnelLeadBooked } from '../../../lib/funnelLeadNotify.js';
 import { getSupabaseAdmin } from '../../../lib/supabaseAdmin.js';
 
 async function loadStaffRoster(clinicName) {
@@ -21,6 +22,8 @@ export async function POST(request) {
       clinicName = 'Guadalajara',
       clinicDisplayName,
       patientName,
+      patientPhone = '',
+      patientEmail = '',
       date,
       time,
       equipment,
@@ -52,6 +55,13 @@ export async function POST(request) {
       promoterCode,
       isFirstSession,
     });
+
+    if (clinicName === 'Shenandoah' || /oxy|shenandoah|woodlands/i.test(String(clinicDisplayName || ''))) {
+      await markFunnelLeadBooked({
+        email: patientEmail,
+        phone: patientPhone,
+      }).catch(() => null);
+    }
 
     return NextResponse.json({ success: true, ...result });
   } catch (error) {

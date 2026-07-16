@@ -480,6 +480,8 @@ export default function AppLayout() {
         clinicName: activeClinic,
         clinicDisplayName: dbCompanyConfig.name,
         patientName: slot.patient,
+        patientPhone: slot.phone || slot.patient_phone || '',
+        patientEmail: slot.email || slot.patient_email || '',
         date: slot.full_date || slot.fullDate,
         time: slot.time,
         equipment: slot.equipment,

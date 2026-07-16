@@ -298,6 +298,8 @@ export default function PublicBookingPortal({
             clinicName,
             clinicDisplayName: dbConfig?.name || branding.title,
             patientName: result.patient.displayName,
+            patientPhone: result.patient.phone || formData.phone || '',
+            patientEmail: (formData.email || result.patient.email || '').trim(),
             date: selectedDate,
             time: selectedTime,
             equipment: selectedService.name,
