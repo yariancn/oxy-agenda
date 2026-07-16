@@ -3,6 +3,7 @@ import {
   buildTrustedDeviceHint,
   readStaffDeviceFromRequest,
 } from '../../../../lib/staffDeviceTrust.js';
+import { getRequestClientIp } from '../../../../lib/requestClientIp.js';
 
 export async function GET(request) {
   try {
@@ -10,7 +11,9 @@ export async function GET(request) {
     if (!device?.email) {
       return NextResponse.json({ trusted: false });
     }
-    return NextResponse.json(buildTrustedDeviceHint(device.email, device));
+    return NextResponse.json(
+      buildTrustedDeviceHint(device.email, device, getRequestClientIp(request)),
+    );
   } catch {
     return NextResponse.json({ trusted: false });
   }

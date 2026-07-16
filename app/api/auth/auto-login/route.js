@@ -28,10 +28,12 @@ export async function POST(request) {
     const response = NextResponse.json({ success: true, user: result.user });
     response.cookies.set(STAFF_SESSION_COOKIE, token, staffSessionCookieOptions());
 
-    const trustedDevice = readStaffDeviceFromRequest(request);
+    const trustedDevice = result.device || readStaffDeviceFromRequest(request);
     if (trustedDevice?.email && result.user?.id !== 'admin') {
       const deviceToken = createStaffDeviceToken(trustedDevice.email, {
         pinVerifiedAt: trustedDevice.pinVerifiedAt,
+        ip: result.clientIp || '',
+        ipHash: trustedDevice.ipHash || '',
       });
       if (deviceToken) {
         response.cookies.set(STAFF_DEVICE_COOKIE, deviceToken, staffDeviceCookieOptions());

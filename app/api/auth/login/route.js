@@ -12,6 +12,7 @@ import {
   STAFF_DEVICE_COOKIE,
 } from '../../../../lib/staffDeviceTrust.js';
 import { normalizeStaffEmail } from '../../../../lib/staffEmail.js';
+import { getRequestClientIp } from '../../../../lib/requestClientIp.js';
 
 export async function POST(request) {
   try {
@@ -49,6 +50,8 @@ export async function POST(request) {
     if (loginEmail && result.user?.id !== 'admin' && (rememberDevice || trustedDevice?.email)) {
       const deviceToken = createStaffDeviceToken(loginEmail, {
         pinVerifiedAt: Date.now(),
+        ip: getRequestClientIp(request),
+        ipHash: trustedDevice?.ipHash || '',
       });
       if (deviceToken) {
         response.cookies.set(STAFF_DEVICE_COOKIE, deviceToken, staffDeviceCookieOptions());
