@@ -1,6 +1,6 @@
 // Service worker mínimo: solo habilita instalación PWA.
 // Sin caché offline — todas las peticiones van a la red.
-const SW_VERSION = '2026-05-23-pos-sms-v2';
+const SW_VERSION = '2026-07-16-deploy-banner';
 
 self.addEventListener('install', () => {
   self.skipWaiting();

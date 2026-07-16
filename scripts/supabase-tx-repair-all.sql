@@ -96,3 +96,20 @@ ALTER TABLE company_config
 -- Live sync ping (open agenda screens)
 ALTER TABLE company_config
   ADD COLUMN IF NOT EXISTS agenda_rev bigint NOT NULL DEFAULT 1;
+
+-- Remove unsafe live-sync triggers (break bitácora seal under pg-safeupdate)
+DROP TRIGGER IF EXISTS trg_oxy_bump_agenda_rev_appointments ON appointments;
+DROP TRIGGER IF EXISTS trg_oxy_bump_agenda_rev_blocked ON blocked_slots;
+DROP TRIGGER IF EXISTS trg_oxy_bump_agenda_rev_services ON services;
+
+CREATE OR REPLACE FUNCTION oxy_bump_agenda_live_rev()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  UPDATE company_config
+  SET agenda_rev = COALESCE(agenda_rev, 0) + 1
+  WHERE true;
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
