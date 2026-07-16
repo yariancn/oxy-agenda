@@ -523,7 +523,8 @@ export default function AppLayout() {
     };
   };
 
-  const openEmailPreview = () => {
+  const buildNotifyPreviewForType = (notifyType) => {
+    const type = notifyType || emailTemplateTab || 'booking';
     const sampleDate = new Date();
     sampleDate.setDate(sampleDate.getDate() + 3);
     const dateStr = sampleDate.toISOString().split('T')[0];
@@ -532,12 +533,12 @@ export default function AppLayout() {
     const previewInstructions = resolveSessionInstructions(dbCompanyConfig, locale, {
       equipment: sampleService,
       services: dbServices,
-      isFirstSession: emailTemplateTab === 'first',
+      isFirstSession: type === 'first',
     });
     const previewTimes = resolveSessionTimes({ duration: 60, buffer: 30 });
-    const preview = buildNotifyContent({
+    return buildNotifyContent({
       locale,
-      notifyType: emailTemplateTab,
+      notifyType: type,
       patientName: locale === 'en' ? 'John Smith' : 'María González',
       clinicName: activeClinic,
       clinicDisplayName: dbCompanyConfig.name,
@@ -552,10 +553,14 @@ export default function AppLayout() {
       clinicPhone: dbCompanyConfig.phone || (locale === 'en' ? '7135913379' : '3321664083'),
       ticketMessage: dbCompanyConfig.ticket_message,
       emailTemplates: pickEmailTemplates(),
+      smsIntros: pickSmsIntros(),
       durationMins: previewTimes.duration,
       bufferMins: previewTimes.buffer,
     });
-    setEmailPreview(preview);
+  };
+
+  const openEmailPreview = () => {
+    setEmailPreview(buildNotifyPreviewForType(emailTemplateTab));
   };
 
   const buildCompanyConfigPayload = () => ({
@@ -5279,18 +5284,41 @@ export default function AppLayout() {
 
                                 <div className="space-y-3 rounded-xl border border-violet-200 p-4 bg-violet-50/50">
                                   <p className="text-sm font-black text-slate-900">SMS</p>
-                                  <p className="text-xs text-slate-600 leading-relaxed">
-                                    {locale === 'en'
-                                      ? 'Write only the greeting. We add date, time, service, location and clinic phone automatically.'
-                                      : 'Escribe solo el saludo. Nosotros agregamos fecha, hora, servicio, ubicación y teléfono de la clínica.'}
-                                  </p>
-                                  <textarea
-                                    rows={4}
-                                    value={dbCompanyConfig[`notify_sms_${card.id}`] || ''}
-                                    onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_sms_${card.id}`]: e.target.value })}
-                                    className="w-full p-3 border border-violet-200 rounded-lg font-bold outline-none text-slate-900 bg-white text-sm leading-relaxed"
-                                    placeholder={locale === 'en' ? 'Hi {{nombre}}, appointment confirmed at {{clinica}}.' : 'Hola {{nombre}}, cita confirmada en {{clinica}}.'}
-                                  />
+                                  <div className="rounded-lg border border-violet-200 bg-white p-3 space-y-2">
+                                    <p className="text-[10px] font-black uppercase text-violet-800">
+                                      {locale === 'en' ? '1) Greeting you edit' : '1) Saludo que tú editas'}
+                                    </p>
+                                    <p className="text-xs text-slate-600 leading-relaxed">
+                                      {locale === 'en'
+                                        ? 'Usually just {{nombre}} and {{clinica}}. Keep it short.'
+                                        : 'Normalmente solo {{nombre}} y {{clinica}}. Manténlo corto.'}
+                                    </p>
+                                    <textarea
+                                      rows={3}
+                                      value={dbCompanyConfig[`notify_sms_${card.id}`] || ''}
+                                      onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [`notify_sms_${card.id}`]: e.target.value })}
+                                      className="w-full p-3 border border-violet-200 rounded-lg font-bold outline-none text-slate-900 bg-violet-50/40 text-sm leading-relaxed"
+                                      placeholder={locale === 'en' ? 'Hi {{nombre}}, reminder of your appointment at {{clinica}}.' : 'Hola {{nombre}}, recordatorio de tu cita en {{clinica}}.'}
+                                    />
+                                  </div>
+                                  <div className="rounded-lg border border-dashed border-violet-300 bg-violet-100/40 p-3">
+                                    <p className="text-[10px] font-black uppercase text-violet-900 mb-1">
+                                      {locale === 'en' ? '2) Added automatically (not editable here)' : '2) Se agrega solo (no se edita aquí)'}
+                                    </p>
+                                    <p className="text-xs text-violet-900/90 leading-relaxed">
+                                      {locale === 'en'
+                                        ? 'Date · time · service · location · map link · clinic phone'
+                                        : 'Fecha · hora · servicio · ubicación · liga del mapa · teléfono de la clínica'}
+                                    </p>
+                                  </div>
+                                  <div className="rounded-lg border border-slate-300 bg-slate-900 p-3">
+                                    <p className="text-[10px] font-black uppercase text-slate-400 mb-2">
+                                      {locale === 'en' ? 'Full SMS that will be sent' : 'SMS completo que se enviará'}
+                                    </p>
+                                    <p className="text-xs font-medium text-slate-100 leading-relaxed whitespace-pre-wrap">
+                                      {buildNotifyPreviewForType(card.id).smsBody}
+                                    </p>
+                                  </div>
                                 </div>
                               </div>
 
