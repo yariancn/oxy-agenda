@@ -2310,6 +2310,13 @@ export default function AppLayout() {
     return getMissingAppointmentFields(selectedSlot, locale);
   }, [showNewAppointment, selectedSlot, locale]);
 
+  const formatAppointmentDateWithWeekday = (isoDate) => {
+    const iso = String(isoDate || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso || '—';
+    const dayName = getDayNameFromDate(locale, new Date(`${iso}T12:00:00`));
+    return `${dayName} · ${iso}`;
+  };
+
   useEffect(() => {
     if (!showNewAppointment || !repeatBooking.enabled) return;
     const d = selectedSlot?.fullDate || selectedSlot?.full_date;
@@ -6399,7 +6406,7 @@ export default function AppLayout() {
                 {selectedSlot.phone && (
                   <a href={`tel:${digitsOnly(selectedSlot.phone)}`} className="block text-sm font-bold text-slate-600 mt-1 normal-case">{selectedSlot.phone}</a>
                 )}
-                <span className="block text-[10px] font-bold text-slate-500 mt-1 uppercase">{selectedSlot.equipment} · {selectedSlot.time} · {selectedSlot.full_date || selectedSlot.fullDate}</span>
+                <span className="block text-[10px] font-bold text-slate-500 mt-1 uppercase">{selectedSlot.equipment} · {selectedSlot.time} · {formatAppointmentDateWithWeekday(selectedSlot.full_date || selectedSlot.fullDate)}</span>
               </div>
               {!isAssessmentService(selectedSlot.equipment) ? (
               <label className="flex items-start gap-3 bg-amber-50 border border-amber-200 p-4 rounded-xl cursor-pointer">
@@ -6803,6 +6810,9 @@ export default function AppLayout() {
                             }}
                             className="w-full min-w-0 max-w-full p-2.5 sm:p-3 border border-blue-200 rounded-xl font-bold outline-none text-slate-900 bg-white text-sm box-border"
                           />
+                          <p className="mt-1 text-[10px] font-black uppercase text-blue-800">
+                            {formatAppointmentDateWithWeekday(selectedSlot.fullDate || selectedSlot.full_date)}
+                          </p>
                         </div>
                         <div className="min-w-0">
                           <label className="block text-[8px] font-black text-blue-700 uppercase mb-1">Hora</label>
@@ -6834,7 +6844,9 @@ export default function AppLayout() {
                       title={canRescheduleAppointment ? 'Clic para reprogramar fecha' : undefined}
                     >
                       <span className="block text-[8px] font-black text-slate-400 uppercase">Fecha</span>
-                      <span className="text-base font-black text-slate-700 block">{selectedSlot.full_date || selectedSlot.fullDate}</span>
+                      <span className="text-base font-black text-slate-700 block">
+                        {formatAppointmentDateWithWeekday(selectedSlot.full_date || selectedSlot.fullDate)}
+                      </span>
                     </div>
                     <div
                       role={canRescheduleAppointment ? 'button' : undefined}
@@ -7199,6 +7211,9 @@ export default function AppLayout() {
                       day: getDayNameFromDate(locale, d)
                     }); 
                   }} className="w-full min-w-0 max-w-full p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm box-border" />
+                  <p className="mt-1 text-[10px] font-black uppercase text-emerald-800">
+                    {formatAppointmentDateWithWeekday(selectedSlot?.fullDate || currentFullDate)}
+                  </p>
                 </div>
                 <div className="min-w-0">
                   <label className="text-[10px] font-black uppercase text-slate-400">Hora</label>
