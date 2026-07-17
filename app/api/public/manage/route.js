@@ -41,9 +41,10 @@ async function loadManageContext(token) {
   const clinicName = normalizeClinicId(claims.clinicName);
   const supabase = getSupabaseAdmin(clinicName);
 
+  // email no existe en appointments (GDL/TX); el correo vive en patients.
   const { data: appointment, error: apptErr } = await supabase
     .from('appointments')
-    .select('id, patient, phone, email, full_date, time, equipment, duration, buffer, check_in_status, clinic, notes, prefers_email, prefers_sms, is_new_patient')
+    .select('id, patient, phone, full_date, time, equipment, duration, buffer, check_in_status, clinic, notes, prefers_email, prefers_sms, is_new_patient')
     .eq('id', claims.appointmentId)
     .maybeSingle();
 

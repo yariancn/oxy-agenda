@@ -40,9 +40,10 @@ export async function POST(request) {
     }
 
     const supabase = getSupabaseAdmin(clinicName);
+    // email no existe en appointments (GDL/TX); el correo vive en patients.
     const { data: app, error } = await supabase
       .from('appointments')
-      .select('id, patient, phone, email, time, full_date, equipment, prefers_sms, patient_id')
+      .select('id, patient, phone, time, full_date, equipment, prefers_sms, patient_id')
       .eq('id', appointmentId)
       .maybeSingle();
 
