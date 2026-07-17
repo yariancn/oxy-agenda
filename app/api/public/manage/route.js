@@ -19,6 +19,7 @@ import { SLOT_UNAVAILABLE } from '../../../../lib/appointmentSlotGuard.js';
 import { sendAppointmentNotifyServer } from '../../../../lib/sendAppointmentNotifyServer.js';
 import { mergePortalAppointments, readDemoConfig } from '../../../../lib/demoOccupancyServer.js';
 import { bumpAgendaLiveRev } from '../../../../lib/agendaLiveRev.js';
+import { selectWithColumnFallback } from '../../../../lib/supabaseSelectSafe.js';
 
 function sanitizeCompanyConfig(row) {
   if (!row) return null;
@@ -41,12 +42,19 @@ async function loadManageContext(token) {
   const clinicName = normalizeClinicId(claims.clinicName);
   const supabase = getSupabaseAdmin(clinicName);
 
-  // email no existe en appointments (GDL/TX); el correo vive en patients.
-  const { data: appointment, error: apptErr } = await supabase
-    .from('appointments')
-    .select('id, patient, phone, full_date, time, equipment, duration, buffer, check_in_status, clinic, notes, prefers_email, prefers_sms, is_new_patient')
-    .eq('id', claims.appointmentId)
-    .maybeSingle();
+  // email / prefers_* pueden no existir en appointments (GDL); se omiten si faltan.
+  const { data: appointment, error: apptErr } = await selectWithColumnFallback(
+    (cols) => supabase
+      .from('appointments')
+      .select(cols)
+      .eq('id', claims.appointmentId)
+      .maybeSingle(),
+    [
+      'id', 'patient', 'phone', 'full_date', 'time', 'equipment', 'duration', 'buffer',
+      'check_in_status', 'clinic', 'notes', 'is_new_patient', 'patient_id',
+      'prefers_email', 'prefers_sms', 'email',
+    ],
+  );
 
   if (apptErr) return { error: apptErr.message, status: 500 };
   if (!appointment) return { error: 'not_found', status: 404 };
