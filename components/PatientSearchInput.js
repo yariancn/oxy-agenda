@@ -19,6 +19,7 @@ export default function PatientSearchInput({
   className = '',
   selectedLabel = 'Paciente seleccionado',
   pickHint = 'Clic en la lista para confirmar',
+  blockedBadge = 'Paciente bloqueado',
 }) {
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
@@ -63,7 +64,8 @@ export default function PatientSearchInput({
 
   const inputClass = [
     className,
-    confirmed ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : '',
+    confirmed && exactMatch?.is_blocked ? 'border-red-400 bg-red-50 ring-2 ring-red-200' : '',
+    confirmed && !exactMatch?.is_blocked ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : '',
     exactMatch && !confirmed ? 'border-amber-400 bg-amber-50' : '',
   ].filter(Boolean).join(' ');
 
@@ -85,9 +87,11 @@ export default function PatientSearchInput({
         className={inputClass}
       />
       {confirmed && exactMatch ? (
-        <p className="mt-1.5 text-[10px] font-black uppercase text-emerald-700 flex items-center gap-1">
-          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-white text-[9px]">✓</span>
-          {selectedLabel}: {exactMatch.patient}
+        <p className={`mt-1.5 text-[10px] font-black uppercase flex items-center gap-1 ${exactMatch.is_blocked ? 'text-red-700' : 'text-emerald-700'}`}>
+          <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-white text-[9px] ${exactMatch.is_blocked ? 'bg-red-600' : 'bg-emerald-600'}`}>
+            {exactMatch.is_blocked ? '!' : '✓'}
+          </span>
+          {exactMatch.is_blocked ? `🚫 ${blockedBadge}` : selectedLabel}: {exactMatch.patient}
           {exactMatch.phone ? ` · ${exactMatch.phone}` : ''}
         </p>
       ) : exactMatch && query.trim() ? (
@@ -101,12 +105,15 @@ export default function PatientSearchInput({
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handlePick(p)}
-                className={`w-full text-left px-3 py-2.5 hover:bg-emerald-50 border-b border-slate-100 last:border-0 transition ${String(p.id) === String(pickedId) ? 'bg-emerald-100' : ''}`}
+                className={`w-full text-left px-3 py-2.5 hover:bg-emerald-50 border-b border-slate-100 last:border-0 transition ${String(p.id) === String(pickedId) ? 'bg-emerald-100' : ''} ${p.is_blocked ? 'bg-red-50 hover:bg-red-100' : ''}`}
               >
-                <span className="block font-black uppercase text-sm text-slate-800 truncate">{p.patient}</span>
-                {p.phone ? (
-                  <span className="block text-[10px] font-bold text-slate-500 mt-0.5">{p.phone}</span>
-                ) : null}
+                <span className="block font-black uppercase text-sm text-slate-800 truncate">
+                  {p.is_blocked ? '🚫 ' : ''}{p.patient}
+                </span>
+                <span className="block text-[10px] font-bold text-slate-500 mt-0.5">
+                  {p.phone || '—'}
+                  {p.is_blocked ? ` · ${blockedBadge}` : ''}
+                </span>
               </button>
             </li>
           ))}

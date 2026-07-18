@@ -337,7 +337,15 @@ export default function AppLayout() {
   const [newPatientData, setNewPatientData] = useState({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true });
   
   const [showOOOModal, setShowOOOModal] = useState(false);
-  const [oooData, setOOOData] = useState({ date: '', start_time: '07:00', end_time: '19:00', is_global: true, equipment: '', reason: 'Festivo / Mantenimiento' });
+  const [oooData, setOOOData] = useState({
+    id: null,
+    date: '',
+    start_time: '07:00',
+    end_time: '19:00',
+    is_global: true,
+    equipment: '',
+    reason: 'Festivo / Mantenimiento',
+  });
 
   // --- REPORTES Y SEGURIDAD ---
   const [isReportsUnlocked, setIsReportsUnlocked] = useState(false);
@@ -2177,13 +2185,39 @@ export default function AppLayout() {
     return slots;
   }, [calendarStartMins, calendarEndMins, intervalMins]);
 
+  const normalizeTimeInputValue = (value, fallback = '07:00') => {
+    const raw = String(value || '').trim();
+    const match = raw.match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return fallback;
+    return `${String(match[1]).padStart(2, '0')}:${match[2]}`;
+  };
+
   const openBlockSlotModal = () => {
     const defaultEquip = dynamicColumns[0] || dbServices.find((s) => s.is_active)?.name || '';
-    setOOOData((prev) => ({
-      ...prev,
+    setOOOData({
+      id: null,
       date: clinicNow.dateStr || formatClinicDateIso(currentDate, activeClinic),
-      equipment: prev.equipment && dynamicColumns.includes(prev.equipment) ? prev.equipment : defaultEquip,
-    }));
+      start_time: '07:00',
+      end_time: '19:00',
+      is_global: true,
+      equipment: defaultEquip,
+      reason: locale === 'en' ? 'Holiday / Maintenance' : 'Festivo / Mantenimiento',
+    });
+    setShowOOOModal(true);
+  };
+
+  const openBlockedSlotEditor = (block) => {
+    if (!block?.id) return;
+    const defaultEquip = dynamicColumns[0] || dbServices.find((s) => s.is_active)?.name || '';
+    setOOOData({
+      id: block.id,
+      date: block.date || clinicNow.dateStr || formatClinicDateIso(currentDate, activeClinic),
+      start_time: normalizeTimeInputValue(block.start_time, '07:00'),
+      end_time: normalizeTimeInputValue(block.end_time, '19:00'),
+      is_global: block.is_global !== false && !block.equipment,
+      equipment: block.equipment || defaultEquip,
+      reason: block.reason || (locale === 'en' ? 'Blocked' : 'Bloqueo'),
+    });
     setShowOOOModal(true);
   };
 
@@ -2309,6 +2343,17 @@ export default function AppLayout() {
     if (!showNewAppointment || !selectedSlot) return [];
     return getMissingAppointmentFields(selectedSlot, locale);
   }, [showNewAppointment, selectedSlot, locale]);
+
+  const newAppointmentPatientBlocked = useMemo(() => {
+    if (!showNewAppointment || !selectedSlot?.patient) return false;
+    if (selectedSlot.is_blocked) return true;
+    if (selectedSlot.patientId) {
+      return !!dbPatients.find((p) => String(p.id) === String(selectedSlot.patientId) && p.is_blocked);
+    }
+    return !!dbPatients.find(
+      (p) => normalizeStr(p.patient) === normalizeStr(selectedSlot.patient) && p.is_blocked,
+    );
+  }, [showNewAppointment, selectedSlot, dbPatients]);
 
   const formatAppointmentDateWithWeekday = (isoDate) => {
     const iso = String(isoDate || '').trim();
@@ -3602,7 +3647,10 @@ export default function AppLayout() {
         return alert(staffAlert(locale, 'pastSchedule'));
       }
 
-      const existingP = dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(slot.patient));
+      const existingP = (slot.patientId
+        ? dbPatients.find((x) => String(x.id) === String(slot.patientId))
+        : null)
+        || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(slot.patient));
       if (existingP?.is_blocked) return alert(staffAlert(locale, 'patientBlockedShort'));
 
       const sessionTimes = resolveSessionTimes(slot);
@@ -4439,10 +4487,24 @@ export default function AppLayout() {
 
                             {/* BLOQUEOS OOO */}
                             {dbBlockedSlots.filter(b => b.date === currentDayInfo.fullDate && (b.is_global || appointmentEquipment(b.equipment) === eqName)).map(b => (
-                              <div key={b.id} className="absolute left-1 right-1 bg-slate-200 border-l-4 border-slate-400 rounded-md opacity-80 overflow-hidden flex flex-col justify-center items-center z-0" style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.03) 10px, rgba(0,0,0,0.03) 20px)', top: `${timeToPixels(b.start_time)}px`, height: `${timeToPixels(b.end_time) - timeToPixels(b.start_time)}px` }}>
-                                <span className="text-[10px] font-black text-slate-500 uppercase bg-white/80 px-2 py-1 rounded">{b.reason}</span>
-                                {currentUserLevel <= 2 && <button onClick={async () => { await activeSupabase.from('blocked_slots').delete().eq('id', b.id); await notifyCalendarChanged(); }} className="text-red-500 text-[8px] font-black mt-1 uppercase bg-white/80 px-2 rounded">Eliminar</button>}
-                              </div>
+                              <button
+                                type="button"
+                                key={b.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openBlockedSlotEditor(b);
+                                }}
+                                title={locale === 'en' ? 'Click to edit or remove block' : 'Clic para editar o quitar el bloqueo'}
+                                className="absolute left-1 right-1 bg-slate-200 border-l-4 border-slate-400 rounded-md opacity-90 overflow-hidden flex flex-col justify-center items-center z-[15] cursor-pointer hover:opacity-100 hover:ring-2 hover:ring-red-400 focus:outline-none focus:ring-2 focus:ring-red-500"
+                                style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.03) 10px, rgba(0,0,0,0.03) 20px)', top: `${timeToPixels(b.start_time)}px`, height: `${Math.max(24, timeToPixels(b.end_time) - timeToPixels(b.start_time))}px` }}
+                              >
+                                <span className="text-[10px] font-black text-slate-600 uppercase bg-white/90 px-2 py-1 rounded truncate max-w-full">
+                                  {b.reason || (locale === 'en' ? 'Blocked' : 'Bloqueo')}
+                                </span>
+                                <span className="text-[8px] font-bold text-red-700 uppercase bg-white/90 px-1.5 py-0.5 rounded mt-1">
+                                  {locale === 'en' ? 'Edit / Remove' : 'Editar / Quitar'}
+                                </span>
+                              </button>
                             ))}
 
                             {/* CITAS */}
@@ -4542,9 +4604,21 @@ export default function AppLayout() {
                                 )}
 
                                 {dbBlockedSlots.filter(b => b.date === dayInfo.fullDate && (b.is_global || appointmentEquipment(b.equipment) === eqName)).map(b => (
-                                  <div key={b.id} className="absolute left-0.5 right-0.5 bg-slate-200 border-l-2 border-slate-400 rounded-md opacity-80 overflow-hidden flex flex-col justify-center items-center z-0" style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.03) 10px, rgba(0,0,0,0.03) 20px)', top: `${timeToPixels(b.start_time)}px`, height: `${timeToPixels(b.end_time) - timeToPixels(b.start_time)}px` }}>
-                                    <span className="text-[7px] font-black text-slate-500 uppercase bg-white/80 px-1 rounded truncate w-full text-center">{b.reason}</span>
-                                  </div>
+                                  <button
+                                    type="button"
+                                    key={b.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openBlockedSlotEditor(b);
+                                    }}
+                                    title={locale === 'en' ? 'Click to edit or remove block' : 'Clic para editar o quitar el bloqueo'}
+                                    className="absolute left-0.5 right-0.5 bg-slate-200 border-l-2 border-slate-400 rounded-md opacity-90 overflow-hidden flex flex-col justify-center items-center z-[15] cursor-pointer hover:opacity-100 hover:ring-2 hover:ring-red-400 focus:outline-none focus:ring-2 focus:ring-red-500"
+                                    style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(0,0,0,0.03) 10px, rgba(0,0,0,0.03) 20px)', top: `${timeToPixels(b.start_time)}px`, height: `${Math.max(18, timeToPixels(b.end_time) - timeToPixels(b.start_time))}px` }}
+                                  >
+                                    <span className="text-[7px] font-black text-slate-600 uppercase bg-white/90 px-1 rounded truncate w-full text-center">
+                                      {b.reason || (locale === 'en' ? 'Blocked' : 'Bloqueo')}
+                                    </span>
+                                  </button>
                                 ))}
 
                                 {calendarAppointments.filter(app => appointmentEquipment(app.equipment) === eqName && app.full_date === dayInfo.fullDate && app.check_in_status !== 'Cancelado').map(app => (
@@ -4597,10 +4671,15 @@ export default function AppLayout() {
             {dbStatus === 'listo' && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                  {filteredPatients.map(p => (
-                   <div key={p.id} className={`bg-slate-50 border ${p.is_blocked ? 'border-red-300 bg-red-50 opacity-80' : 'border-slate-200'} p-4 rounded-2xl hover:shadow-lg transition flex flex-col relative`}>
+                   <div key={p.id} className={`bg-slate-50 border ${p.is_blocked ? 'border-red-400 bg-red-50' : 'border-slate-200'} p-4 rounded-2xl hover:shadow-lg transition flex flex-col relative`}>
 
-                      <p className="font-black text-slate-900 uppercase text-base truncate pr-6">
-                        {p.is_blocked && <span title="Paciente Bloqueado" className="mr-2">🚫</span>}
+                      {p.is_blocked && (
+                        <span className="absolute top-2 right-2 text-[8px] font-black uppercase bg-red-600 text-white px-2 py-0.5 rounded">
+                          🚫 {locale === 'en' ? 'Blocked' : 'Bloqueado'}
+                        </span>
+                      )}
+                      <p className="font-black text-slate-900 uppercase text-base truncate pr-20">
+                        {p.is_blocked && <span title={locale === 'en' ? 'Patient blocked' : 'Paciente bloqueado'} className="mr-2">🚫</span>}
                         {p.sessionGroupId && <span title={L.symbolLegend?.legendSharedWallet || 'Cartera compartida'} className="mr-2">👥</span>}
                         {p.patient}
                       </p>
@@ -4614,7 +4693,9 @@ export default function AppLayout() {
                            setSelectedSlot({ ...p, patientId: p.id }); 
                            setShowPatientProfile(true); 
                          }} className="flex-1 bg-emerald-600 text-white text-[9px] font-black uppercase py-2 rounded hover:bg-emerald-700 transition shadow-sm">💳 {L.chart}</button>
-                         <button onClick={() => { 
+                         <button
+                           disabled={!!p.is_blocked}
+                           onClick={() => { 
                            if (p.is_blocked) {
                               alert(staffAlert(locale, 'patientBlocked'));
                               return;
@@ -4626,8 +4707,9 @@ export default function AppLayout() {
                              email: p.email,
                              patientNotes: p.notes,
                              is_new_patient: false,
+                             patientId: p.id,
                            }); 
-                         }} className="flex-1 bg-blue-600 text-white text-[9px] font-black uppercase py-2 rounded hover:bg-blue-700 transition shadow-sm">📅 {L.schedule}</button>
+                         }} className={`flex-1 text-white text-[9px] font-black uppercase py-2 rounded transition shadow-sm ${p.is_blocked ? 'bg-slate-400 cursor-not-allowed opacity-70' : 'bg-blue-600 hover:bg-blue-700'}`}>📅 {L.schedule}</button>
                       </div>
                    </div>
                  ))}
@@ -7029,6 +7111,7 @@ export default function AppLayout() {
                   placeholder={L.p.appt.searchPatient}
                   selectedLabel={L.p.appt.patientSelected}
                   pickHint={L.p.appt.pickPatientHint}
+                  blockedBadge={locale === 'en' ? 'Patient blocked' : 'Paciente bloqueado'}
                   className="w-full p-3 border border-slate-300 rounded-xl font-bold uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white mt-1"
                   onQueryChange={(pName) => {
                     const exact = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(pName));
@@ -7042,6 +7125,7 @@ export default function AppLayout() {
                       patientNotes: exact ? exact.notes : (prev?.patientNotes || ''),
                       prefers_email: exact ? exact.prefers_email !== false : prev?.prefers_email !== false,
                       prefers_sms: exact ? exact.prefers_sms !== false : prev?.prefers_sms !== false,
+                      is_blocked: exact ? !!exact.is_blocked : false,
                     }));
                   }}
                   onSelectPatient={(p) => {
@@ -7055,10 +7139,26 @@ export default function AppLayout() {
                       patientNotes: p.notes || '',
                       prefers_email: p.prefers_email !== false,
                       prefers_sms: p.prefers_sms !== false,
+                      is_blocked: !!p.is_blocked,
                     }));
+                    if (p.is_blocked) {
+                      alert(staffAlert(locale, 'patientBlocked'));
+                    }
                   }}
                 />
               </div>
+              {newAppointmentPatientBlocked ? (
+                  <div className="rounded-xl border-2 border-red-400 bg-red-50 px-3 py-2.5">
+                    <p className="text-[10px] font-black uppercase text-red-800">
+                      🚫 {locale === 'en' ? 'Patient blocked' : 'Paciente bloqueado'}
+                    </p>
+                    <p className="text-[9px] font-bold text-red-700 mt-1 normal-case leading-snug">
+                      {locale === 'en'
+                        ? 'You can open the chart, but you cannot book appointments for this patient.'
+                        : 'Puedes consultar el expediente, pero no se puede programar una cita para este paciente.'}
+                    </p>
+                  </div>
+                ) : null}
               {!selectedSlot?.patient?.trim() && (
                 <p className="text-[10px] font-bold uppercase text-slate-500">{L.p.appt.pickPatientHint}</p>
               )}
@@ -7300,7 +7400,7 @@ export default function AppLayout() {
               <button
                 type="button"
                 onClick={() => handleSaveNewAppointment()}
-                disabled={isSavingAppointment || newAppointmentMissing.length > 0}
+                disabled={isSavingAppointment || newAppointmentMissing.length > 0 || newAppointmentPatientBlocked}
                 className="w-full sm:flex-1 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-emerald-700 transition disabled:opacity-60"
               >
                 {isSavingAppointment ? L.p.appt.creatingTitle : L.p.appt.scheduleSlot}
@@ -7446,22 +7546,35 @@ export default function AppLayout() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" style={{ zIndex: 9999 }}>
           <div className="bg-white rounded-t-2xl sm:rounded-3xl max-w-sm w-full max-h-[92dvh] sm:max-h-[85vh] flex flex-col border-t-8 border-red-500 shadow-2xl overflow-hidden text-slate-900">
             <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-b shrink-0 flex justify-between items-center">
-              <h3 className="text-base sm:text-xl font-black uppercase text-red-600">🚫 Bloquear Agenda</h3>
+              <h3 className="text-base sm:text-xl font-black uppercase text-red-600">
+                {oooData.id
+                  ? (locale === 'en' ? '🚫 Edit block' : '🚫 Editar bloqueo')
+                  : (locale === 'en' ? '🚫 Block agenda' : '🚫 Bloquear Agenda')}
+              </h3>
               <button onClick={() => setShowOOOModal(false)} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
             </div>
             
             <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-3 sm:space-y-4 min-h-0">
+              {oooData.id ? (
+                <p className="text-[10px] font-bold text-slate-500 normal-case leading-snug bg-slate-100 border border-slate-200 rounded-xl px-3 py-2">
+                  {locale === 'en'
+                    ? 'Change the date, times, scope or reason, then save. Or remove the block completely.'
+                    : 'Cambia fecha, horario, ámbito o motivo y guarda. O quita el bloqueo por completo.'}
+                </p>
+              ) : null}
               <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fecha a bloquear</label>
+                <label className="text-[10px] font-black uppercase text-slate-400 ml-1">
+                  {locale === 'en' ? 'Date' : 'Fecha a bloquear'}
+                </label>
                 <input type="date" value={oooData.date} onChange={e => setOOOData({...oooData, date: e.target.value})} className="w-full p-3 border rounded-xl font-bold text-sm outline-none text-slate-900 bg-white" />
               </div>
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="flex-1 min-w-0">
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Desde</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">{locale === 'en' ? 'From' : 'Desde'}</label>
                   <input type="time" value={oooData.start_time} onChange={e => setOOOData({...oooData, start_time: e.target.value})} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Hasta</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-1">{locale === 'en' ? 'Until' : 'Hasta'}</label>
                   <input type="time" value={oooData.end_time} onChange={e => setOOOData({...oooData, end_time: e.target.value})} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm" />
                 </div>
               </div>
@@ -7499,40 +7612,92 @@ export default function AppLayout() {
                 </div>
               )}
               <div className="pb-2">
-                <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Motivo</label>
-                <input type="text" placeholder="Ej. Mantenimiento Preventivo" value={oooData.reason} onChange={e => setOOOData({...oooData, reason: e.target.value})} className="w-full p-3 border rounded-xl font-bold text-sm uppercase outline-none text-slate-900 bg-white" />
+                <label className="text-[10px] font-black uppercase text-slate-400 ml-1">{locale === 'en' ? 'Reason' : 'Motivo'}</label>
+                <input type="text" placeholder={locale === 'en' ? 'e.g. Preventive maintenance' : 'Ej. Mantenimiento Preventivo'} value={oooData.reason} onChange={e => setOOOData({...oooData, reason: e.target.value})} className="w-full p-3 border rounded-xl font-bold text-sm uppercase outline-none text-slate-900 bg-white" />
               </div>
             </div>
             
-            <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-t shrink-0 flex flex-col sm:flex-row gap-2 sm:gap-3">
-              <button disabled={isSavingAppointment} onClick={() => setShowOOOModal(false)} className="w-full sm:w-1/3 bg-white border border-slate-300 font-black py-3 sm:py-4 rounded-xl uppercase text-xs hover:bg-slate-50 disabled:opacity-50">Cancelar</button>
-              <button
-                disabled={isSavingAppointment}
-                onClick={async () => {
-                if (!oooData.date) return alert(a('selectDate'));
-                if (!oooData.is_global && !oooData.equipment) return alert(L.blockSelectEquipmentRequired);
-                await runBusyAction({
-                  workingTitle: L.p.common.blockingTitle,
-                  workingDetail: L.p.common.pleaseWait,
-                  successTitle: L.p.common.blockedOk,
-                  autoCloseMs: 1000,
-                  onDone: () => setShowOOOModal(false),
-                  action: async () => {
-                    const { error } = await activeSupabase.from('blocked_slots').insert([{
-                      date: oooData.date,
-                      start_time: oooData.start_time,
-                      end_time: oooData.end_time,
-                      equipment: oooData.is_global ? null : oooData.equipment,
-                      reason: oooData.reason,
-                      is_global: oooData.is_global,
-                      clinic: normalizeClinicId(activeClinic),
-                    }]);
-                    if (error) return { error: error.message };
-                    await notifyCalendarChanged();
-                    return { detail: oooData.date };
-                  },
-                });
-              }} className="w-full sm:flex-1 bg-red-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-red-700 disabled:opacity-50">{isSavingAppointment ? L.p.common.working : 'Aplicar Bloqueo'}</button>
+            <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-t shrink-0 flex flex-col gap-2">
+              {oooData.id ? (
+                <button
+                  type="button"
+                  disabled={isSavingAppointment}
+                  onClick={async () => {
+                    if (!window.confirm(locale === 'en'
+                      ? 'Remove this block from the calendar?'
+                      : '¿Quitar este bloqueo del calendario?')) {
+                      return;
+                    }
+                    await runBusyAction({
+                      workingTitle: locale === 'en' ? 'Removing block…' : 'Quitando bloqueo…',
+                      workingDetail: L.p.common.pleaseWait,
+                      successTitle: locale === 'en' ? 'Block removed' : 'Bloqueo quitado',
+                      autoCloseMs: 900,
+                      onDone: () => setShowOOOModal(false),
+                      action: async () => {
+                        const { error } = await activeSupabase.from('blocked_slots').delete().eq('id', oooData.id);
+                        if (error) return { error: error.message };
+                        await notifyCalendarChanged();
+                        return { detail: oooData.date };
+                      },
+                    });
+                  }}
+                  className="w-full bg-white border-2 border-red-300 text-red-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-red-50 disabled:opacity-50"
+                >
+                  {locale === 'en' ? 'Remove block' : 'Quitar bloqueo'}
+                </button>
+              ) : null}
+              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                <button disabled={isSavingAppointment} onClick={() => setShowOOOModal(false)} className="w-full sm:w-1/3 bg-white border border-slate-300 font-black py-3 sm:py-4 rounded-xl uppercase text-xs hover:bg-slate-50 disabled:opacity-50">
+                  {locale === 'en' ? 'Close' : 'Cerrar'}
+                </button>
+                <button
+                  disabled={isSavingAppointment}
+                  onClick={async () => {
+                  if (!oooData.date) return alert(a('selectDate'));
+                  if (!oooData.is_global && !oooData.equipment) return alert(L.blockSelectEquipmentRequired);
+                  if (oooData.start_time >= oooData.end_time) {
+                    return alert(locale === 'en'
+                      ? 'End time must be after start time.'
+                      : 'La hora final debe ser después de la hora de inicio.');
+                  }
+                  const isEdit = !!oooData.id;
+                  await runBusyAction({
+                    workingTitle: isEdit
+                      ? (locale === 'en' ? 'Saving block…' : 'Guardando bloqueo…')
+                      : L.p.common.blockingTitle,
+                    workingDetail: L.p.common.pleaseWait,
+                    successTitle: isEdit
+                      ? (locale === 'en' ? 'Block updated' : 'Bloqueo actualizado')
+                      : L.p.common.blockedOk,
+                    autoCloseMs: 1000,
+                    onDone: () => setShowOOOModal(false),
+                    action: async () => {
+                      const payload = {
+                        date: oooData.date,
+                        start_time: oooData.start_time,
+                        end_time: oooData.end_time,
+                        equipment: oooData.is_global ? null : oooData.equipment,
+                        reason: oooData.reason,
+                        is_global: oooData.is_global,
+                        clinic: normalizeClinicId(activeClinic),
+                      };
+                      const { error } = isEdit
+                        ? await activeSupabase.from('blocked_slots').update(payload).eq('id', oooData.id)
+                        : await activeSupabase.from('blocked_slots').insert([payload]);
+                      if (error) return { error: error.message };
+                      await notifyCalendarChanged();
+                      return { detail: oooData.date };
+                    },
+                  });
+                }} className="w-full sm:flex-1 bg-red-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-red-700 disabled:opacity-50">
+                  {isSavingAppointment
+                    ? L.p.common.working
+                    : oooData.id
+                      ? (locale === 'en' ? 'Save changes' : 'Guardar cambios')
+                      : (locale === 'en' ? 'Apply block' : 'Aplicar Bloqueo')}
+                </button>
+              </div>
             </div>
           </div>
         </div>

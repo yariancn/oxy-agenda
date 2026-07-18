@@ -349,23 +349,23 @@ export default function PatientProfileModal({
           <div className="space-y-4">
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.fullName}</label>
-              <input disabled={formData.is_blocked && currentUserLevel > 1} type="text" value={formData.patient} onChange={(e) => handleChange('patient', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 font-black text-slate-800 uppercase outline-none text-sm disabled:opacity-50" />
+              <input type="text" value={formData.patient} onChange={(e) => handleChange('patient', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 font-black text-slate-800 uppercase outline-none text-sm disabled:opacity-50" />
             </div>
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.phone}</label>
-              <input disabled={formData.is_blocked && currentUserLevel > 1} type="tel" value={formData.phone} onChange={(e) => handleChange('phone', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold outline-none disabled:opacity-50" />
+              <input type="tel" value={formData.phone} onChange={(e) => handleChange('phone', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold outline-none disabled:opacity-50" />
             </div>
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.email}</label>
-              <input disabled={formData.is_blocked && currentUserLevel > 1} type="email" value={formData.email} onChange={(e) => handleChange('email', e.target.value)} placeholder="correo@ejemplo.com" className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold outline-none disabled:opacity-50" />
+              <input type="email" value={formData.email} onChange={(e) => handleChange('email', e.target.value)} placeholder="correo@ejemplo.com" className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold outline-none disabled:opacity-50" />
             </div>
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.receiptDob}</label>
-              <input disabled={formData.is_blocked && currentUserLevel > 1} type="date" value={formData.dob || ''} onChange={(e) => handleChange('dob', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold outline-none disabled:opacity-50" />
+              <input type="date" value={formData.dob || ''} onChange={(e) => handleChange('dob', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold outline-none disabled:opacity-50" />
             </div>
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">{t.clinicalProtocol}</label>
-              <select disabled={formData.is_blocked && currentUserLevel > 1} value={formData.protocol} onChange={(e) => handleChange('protocol', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold text-blue-700 uppercase outline-none disabled:opacity-50">
+              <select value={formData.protocol} onChange={(e) => handleChange('protocol', e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-bold text-blue-700 uppercase outline-none disabled:opacity-50">
                 <option value="Médico">Médico</option>
                 <option value="Wellness">Wellness</option>
                 <option value="InfraBaldan">InfraBaldan</option>
@@ -378,11 +378,11 @@ export default function PatientProfileModal({
               </div>
               <div className="flex flex-col sm:flex-row gap-3">
                 <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900 flex-1">
-                  <input disabled={formData.is_blocked && currentUserLevel > 1} type="checkbox" checked={formData.prefers_sms} onChange={(e) => handleChange('prefers_sms', e.target.checked)} className="w-4 h-4 shrink-0" />
+                  <input type="checkbox" checked={formData.prefers_sms} onChange={(e) => handleChange('prefers_sms', e.target.checked)} className="w-4 h-4 shrink-0" />
                   {t.receiveSms}
                 </label>
                 <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900 flex-1">
-                  <input disabled={formData.is_blocked && currentUserLevel > 1} type="checkbox" checked={formData.prefers_email} onChange={(e) => handleChange('prefers_email', e.target.checked)} className="w-4 h-4 shrink-0" />
+                  <input type="checkbox" checked={formData.prefers_email} onChange={(e) => handleChange('prefers_email', e.target.checked)} className="w-4 h-4 shrink-0" />
                   {t.receiveEmail}
                 </label>
               </div>
@@ -395,19 +395,24 @@ export default function PatientProfileModal({
             <p className="text-[8px] text-amber-600 mt-1 font-bold uppercase">{t.notesHint}</p>
           </div>
 
-          {currentUserLevel === 1 && (
-            <div className="bg-red-50 p-4 rounded-xl border border-red-200 flex items-center justify-between">
-              <div>
-                <label className="text-[10px] font-black uppercase text-red-800">{t.blockTitle}</label>
-                <p className="text-[8px] text-red-600 font-bold uppercase mt-1">{t.blockHint}</p>
-              </div>
-              <input type="checkbox" checked={formData.is_blocked} onChange={(e) => handleChange('is_blocked', e.target.checked)} className="w-5 h-5" />
+          <div className="bg-red-50 p-4 rounded-xl border border-red-200 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <label className="text-[10px] font-black uppercase text-red-800">{t.blockTitle}</label>
+              <p className="text-[8px] text-red-600 font-bold uppercase mt-1 leading-snug">{t.blockHint}</p>
             </div>
-          )}
+            <input
+              type="checkbox"
+              checked={formData.is_blocked}
+              onChange={(e) => handleChange('is_blocked', e.target.checked)}
+              className="w-5 h-5 shrink-0"
+              aria-label={t.blockTitle}
+            />
+          </div>
 
-          {formData.is_blocked && currentUserLevel > 1 && (
+          {formData.is_blocked && (
             <div className="bg-red-600 p-4 rounded-xl text-white text-center">
               <span className="text-xs font-black uppercase">{t.profileBlocked}</span>
+              <p className="text-[9px] font-bold mt-1 normal-case opacity-95">{t.blockedScheduleHint}</p>
             </div>
           )}
 
