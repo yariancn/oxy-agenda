@@ -18,6 +18,20 @@ const nextConfig = {
       permanent: true,
     }));
   },
+  async headers() {
+    return [
+      {
+        source: '/booking/:path*',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value:
+              "frame-ancestors 'self' https://oxyhyperbaric.com https://*.oxyhyperbaric.com https://oxyhyperbaric.marktr.co https://*.oxyhyperbaric.marktr.co",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

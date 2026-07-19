@@ -8,6 +8,7 @@ import { PUBLIC_BOOKING_COPY, PUBLIC_SLOT_STATUS } from '../lib/i18n';
 import {
   getPromoFromUrl,
   getServiceFromUrl,
+  matchServiceFromList,
   normalizePromoCode,
   resolvePromoter,
 } from '../lib/promoters';
@@ -38,10 +39,19 @@ export default function PublicBookingPortal({
 }) {
   const t = PUBLIC_BOOKING_COPY[locale] || PUBLIC_BOOKING_COPY.es;
   const legalLinks = getLegalLinks(clinicName);
+  const [isEmbed, setIsEmbed] = useState(false);
 
   useEffect(() => {
     document.documentElement.lang = locale === 'en' ? 'en' : 'es';
   }, [locale]);
+
+  useEffect(() => {
+    try {
+      setIsEmbed(new URLSearchParams(window.location.search).get('embed') === '1');
+    } catch {
+      setIsEmbed(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (clinicName !== 'Shenandoah') return undefined;
@@ -221,9 +231,7 @@ export default function PublicBookingPortal({
     if (serviceFromLinkApplied.current || !dbServices.length || isLoading) return;
     const serviceName = getServiceFromUrl();
     if (!serviceName) return;
-    const match = dbServices.find(
-      (s) => String(s.name || '').toLowerCase() === serviceName.toLowerCase(),
-    );
+    const match = matchServiceFromList(dbServices, serviceName);
     if (match) {
       serviceFromLinkApplied.current = true;
       setSelectedService(match);
@@ -389,6 +397,36 @@ export default function PublicBookingPortal({
       funnelBookedRef.current = true;
       try { sessionStorage.removeItem('oxy_funnel_pending'); } catch { /* ignore */ }
 
+      try {
+        await fetch('/api/public/funnel-lead-booked', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: (formData.email || result.patient?.email || '').trim(),
+            phone: result.patient?.phone || formData.phone || '',
+          }),
+        });
+      } catch {
+        /* non-blocking */
+      }
+
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(
+            {
+              type: 'oxy_funnel_booked',
+              source: 'oxy-agenda',
+              date: selectedDate,
+              time: selectedTime,
+              equipment: selectedService?.name || '',
+            },
+            '*',
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+
       setStep(4);
     } catch (error) {
       alert(error.message || t.genericError);
@@ -434,8 +472,8 @@ export default function PublicBookingPortal({
   ) : null;
 
   return (
-    <div className="min-h-screen bg-slate-100 font-sans text-slate-900 flex flex-col">
-      {activePromoter.code && (
+    <div className={`${isEmbed ? 'min-h-0 bg-transparent' : 'min-h-screen bg-slate-100'} font-sans text-slate-900 flex flex-col`}>
+      {activePromoter.code && !isEmbed && (
         <div className="bg-gradient-to-r from-amber-500 via-amber-500 to-orange-600 text-white px-4 py-4 shadow-md">
           <p className="text-[10px] font-black uppercase tracking-widest text-amber-100">
             {t.promoterPageLabel}
@@ -453,16 +491,24 @@ export default function PublicBookingPortal({
         </div>
       )}
 
-      <header className="bg-slate-900 text-white p-4 flex items-center justify-between shadow-lg gap-2">
+      <header className={`bg-slate-900 text-white p-4 flex items-center justify-between shadow-lg gap-2 ${isEmbed ? 'rounded-t-2xl' : ''}`}>
         <div className="flex items-center gap-3 min-w-0">
-          <img
-            src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg"
-            className="h-10 w-auto bg-white rounded p-1 shrink-0"
-            alt=""
-          />
+          {!isEmbed && (
+            <img
+              src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg"
+              className="h-10 w-auto bg-white rounded p-1 shrink-0"
+              alt=""
+            />
+          )}
           <div className="min-w-0">
-            <h1 className="text-sm font-black uppercase tracking-widest truncate">{branding.title}</h1>
-            <p className={`text-[9px] font-bold uppercase ${accentText}`}>{branding.subtitle}</p>
+            <h1 className="text-sm font-black uppercase tracking-widest truncate">
+              {isEmbed ? (locale === 'en' ? 'Pick your time' : 'Elige tu horario') : branding.title}
+            </h1>
+            <p className={`text-[9px] font-bold uppercase ${accentText}`}>
+              {isEmbed
+                ? (locale === 'en' ? 'Available openings · book here' : 'Espacios disponibles · reserva aquí')
+                : branding.subtitle}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -478,8 +524,8 @@ export default function PublicBookingPortal({
         </div>
       </header>
 
-      <main className="flex-1 p-4 md:p-8 flex justify-center">
-        <div className="max-w-2xl w-full bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden h-fit">
+      <main className={`flex-1 p-4 md:p-8 flex justify-center ${isEmbed ? 'p-3 md:p-4 bg-transparent' : ''}`}>
+        <div className={`max-w-2xl w-full bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden h-fit ${isEmbed ? 'shadow-md rounded-2xl' : ''}`}>
           {isLoading && step < 4 && (
             <p className="p-8 text-center text-sm font-bold text-slate-400 uppercase">{t.loading}</p>
           )}
@@ -772,7 +818,7 @@ export default function PublicBookingPortal({
         </div>
       </main>
 
-      {locale === 'en' && (
+      {locale === 'en' && !isEmbed && (
         <footer className="border-t border-slate-200 bg-white px-4 py-6 text-center text-[10px] font-semibold text-slate-500 leading-relaxed max-w-2xl mx-auto w-full">
           <p className="font-black uppercase text-slate-700 tracking-wide">
             REGENOXY LLC d/b/a OxyHyperbaric · Shenandoah, TX
