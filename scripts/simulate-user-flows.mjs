@@ -5,7 +5,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { resolvePatientForAppointment } from '../lib/ensurePatient.js';
+import { resolvePatientForAppointment, chooseDuplicatePhoneAction } from '../lib/ensurePatient.js';
 import { mergeStaffAlertRecipients } from '../lib/staffBookingAlert.js';
 import {
   isSystemImportNote,
@@ -501,6 +501,45 @@ test('mensajes: preferencias del paciente mandan sobre canales por aviso', () =>
   });
   assert.equal(smsOnlyPatient.sendEmail, false);
   assert.equal(smsOnlyPatient.sendSms, true);
+});
+
+test('expediente: mismo teléfono con nombre distinto se detecta', () => {
+  const patients = [
+    { id: 1, patient: 'CLAUDIA MAYRA VARGAS MARTÍNEZ', phone: '7135551212' },
+  ];
+  const linked = resolvePatientForAppointment(
+    { patient: 'Claudia Vargas', phone: '7135551212' },
+    patients,
+  );
+  assert.equal(linked?.id, 1);
+  assert.equal(linked?.patient, 'CLAUDIA MAYRA VARGAS MARTÍNEZ');
+});
+
+test('expediente: mensajes de teléfono duplicado existen', () => {
+  const orig = globalThis.window;
+  let calls = 0;
+  globalThis.window = {
+    confirm: () => {
+      calls += 1;
+      return calls === 1; // use_existing
+    },
+  };
+  try {
+    assert.equal(chooseDuplicatePhoneAction({
+      existingName: 'CLAUDIA MAYRA VARGAS MARTÍNEZ',
+      typedName: 'Claudia Vargas',
+      locale: 'es',
+    }), 'use_existing');
+    calls = 0;
+    globalThis.window = { confirm: () => { calls += 1; return calls === 2; } };
+    assert.equal(chooseDuplicatePhoneAction({
+      existingName: 'CLAUDIA MAYRA VARGAS MARTÍNEZ',
+      typedName: 'Claudia Vargas',
+      locale: 'es',
+    }), 'create_new');
+  } finally {
+    globalThis.window = orig;
+  }
 });
 
 test('mensajes: primera cita siempre correo + SMS', () => {

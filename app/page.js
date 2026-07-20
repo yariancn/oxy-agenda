@@ -27,6 +27,7 @@ import {
   CLINIC_SELECTOR_ORDER,
 } from '../lib/clinicRegistry';
 import {
+  chooseDuplicatePhoneAction,
   ensurePatient,
   digitsOnly,
   resolvePatientForAppointment,
@@ -921,24 +922,58 @@ export default function AppLayout() {
 
   // --- MOTOR INTELIGENTE AUTO-ADAPTABLE (TX / GDL) ---
   const savePatientToDB = async (db, pData) => {
+    const last10 = digitsOnly(pData.phone).slice(-10);
+    const existingByPhone = last10.length === 10
+      ? dbPatients.find((p) => digitsOnly(p.phone).slice(-10) === last10)
+      : null;
+
+    let forceCreate = false;
+    let namePolicy = 'prefer_incoming';
+    let nameForSave = pData.name;
+
+    if (existingByPhone) {
+      const action = chooseDuplicatePhoneAction({
+        existingName: existingByPhone.patient,
+        typedName: pData.name,
+        locale,
+      });
+      if (action === 'abort') {
+        return { error: { message: 'CANCELADO' }, cancelled: true };
+      }
+      if (action === 'use_existing') {
+        forceCreate = false;
+        namePolicy = 'keep_existing';
+        nameForSave = existingByPhone.patient;
+      } else {
+        forceCreate = true;
+        namePolicy = 'prefer_incoming';
+      }
+    }
+
     const result = await ensurePatient(db, {
-      name: pData.name,
+      name: nameForSave,
       phone: pData.phone,
       email: pData.email,
       protocol: pData.protocol,
       notes: pData.notes,
       prefers_email: pData.prefers_email,
       prefers_sms: pData.prefers_sms,
+      namePolicy,
+      forceCreate,
     });
     if (result.error) {
-      const last10 = digitsOnly(pData.phone).slice(-10);
       const duplicateInMemory = dbPatients.some(
         (p) => digitsOnly(p.phone).slice(-10) === last10 && last10.length === 10
       );
-      if (duplicateInMemory) return { error: { message: 'CLON_DETECTADO' } };
+      if (duplicateInMemory && !forceCreate) return { error: { message: 'CLON_DETECTADO' } };
       return { error: result.error };
     }
-    return { data: [{ id: result.id }], error: null };
+    return {
+      data: [{ id: result.id, patient: result.displayName }],
+      error: null,
+      linkedExisting: result.linkedExisting,
+      forceCreated: result.forceCreated,
+    };
   };
 
   const persistPatientContactFromSlot = async (slot) => {
@@ -3891,7 +3926,43 @@ export default function AppLayout() {
       let isNewForAppointment = !!(slot.is_new_patient || newPatientForSlot);
 
       const phoneDigits = digitsOnly(canonicalPhone).slice(-10);
+      let namePolicy = 'keep_existing';
+      let forceCreate = false;
       if (phoneDigits.length === 10) {
+        const existingByPhone = dbPatients.find(
+          (p) => digitsOnly(p.phone).slice(-10) === phoneDigits,
+        );
+        const alreadySelected = existingByPhone
+          && slot.patientId
+          && String(slot.patientId) === String(existingByPhone.id);
+
+        if (existingByPhone && !alreadySelected) {
+          const action = chooseDuplicatePhoneAction({
+            existingName: existingByPhone.patient,
+            typedName: canonicalPatient,
+            locale,
+          });
+          if (action === 'abort') {
+            setAppointmentSaveFeedback({
+              phase: 'idle',
+              title: '',
+              detail: '',
+              closeForm: false,
+            });
+            return;
+          }
+          if (action === 'use_existing') {
+            forceCreate = false;
+            namePolicy = 'keep_existing';
+            canonicalPatient = existingByPhone.patient;
+          } else {
+            forceCreate = true;
+            namePolicy = 'prefer_incoming';
+          }
+        } else if (alreadySelected) {
+          namePolicy = 'keep_existing';
+        }
+
         const ensured = await ensurePatient(activeSupabase, {
           name: canonicalPatient,
           phone: canonicalPhone,
@@ -3900,6 +3971,8 @@ export default function AppLayout() {
           notes: slot.patientNotes || '',
           prefers_email: slot.prefers_email !== false,
           prefers_sms: slot.prefers_sms !== false,
+          namePolicy,
+          forceCreate,
         });
         if (ensured.error) {
           setAppointmentSaveFeedback({
@@ -3915,7 +3988,7 @@ export default function AppLayout() {
         canonicalPatient = ensured.displayName;
         canonicalPhone = ensured.phone;
         canonicalEmail = ensured.email;
-        if (ensured.isNew) isNewForAppointment = true;
+        if (ensured.isNew || ensured.forceCreated) isNewForAppointment = true;
       } else if (newPatientForSlot && !slot.id) {
         setAppointmentSaveFeedback({
           phase: 'error',
@@ -7504,6 +7577,25 @@ export default function AppLayout() {
                     </p>
                   </div>
                 ) : null}
+              {(() => {
+                const last10 = digitsOnly(selectedSlot?.phone).slice(-10);
+                if (last10.length !== 10) return null;
+                const existing = dbPatients.find((p) => digitsOnly(p.phone).slice(-10) === last10);
+                if (!existing) return null;
+                if (normalizeStr(existing.patient) === normalizeStr(selectedSlot?.patient)) return null;
+                return (
+                  <div className="rounded-xl border-2 border-amber-400 bg-amber-50 px-3 py-2.5">
+                    <p className="text-[10px] font-black uppercase text-amber-950">
+                      {locale === 'en' ? 'Phone already registered' : 'Teléfono ya registrado'}
+                    </p>
+                    <p className="text-[9px] font-bold text-amber-900 mt-1 normal-case leading-snug">
+                      {locale === 'en'
+                        ? `«${existing.patient}» already has this number. On save you’ll choose: use that patient, or register another with the same phone.`
+                        : `Ya tenemos a «${existing.patient}» con este número. Al guardar podrás: usar ese paciente, o dar de alta a otro con el mismo teléfono.`}
+                    </p>
+                  </div>
+                );
+              })()}
               {!selectedSlot?.patient?.trim() && (
                 <p className="text-[10px] font-bold uppercase text-slate-500">{L.p.appt.pickPatientHint}</p>
               )}
@@ -7822,7 +7914,7 @@ export default function AppLayout() {
                     setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true });
                   },
                   action: async () => {
-                    const { error } = await savePatientToDB(activeSupabase, {
+                    const result = await savePatientToDB(activeSupabase, {
                       name: trimmedName,
                       phone: newPatientData.phone.trim(),
                       email: newPatientData.email.trim(),
@@ -7831,10 +7923,13 @@ export default function AppLayout() {
                       prefers_email: newPatientData.prefers_email,
                       prefers_sms: newPatientData.prefers_sms,
                     });
-                    if (error && error.message === 'CLON_DETECTADO') return { error: a('cloneDetected') };
-                    if (error) return { error: a('saveClientError', error.message) };
+                    if (result.cancelled || result.error?.message === 'CANCELADO') {
+                      return { cancelled: true };
+                    }
+                    if (result.error && result.error.message === 'CLON_DETECTADO') return { error: a('cloneDetected') };
+                    if (result.error) return { error: a('saveClientError', result.error.message) };
                     await fetchAllData({ silent: true });
-                    return { detail: trimmedName };
+                    return { detail: result.data?.[0]?.patient || trimmedName };
                   },
                 });
               }} className="w-full sm:w-1/2 bg-white border border-slate-300 text-slate-700 font-black py-3 sm:py-4 rounded-xl uppercase text-[10px] shadow-sm hover:bg-slate-50 disabled:opacity-50">{isSavingAppointment ? L.p.common.working : 'Solo Guardar'}</button>
@@ -7851,22 +7946,11 @@ export default function AppLayout() {
                   autoCloseMs: 900,
                   onDone: () => {
                     setShowNewPatientModal(false);
-                    setSelectedSlot({
-                      patient: trimmedName,
-                      phone: newPatientData.phone.trim(),
-                      email: newPatientData.email.trim(),
-                      protocol: newPatientData.protocol,
-                      patientNotes: newPatientData.notes,
-                      prefers_email: newPatientData.prefers_email,
-                      prefers_sms: newPatientData.prefers_sms,
-                      status: 'available',
-                      is_new_patient: true,
-                    });
                     setShowNewAppointment(true);
                     setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true });
                   },
                   action: async () => {
-                    const { error } = await savePatientToDB(activeSupabase, {
+                    const result = await savePatientToDB(activeSupabase, {
                       name: trimmedName,
                       phone: newPatientData.phone.trim(),
                       email: newPatientData.email.trim(),
@@ -7875,10 +7959,26 @@ export default function AppLayout() {
                       prefers_email: newPatientData.prefers_email,
                       prefers_sms: newPatientData.prefers_sms,
                     });
-                    if (error && error.message === 'CLON_DETECTADO') return { error: a('cloneDetected') };
-                    if (error) return { error: a('saveClientError', error.message) };
+                    if (result.cancelled || result.error?.message === 'CANCELADO') {
+                      return { cancelled: true };
+                    }
+                    if (result.error && result.error.message === 'CLON_DETECTADO') return { error: a('cloneDetected') };
+                    if (result.error) return { error: a('saveClientError', result.error.message) };
+                    const savedName = result.data?.[0]?.patient || trimmedName;
+                    setSelectedSlot({
+                      patient: savedName,
+                      patientId: result.data?.[0]?.id || null,
+                      phone: newPatientData.phone.trim(),
+                      email: newPatientData.email.trim(),
+                      protocol: newPatientData.protocol,
+                      patientNotes: newPatientData.notes,
+                      prefers_email: newPatientData.prefers_email,
+                      prefers_sms: newPatientData.prefers_sms,
+                      status: 'available',
+                      is_new_patient: !result.linkedExisting,
+                    });
                     await fetchAllData({ silent: true });
-                    return { detail: trimmedName };
+                    return { detail: savedName };
                   },
                 });
               }} className="w-full sm:w-1/2 bg-emerald-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-[10px] shadow-lg hover:bg-emerald-700 disabled:opacity-50">{isSavingAppointment ? L.p.common.working : 'Guardar y Agendar'}</button>
