@@ -22,7 +22,7 @@ import {
   getSessionInstructionsLabel,
   getSessionInstructionsUrl,
   isAutoNotifyEnabled,
-  resolveNotifyChannels,
+  resolveNotifyChannelsForPatient,
   resolveSessionInstructions,
 } from '../lib/notifySettings';
 import { notifyStaffNewBooking } from '../lib/staffBookingAlert';
@@ -331,6 +331,15 @@ export default function PublicBookingPortal({
 
       if (isAutoNotifyEnabled(dbConfig || {}, notifyType)) {
         try {
+          const patientNotifyPrefs = {
+            prefers_email: true,
+            prefers_sms: locale !== 'en' || formData.smsConsent === true,
+          };
+          const notifyChannels = resolveNotifyChannelsForPatient(
+            dbConfig || {},
+            notifyType,
+            patientNotifyPrefs,
+          );
           const notifyData = await sendAppointmentNotification({
             patientName: result.patient.displayName,
             phone: result.patient.phone,
@@ -359,9 +368,10 @@ export default function PublicBookingPortal({
             emailTemplates: dbConfig || {},
             appointmentId: result.appointment?.id || '',
             cancelLimitHours: Number(dbConfig?.cancel_limit_hours) || 24,
-            sendEmail: resolveNotifyChannels(dbConfig || {}, notifyType).sendEmail,
-            sendSms: resolveNotifyChannels(dbConfig || {}, notifyType).sendSms
-              && (locale !== 'en' || formData.smsConsent === true),
+            sendEmail: notifyChannels.sendEmail,
+            sendSms: notifyChannels.sendSms,
+            prefers_email: patientNotifyPrefs.prefers_email,
+            prefers_sms: patientNotifyPrefs.prefers_sms,
           });
           if (notifyHadFailure(notifyData.report)) {
             console.warn('Booking notify partial failure', notifyData.report);

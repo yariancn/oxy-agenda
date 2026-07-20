@@ -165,6 +165,7 @@ import {
   isAutoNotifyEnabled,
   NOTIFY_SETTING_FIELDS,
   resolveNotifyChannels,
+  resolveNotifyChannelsForPatient,
   resolveSessionInstructions,
 } from '../lib/notifySettings';
 import {
@@ -180,6 +181,10 @@ import {
   confirmationStatusLabel,
   explainConfirmationState,
 } from '../lib/appointmentConfirmation';
+import {
+  CANCEL_REQUEST_STATUS,
+  isCancelRequestPending,
+} from '../lib/appointmentManage';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -350,10 +355,11 @@ export default function AppLayout() {
   // --- REPORTES Y SEGURIDAD ---
   const [isReportsUnlocked, setIsReportsUnlocked] = useState(false);
   const [pinInput, setPinInput] = useState('');
-  const [reportFilter, setReportFilter] = useState('Día');
+  const [reportFilter, setReportFilter] = useState('Citas');
   const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0]);
   const [reportStartDate, setReportStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [reportEndDate, setReportEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [reportIncludeCancelled, setReportIncludeCancelled] = useState(false);
   const [selectedPatientReport, setSelectedPatientReport] = useState('');
   const [reportReceipt, setReportReceipt] = useState(null);
   const [reportReceiptPhone, setReportReceiptPhone] = useState('');
@@ -398,8 +404,8 @@ export default function AppLayout() {
       id: 'first',
       title: locale === 'en' ? '1. First visit' : '1. Primera visita',
       when: locale === 'en'
-        ? 'Sent when a new patient books (first time at the clinic).'
-        : 'Se envía cuando un paciente nuevo agenda (primera vez en la clínica).',
+        ? 'Sent when a new patient books (first time at the clinic). Always email + SMS.'
+        : 'Se envía cuando un paciente nuevo agenda (primera vez en la clínica). Siempre correo + SMS.',
       autoKey: 'notify_auto_first',
       defaultOn: true,
     },
@@ -2749,17 +2755,21 @@ export default function AppLayout() {
       return reportResult ? { skipped: true, reason } : null;
     }
 
-    const { sendEmail, sendSms } = resolveNotifyChannels(dbCompanyConfig, notifyType);
+    const prefersEmail = contact.prefers_email;
+    const prefersSms = contact.prefers_sms;
+    // Patient prefs dominate Admin → Messages per-event Correo/SMS.
+    const { sendEmail, sendSms } = resolveNotifyChannelsForPatient(dbCompanyConfig, notifyType, {
+      prefers_email: prefersEmail,
+      prefers_sms: prefersSms,
+    });
     if (!sendEmail && !sendSms) {
       const reason = locale === 'en'
-        ? 'Email and SMS are both off for this notice in Admin → Messages.'
-        : 'Correo y SMS están apagados para este aviso en Admin → Mensajes.';
+        ? 'Patient opted out of SMS and email (or clinic-wide channels are off).'
+        : 'El paciente desactivó SMS y correo (o los canales de clínica están apagados).';
       if (showSuccess) alert(reason);
       return reportResult ? { skipped: true, reason } : null;
     }
 
-    const prefersEmail = contact.prefers_email;
-    const prefersSms = contact.prefers_sms;
     if (!isManual && !forceNotify && prefersEmail === false && prefersSms === false) {
       const reason = locale === 'en'
         ? 'Patient opted out of SMS and email.'
@@ -2791,8 +2801,8 @@ export default function AppLayout() {
         locale,
         durationMins: resolveSessionTimes(slot).duration,
         bufferMins: resolveSessionTimes(slot).buffer,
-        prefers_email: prefersEmail,
-        prefers_sms: prefersSms,
+        prefers_email: sendEmail,
+        prefers_sms: sendSms,
         notifyEnabled: true,
         notifyType,
         emailTemplates: pickEmailTemplates(),
@@ -2938,6 +2948,7 @@ export default function AppLayout() {
     if (status === 'En Sesión') { badgeClass = 'bg-emerald-200 text-emerald-900'; icon = '🟢'; }
     if (status === 'Finalizado') { badgeClass = 'bg-slate-300 text-slate-700'; icon = '✔️'; }
     if (status === 'No Asistió' || status === 'Cancelado') { badgeClass = 'bg-red-200 text-red-900'; icon = '❌'; }
+    if (status === 'Pendiente cancelación') { badgeClass = 'bg-amber-200 text-amber-950'; icon = '⏳'; }
     if (status === 'Falta Justificada') { badgeClass = 'bg-orange-200 text-orange-900'; icon = '📋'; }
     if (status === 'Devuelto') { badgeClass = 'bg-purple-200 text-purple-900'; icon = '↩️'; }
     return (
@@ -3031,7 +3042,7 @@ export default function AppLayout() {
     }
   };
 
-  const canRescheduleAppointment = selectedSlot?.id && !['Finalizado', 'Devuelto', 'No Asistió', 'Falta Justificada'].includes(selectedSlot.check_in_status);
+  const canRescheduleAppointment = selectedSlot?.id && !['Finalizado', 'Devuelto', 'No Asistió', 'Falta Justificada', CANCEL_REQUEST_STATUS].includes(selectedSlot.check_in_status);
 
   const tryRequestMove = (app, newTime, newEquipment, newDay, newFullDate, options = {}) => {
     // La cita original SIEMPRE proviene de la base de datos; `app` puede venir
@@ -3425,6 +3436,62 @@ export default function AppLayout() {
     });
   };
 
+  const handleApproveCancelRequest = async () => {
+    if (!selectedSlot?.id || !activeSupabase || !isCancelRequestPending(selectedSlot.check_in_status)) return;
+    const app = selectedSlot;
+    await runBusyAction({
+      workingTitle: L.p.common.cancellingTitle,
+      workingDetail: L.p.common.cancellingHint,
+      successTitle: L.p.common.cancelledOk,
+      autoCloseMs: 1200,
+      onDone: () => closeAppointmentPanel(),
+      action: async () => {
+        const stamp = new Date().toLocaleString();
+        const detail = `Cancelación online aprobada por ${currentUser?.name || 'staff'}.`;
+        const note = `[APROBADA ${stamp}] ${detail}`;
+        const newNotes = app.notes ? `${app.notes}\n${note}` : note;
+        const { error } = await activeSupabase.from('appointments').update({
+          check_in_status: 'Cancelado',
+          notes: newNotes,
+        }).eq('id', app.id);
+        if (error) return { error: error.message };
+        await logAudit(app.id, app.patient, 'CANCELACIÓN APROBADA', detail);
+        await notifyPatientFromSlot(app, { notifyReason: 'cancel' });
+        pushGoogleCalendarSync(app.id, 'delete');
+        await notifyCalendarChanged();
+        return { detail: app.patient };
+      },
+    });
+  };
+
+  const handleRejectCancelRequest = async () => {
+    if (!selectedSlot?.id || !activeSupabase || !isCancelRequestPending(selectedSlot.check_in_status)) return;
+    const app = selectedSlot;
+    await runBusyAction({
+      workingTitle: locale === 'en' ? 'Keeping appointment…' : 'Manteniendo cita…',
+      workingDetail: locale === 'en' ? 'Rejecting cancel request' : 'Rechazando solicitud',
+      successTitle: locale === 'en' ? 'Appointment kept' : 'Cita conservada',
+      autoCloseMs: 1200,
+      action: async () => {
+        const stamp = new Date().toLocaleString();
+        const detail = `Solicitud de cancelación rechazada por ${currentUser?.name || 'staff'}.`;
+        const note = `[RECHAZADA ${stamp}] ${detail}`;
+        const newNotes = app.notes ? `${app.notes}\n${note}` : note;
+        const { error } = await activeSupabase.from('appointments').update({
+          check_in_status: 'Agendado',
+          notes: newNotes,
+        }).eq('id', app.id);
+        if (error) return { error: error.message };
+        await logAudit(app.id, app.patient, 'CANCELACIÓN RECHAZADA', detail);
+        setSelectedSlot((prev) => (prev && prev.id === app.id
+          ? { ...prev, check_in_status: 'Agendado', notes: newNotes }
+          : prev));
+        await notifyCalendarChanged();
+        return { detail: app.patient };
+      },
+    });
+  };
+
   // --- MOTOR DE IMPRESIÓN CON IFRAME (Anti-bloqueo) ---
   const printHTML = (htmlContent, title) => {
     const iframe = document.createElement('iframe');
@@ -3448,6 +3515,108 @@ export default function AppLayout() {
         document.body.removeChild(iframe);
       }, 1000);
     }, 500);
+  };
+
+  const shiftReportIsoDate = (iso, days) => {
+    const [y, m, d] = String(iso || '').split('-').map(Number);
+    if (![y, m, d].every(Number.isFinite)) return iso;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() + days);
+    return dt.toISOString().slice(0, 10);
+  };
+
+  const reportAppointments = useMemo(() => {
+    const start = reportStartDate <= reportEndDate ? reportStartDate : reportEndDate;
+    const end = reportStartDate <= reportEndDate ? reportEndDate : reportStartDate;
+    return (dbAppointments || [])
+      .filter((a) => {
+        const d = a.full_date || '';
+        if (!d || d < start || d > end) return false;
+        if (!reportIncludeCancelled && a.check_in_status === 'Cancelado') return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const byDate = String(a.full_date || '').localeCompare(String(b.full_date || ''));
+        if (byDate !== 0) return byDate;
+        return getMinutes(a.time) - getMinutes(b.time);
+      });
+  }, [dbAppointments, reportStartDate, reportEndDate, reportIncludeCancelled]);
+
+  const reportApptStats = useMemo(() => {
+    const stats = {
+      total: reportAppointments.length,
+      scheduled: 0,
+      done: 0,
+      cancelled: 0,
+      noShow: 0,
+      pendingCancel: 0,
+    };
+    for (const a of reportAppointments) {
+      const s = a.check_in_status || 'Agendado';
+      if (s === 'Finalizado') stats.done += 1;
+      else if (s === 'Cancelado') stats.cancelled += 1;
+      else if (s === 'No Asistió') stats.noShow += 1;
+      else if (s === 'Pendiente cancelación') stats.pendingCancel += 1;
+      else if (!['Devuelto', 'Falta Justificada'].includes(s)) stats.scheduled += 1;
+    }
+    return stats;
+  }, [reportAppointments]);
+
+  const setReportApptRangePreset = (preset) => {
+    const today = clinicNow.dateStr || formatClinicDateIso(new Date(), activeClinic);
+    if (preset === 'today') {
+      setReportStartDate(today);
+      setReportEndDate(today);
+      setReportDate(today);
+      return;
+    }
+    if (preset === 'next7') {
+      setReportStartDate(today);
+      setReportEndDate(shiftReportIsoDate(today, 7));
+      return;
+    }
+    if (preset === 'prev7') {
+      setReportStartDate(shiftReportIsoDate(today, -7));
+      setReportEndDate(today);
+    }
+  };
+
+  const printAppointmentsReport = () => {
+    const R = L.p.reports;
+    const start = reportStartDate <= reportEndDate ? reportStartDate : reportEndDate;
+    const end = reportStartDate <= reportEndDate ? reportEndDate : reportStartDate;
+    const rows = reportAppointments.map((a) => `
+      <tr>
+        <td style="border:1px solid #cbd5e1;padding:6px;font-size:11px;">${a.full_date || ''}</td>
+        <td style="border:1px solid #cbd5e1;padding:6px;font-size:11px;">${a.time || ''}<br/><span style="color:#2563eb;font-size:10px;">${a.equipment || ''}</span></td>
+        <td style="border:1px solid #cbd5e1;padding:6px;font-size:11px;text-transform:uppercase;">${a.patient || ''}</td>
+        <td style="border:1px solid #cbd5e1;padding:6px;font-size:11px;">${a.phone || '—'}</td>
+        <td style="border:1px solid #cbd5e1;padding:6px;font-size:11px;">${a.attendant || 'N/A'}</td>
+        <td style="border:1px solid #cbd5e1;padding:6px;font-size:11px;">${translateCheckInStatus(locale, a.check_in_status || 'Agendado')}</td>
+      </tr>
+    `).join('');
+    const html = `
+      <div style="padding:32px;font-family:sans-serif;color:#0f172a;">
+        <h1 style="margin:0 0 4px;font-size:20px;text-transform:uppercase;">${formatClinicField(dbCompanyConfig.name) || 'Oxygen'}</h1>
+        <p style="margin:0 0 16px;font-size:12px;font-weight:700;text-transform:uppercase;color:#64748b;">
+          ${R.apptsTitle} · ${start} → ${end} · ${reportApptStats.total} ${R.apptsTotal.toLowerCase()}
+        </p>
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="background:#f1f5f9;text-align:left;font-size:10px;text-transform:uppercase;">
+              <th style="border:1px solid #cbd5e1;padding:6px;">${R.apptsColDate}</th>
+              <th style="border:1px solid #cbd5e1;padding:6px;">${R.apptsColTime}</th>
+              <th style="border:1px solid #cbd5e1;padding:6px;">${R.apptsColPatient}</th>
+              <th style="border:1px solid #cbd5e1;padding:6px;">${R.apptsColPhone}</th>
+              <th style="border:1px solid #cbd5e1;padding:6px;">${R.apptsColAttendant}</th>
+              <th style="border:1px solid #cbd5e1;padding:6px;">${R.apptsColStatus}</th>
+            </tr>
+          </thead>
+          <tbody>${rows || `<tr><td colspan="6" style="padding:16px;text-align:center;">${R.noApptsDate}</td></tr>`}</tbody>
+        </table>
+      </div>
+    `;
+    printHTML(html, R.apptsTitle);
   };
 
   const printPatientBitacora = (patientName) => {
@@ -5078,31 +5247,124 @@ export default function AppLayout() {
         {activeTab === 'Reportes' && currentUserLevel <= 2 && (
           <StaffTabErrorBoundary locale={locale} onGoAgenda={() => selectTab('Agenda')}>
           <div className={`${STAFF_TAB_PANEL} bg-white relative`}>
-            <div className="flex justify-between items-end mb-6 border-b border-slate-200 pb-4">
-              <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Centro de Reportes</h2>
-              <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
-                {['Día', 'Paciente', 'Ventas', 'Caja Negra'].map(t => (
-                  <button key={t} onClick={() => setReportFilter(t)} className={`px-6 py-2 text-xs font-black uppercase rounded transition ${reportFilter === t ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>{t}</button>
+            <div className="flex justify-between items-end mb-6 border-b border-slate-200 pb-4 gap-3 flex-wrap">
+              <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">{L.p.reports.title}</h2>
+              <div className="flex flex-wrap bg-slate-100 p-1 rounded-lg border border-slate-200">
+                {[
+                  { id: 'Citas', label: L.p.reports.filterAppts },
+                  { id: 'Paciente', label: L.p.reports.filterPatient },
+                  { id: 'Ventas', label: L.p.reports.filterSales },
+                  { id: 'Caja Negra', label: L.p.reports.filterAudit },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setReportFilter(t.id)}
+                    className={`px-4 sm:px-6 py-2 text-xs font-black uppercase rounded transition ${reportFilter === t.id ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}
+                  >
+                    {t.label}
+                  </button>
                 ))}
               </div>
             </div>
             
-            {reportFilter === 'Día' && (
-              <div className="flex-1 flex flex-col">
-                <div className="mb-4"><input type="date" value={reportDate} onChange={e => setReportDate(e.target.value)} className="p-2.5 border border-slate-300 rounded-lg font-bold text-sm outline-none text-slate-900 bg-white" /></div>
-                <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 overflow-auto">
+            {(reportFilter === 'Citas' || reportFilter === 'Día') && (
+              <div className="flex-1 flex flex-col min-h-0">
+                <div className="mb-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                    <div className="min-w-0 flex-1">
+                      <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">{L.p.reports.apptsStart}</label>
+                      <input
+                        type="date"
+                        value={reportStartDate}
+                        onChange={(e) => {
+                          setReportStartDate(e.target.value);
+                          setReportDate(e.target.value);
+                        }}
+                        className="w-full p-2.5 border border-slate-300 rounded-lg font-bold text-sm outline-none text-slate-900 bg-white"
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">{L.p.reports.apptsEnd}</label>
+                      <input
+                        type="date"
+                        value={reportEndDate}
+                        onChange={(e) => setReportEndDate(e.target.value)}
+                        className="w-full p-2.5 border border-slate-300 rounded-lg font-bold text-sm outline-none text-slate-900 bg-white"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={printAppointmentsReport}
+                      className="bg-slate-900 text-white px-4 py-2.5 rounded-lg text-xs font-black uppercase hover:bg-slate-800 transition shrink-0"
+                    >
+                      {L.p.reports.apptsPrint}
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <button type="button" onClick={() => setReportApptRangePreset('today')} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200">{L.p.reports.apptsPresetToday}</button>
+                    <button type="button" onClick={() => setReportApptRangePreset('next7')} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200">{L.p.reports.apptsPresetNext7}</button>
+                    <button type="button" onClick={() => setReportApptRangePreset('prev7')} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200">{L.p.reports.apptsPresetPrev7}</button>
+                    <label className="flex items-center gap-2 ml-auto text-xs font-bold text-slate-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={reportIncludeCancelled}
+                        onChange={(e) => setReportIncludeCancelled(e.target.checked)}
+                        className="w-4 h-4"
+                      />
+                      {L.p.reports.apptsIncludeCancelled}
+                    </label>
+                  </div>
+                  <p className="text-xs text-slate-500">{L.p.reports.apptsHint}</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                    {[
+                      { label: L.p.reports.apptsTotal, value: reportApptStats.total, className: 'bg-slate-50 border-slate-200 text-slate-800' },
+                      { label: L.p.reports.apptsScheduled, value: reportApptStats.scheduled, className: 'bg-blue-50 border-blue-200 text-blue-800' },
+                      { label: L.p.reports.apptsDone, value: reportApptStats.done, className: 'bg-emerald-50 border-emerald-200 text-emerald-800' },
+                      { label: L.p.reports.apptsCancelled, value: reportApptStats.cancelled, className: 'bg-red-50 border-red-200 text-red-800' },
+                      { label: L.p.reports.apptsNoShow, value: reportApptStats.noShow, className: 'bg-orange-50 border-orange-200 text-orange-800' },
+                      { label: L.p.reports.apptsPendingCancel, value: reportApptStats.pendingCancel, className: 'bg-amber-50 border-amber-200 text-amber-900' },
+                    ].map((card) => (
+                      <div key={card.label} className={`rounded-xl border p-3 ${card.className}`}>
+                        <p className="text-[9px] font-black uppercase tracking-widest opacity-80">{card.label}</p>
+                        <p className="text-2xl font-black mt-1">{card.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 overflow-auto min-h-[280px]">
                   <table className="w-full text-left border-collapse bg-white">
-                    <thead><tr className="bg-slate-100 border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest"><th className="p-4">Hora / Equipo</th><th className="p-4">Paciente</th><th className="p-4">Atendido Por</th><th className="p-4 text-right">Estatus</th></tr></thead>
+                    <thead>
+                      <tr className="bg-slate-100 border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        <th className="p-4">{L.p.reports.apptsColDate}</th>
+                        <th className="p-4">{L.p.reports.apptsColTime}</th>
+                        <th className="p-4">{L.p.reports.apptsColPatient}</th>
+                        <th className="p-4 hidden md:table-cell">{L.p.reports.apptsColPhone}</th>
+                        <th className="p-4 hidden lg:table-cell">{L.p.reports.apptsColAttendant}</th>
+                        <th className="p-4 text-right">{L.p.reports.apptsColStatus}</th>
+                      </tr>
+                    </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {dbAppointments.filter(a => a.full_date === reportDate && a.check_in_status !== 'Cancelado').map(app => (
+                      {reportAppointments.map((app) => (
                         <tr key={app.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="p-4"><p className="text-xs font-black text-slate-800">{app.time}</p><p className="text-[9px] font-bold text-blue-600 uppercase">{app.equipment}</p></td>
+                          <td className="p-4 font-black text-slate-800 text-xs whitespace-nowrap">{app.full_date}</td>
+                          <td className="p-4">
+                            <p className="text-xs font-black text-slate-800">{app.time}</p>
+                            <p className="text-[9px] font-bold text-blue-600 uppercase">{app.equipment}</p>
+                          </td>
                           <td className="p-4 font-black text-slate-700 uppercase text-sm">{app.patient}</td>
-                          <td className="p-4 font-bold text-slate-600 text-xs">{app.attendant || 'N/A'}</td>
+                          <td className="p-4 hidden md:table-cell font-bold text-slate-600 text-xs">{app.phone || '—'}</td>
+                          <td className="p-4 hidden lg:table-cell font-bold text-slate-600 text-xs">{app.attendant || 'N/A'}</td>
                           <td className="p-4 text-right">{getStatusBadge(app.check_in_status)}</td>
                         </tr>
                       ))}
-                      {dbAppointments.filter(a => a.full_date === reportDate && a.check_in_status !== 'Cancelado').length === 0 && <tr><td colSpan="4" className="text-center p-8 text-slate-400 font-bold uppercase">Sin citas activas en esta fecha.</td></tr>}
+                      {reportAppointments.length === 0 && (
+                        <tr>
+                          <td colSpan="6" className="text-center p-8 text-slate-400 font-bold uppercase">
+                            {L.p.reports.noApptsDate}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -5337,8 +5599,8 @@ export default function AppLayout() {
                   </label>
                   <p className="text-xs text-slate-500">
                     {locale === 'en'
-                      ? 'Below you can also allow email/SMS clinic-wide. The real control is per message: each situation chooses Correo and/or SMS.'
-                      : 'Abajo puedes permitir correo/SMS a nivel clínica. El control fino es por aviso: cada situación elige Correo y/o SMS.'}
+                      ? 'Clinic-wide Allow email/SMS are hard stops. Per-situation Correo/SMS are defaults — patient prefs on the chart override them (e.g. SMS still goes out if the patient wants SMS).'
+                      : 'Permitir correo/SMS a nivel clínica son cortes duros. Correo/SMS por aviso son valores por defecto: las preferencias del paciente en la ficha mandan (ej. si quiere SMS, llega por SMS).'}
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-slate-200 cursor-pointer">
@@ -5369,16 +5631,17 @@ export default function AppLayout() {
                   </h4>
                   <p className="text-xs text-slate-500">
                     {locale === 'en'
-                      ? 'Turn each situation on/off, then choose Correo and/or SMS for that situation only.'
-                      : 'Enciende o apaga cada situación y elige Correo y/o SMS solo para esa situación.'}
+                      ? 'Turn each situation on/off. First visit always uses email + SMS. For the others, set defaults — patient prefs still win for that person.'
+                      : 'Enciende o apaga cada situación. Primera visita siempre va por correo + SMS. En las demás, elige defaults — las preferencias del paciente mandan.'}
                   </p>
                   <div className="space-y-3">
                     {messageTypeCards.map((card) => {
                       const on = isMessageTypeOn(card);
                       const emailKey = `notify_use_email_${card.id}`;
                       const smsKey = `notify_use_sms_${card.id}`;
-                      const useEmail = dbCompanyConfig[emailKey] !== false;
-                      const useSms = dbCompanyConfig[smsKey] !== false;
+                      const forceBothChannels = card.id === 'first';
+                      const useEmail = forceBothChannels ? true : dbCompanyConfig[emailKey] !== false;
+                      const useSms = forceBothChannels ? true : dbCompanyConfig[smsKey] !== false;
                       const channels = resolveNotifyChannels(dbCompanyConfig, card.id);
                       const editing = emailTemplateTab === card.id;
                       return (
@@ -5441,35 +5704,47 @@ export default function AppLayout() {
                           {on && (
                             <div className={`mt-3 pt-3 border-t ${on ? 'border-emerald-200' : 'border-slate-200'}`}>
                               <p className="text-xs font-bold text-slate-700 mb-2">
-                                {locale === 'en' ? 'Send this notice by:' : 'Enviar este aviso por:'}
+                                {forceBothChannels
+                                  ? (locale === 'en'
+                                    ? 'First visit always sends by email and SMS:'
+                                    : 'Primera visita siempre se envía por correo y SMS:')
+                                  : (locale === 'en' ? 'Send this notice by:' : 'Enviar este aviso por:')}
                               </p>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                <label className={`flex items-center gap-2 p-3 rounded-xl border cursor-pointer ${useEmail ? 'bg-white border-blue-300' : 'bg-slate-100 border-slate-200 opacity-70'}`}>
+                                <label className={`flex items-center gap-2 p-3 rounded-xl border ${forceBothChannels ? 'bg-white border-blue-300 opacity-90 cursor-default' : `cursor-pointer ${useEmail ? 'bg-white border-blue-300' : 'bg-slate-100 border-slate-200 opacity-70'}`}`}>
                                   <input
                                     type="checkbox"
                                     checked={useEmail}
+                                    disabled={forceBothChannels}
                                     onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [emailKey]: e.target.checked })}
                                     className="w-4 h-4 shrink-0"
                                   />
                                   <span className="text-sm font-bold text-slate-900">{locale === 'en' ? 'Email' : 'Correo'}</span>
                                 </label>
-                                <label className={`flex items-center gap-2 p-3 rounded-xl border cursor-pointer ${useSms ? 'bg-white border-violet-300' : 'bg-slate-100 border-slate-200 opacity-70'}`}>
+                                <label className={`flex items-center gap-2 p-3 rounded-xl border ${forceBothChannels ? 'bg-white border-violet-300 opacity-90 cursor-default' : `cursor-pointer ${useSms ? 'bg-white border-violet-300' : 'bg-slate-100 border-slate-200 opacity-70'}`}`}>
                                   <input
                                     type="checkbox"
                                     checked={useSms}
+                                    disabled={forceBothChannels}
                                     onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, [smsKey]: e.target.checked })}
                                     className="w-4 h-4 shrink-0"
                                   />
                                   <span className="text-sm font-bold text-slate-900">SMS</span>
                                 </label>
                               </div>
-                              {!channels.sendEmail && !channels.sendSms && (
+                              {forceBothChannels ? (
+                                <p className="mt-2 text-xs font-bold text-slate-600">
+                                  {locale === 'en'
+                                    ? 'Later notices follow Admin defaults and patient prefs.'
+                                    : 'Los avisos posteriores siguen Admin y las preferencias del paciente.'}
+                                </p>
+                              ) : !channels.sendEmail && !channels.sendSms ? (
                                 <p className="mt-2 text-xs font-bold text-amber-800">
                                   {locale === 'en'
                                     ? 'Pick at least email or SMS, or turn the notice off.'
                                     : 'Elige al menos correo o SMS, o apaga el aviso.'}
                                 </p>
-                              )}
+                              ) : null}
                             </div>
                           )}
 
@@ -5689,8 +5964,8 @@ export default function AppLayout() {
                   </h4>
                   <p className="text-xs text-indigo-900/90 leading-relaxed">
                     {locale === 'en'
-                      ? 'Optional: notify reception when someone books. Separate from patient messages.'
-                      : 'Opcional: avisar a recepción cuando alguien agenda. Es aparte de los mensajes al paciente.'}
+                      ? 'Optional for new bookings (checkbox below). Online cancel requests always alert these phones/emails — the appointment stays on the calendar until staff approves.'
+                      : 'Opcional para citas nuevas (casilla abajo). Las cancelaciones en línea siempre avisan a estos teléfonos/correos — la cita sigue en agenda hasta que el staff apruebe.'}
                   </p>
                   <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-indigo-200 cursor-pointer">
                     <input
@@ -6586,8 +6861,38 @@ export default function AppLayout() {
             </div>
             
             <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-4 sm:space-y-5 min-h-0">
+              {isCancelRequestPending(selectedSlot.check_in_status) && !isRescheduling && (
+                <div className="rounded-2xl border-2 border-amber-400 bg-amber-50 p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-black uppercase text-amber-950 tracking-tight">
+                      {L.p.appt.cancelPendingTitle}
+                    </p>
+                    <p className="text-xs text-amber-900/80 mt-1 leading-relaxed">
+                      {selectedSlot.confirmation_status === CONFIRMATION_STATUS.DECLINED
+                        ? L.p.appt.cancelPendingSmsNoHint
+                        : L.p.appt.cancelPendingHint}
+                    </p>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <button
+                      type="button"
+                      onClick={handleApproveCancelRequest}
+                      className="flex-1 bg-red-600 text-white px-3 py-2.5 rounded-xl text-[10px] font-black uppercase hover:bg-red-700 transition"
+                    >
+                      {L.p.appt.cancelPendingApprove}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRejectCancelRequest}
+                      className="flex-1 bg-white border border-amber-300 text-amber-950 px-3 py-2.5 rounded-xl text-[10px] font-black uppercase hover:bg-amber-100 transition"
+                    >
+                      {L.p.appt.cancelPendingReject}
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="flex flex-wrap gap-2 mb-2">
-                 {!isRescheduling && !['Finalizado', 'Devuelto', 'Cancelado'].includes(selectedSlot.check_in_status) && (
+                 {!isRescheduling && !['Finalizado', 'Devuelto', 'Cancelado', CANCEL_REQUEST_STATUS].includes(selectedSlot.check_in_status) && (
                    <>
                      <button
                        onClick={() => updateAppStatus(selectedSlot.id, 'Llegó', selectedSlot.patient, selectedSlot.equipment)}
@@ -6634,7 +6939,7 @@ export default function AppLayout() {
                    </>
                  )}
                  
-                 {selectedSlot.check_in_status !== 'Finalizado' && selectedSlot.check_in_status !== 'Devuelto' && selectedSlot.check_in_status !== 'Cancelado' && !isRescheduling && (
+                 {selectedSlot.check_in_status !== 'Finalizado' && selectedSlot.check_in_status !== 'Devuelto' && selectedSlot.check_in_status !== 'Cancelado' && !isCancelRequestPending(selectedSlot.check_in_status) && !isRescheduling && (
                      <button onClick={() => { setCancelDeductSession(false); setShowCancelModal(true); }} className="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-200 transition ml-auto border border-red-200">{L.p.appt.cancelAppt}</button>
                  )}
               </div>

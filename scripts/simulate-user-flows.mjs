@@ -52,7 +52,7 @@ import { normalizeClientIp } from '../lib/requestClientIp.js';
 import { buildPatientSmsMessage } from '../lib/patientStaffSms.js';
 import { isAppointmentInReminderWindow } from '../lib/appointmentReminder.js';
 import { canAutoLoginWithoutPin, hashClientIp } from '../lib/staffDeviceTrust.js';
-import { resolveNotifyChannels } from '../lib/notifySettings.js';
+import { resolveNotifyChannels, resolveNotifyChannelsForPatient } from '../lib/notifySettings.js';
 
 process.env.STAFF_SESSION_SECRET = process.env.STAFF_SESSION_SECRET || 'test-secret-for-simulations';
 let passed = 0;
@@ -479,6 +479,39 @@ test('mensajes: canales Correo/SMS por tipo de aviso', () => {
     notify_use_sms_booking: true,
   }, 'booking');
   assert.equal(clinicSmsOff.sendSms, false);
+});
+
+test('mensajes: preferencias del paciente mandan sobre canales por aviso', () => {
+  const adminEmailOnlyReminder = {
+    notify_channel_email: true,
+    notify_channel_sms: true,
+    notify_use_email_reminder: true,
+    notify_use_sms_reminder: false,
+  };
+  const patientWantsSms = resolveNotifyChannelsForPatient(adminEmailOnlyReminder, 'reminder', {
+    prefers_email: true,
+    prefers_sms: true,
+  });
+  assert.equal(patientWantsSms.sendEmail, true);
+  assert.equal(patientWantsSms.sendSms, true);
+
+  const smsOnlyPatient = resolveNotifyChannelsForPatient(adminEmailOnlyReminder, 'reminder', {
+    prefers_email: false,
+    prefers_sms: true,
+  });
+  assert.equal(smsOnlyPatient.sendEmail, false);
+  assert.equal(smsOnlyPatient.sendSms, true);
+});
+
+test('mensajes: primera cita siempre correo + SMS', () => {
+  const channels = resolveNotifyChannelsForPatient({
+    notify_channel_email: true,
+    notify_channel_sms: true,
+    notify_use_email_first: false,
+    notify_use_sms_first: false,
+  }, 'first', { prefers_email: false, prefers_sms: false });
+  assert.equal(channels.sendEmail, true);
+  assert.equal(channels.sendSms, true);
 });
 
 test('recordatorio: ventana diaria según horas antes', () => {

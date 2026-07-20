@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
-import { CLINIC_SHENANDOAH, getClinicTimezone } from '../../../../lib/clinicRegistry.js';
+import { CLINIC_SHENANDOAH, getClinicTimezone, selectCompanyConfigForClinic } from '../../../../lib/clinicRegistry.js';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
 import {
   CONFIRMATION_STATUS,
   findPendingConfirmationByPhone,
   parseConfirmationReply,
 } from '../../../../lib/appointmentConfirmation.js';
+import { CANCEL_REQUEST_STATUS } from '../../../../lib/appointmentManage.js';
+import { dispatchStaffCancelRequestAlert } from '../../../../lib/staffBookingAlert.js';
+import { bumpAgendaLiveRev } from '../../../../lib/agendaLiveRev.js';
+import { localeForClinic } from '../../../../lib/i18n.js';
 
 export async function POST(request) {
   try {
@@ -34,7 +38,7 @@ export async function POST(request) {
 
     const { data: appointments, error } = await supabase
       .from('appointments')
-      .select('id, patient, phone, time, full_date, equipment, confirmation_status, confirmation_sent_at')
+      .select('id, patient, phone, time, full_date, equipment, confirmation_status, confirmation_sent_at, notes')
       .gte('full_date', fromIso)
       .lte('full_date', toIso)
       .eq('confirmation_status', CONFIRMATION_STATUS.PENDING);
@@ -55,13 +59,26 @@ export async function POST(request) {
       ? CONFIRMATION_STATUS.CONFIRMED
       : CONFIRMATION_STATUS.DECLINED;
 
+    const stamp = new Date().toLocaleString('en-US', { timeZone: timezone });
+    const declineNote = reply === 'declined'
+      ? `[PATIENT SMS ${stamp}] Replied NO — cancellation pending staff approval.`
+      : null;
+    const newNotes = declineNote
+      ? (match.notes ? `${match.notes}\n${declineNote}` : declineNote)
+      : undefined;
+
     const { error: updateErr } = await supabase
       .from('appointments')
       .update({
         confirmation_status: nextStatus,
         confirmation_replied_at: new Date().toISOString(),
         confirmation_reply: String(body || '').trim().slice(0, 160),
-        ...(reply === 'declined' ? { check_in_status: 'Cancelado' } : {}),
+        ...(reply === 'declined'
+          ? {
+            check_in_status: CANCEL_REQUEST_STATUS,
+            ...(newNotes ? { notes: newNotes } : {}),
+          }
+          : {}),
       })
       .eq('id', match.id)
       .eq('confirmation_status', CONFIRMATION_STATUS.PENDING);
@@ -71,7 +88,31 @@ export async function POST(request) {
     if (reply === 'confirmed') {
       return twiml(`Thanks ${match.patient || ''}! Your appointment at ${match.time} is confirmed.`);
     }
-    return twiml('Your appointment has been cancelled. Call us if you need to reschedule.');
+
+    await bumpAgendaLiveRev(supabase, CLINIC_SHENANDOAH).catch(() => null);
+
+    const [{ data: companyConfig }, { data: staffRoster }] = await Promise.all([
+      selectCompanyConfigForClinic(supabase, CLINIC_SHENANDOAH),
+      supabase
+        .from('users_staff')
+        .select('name, email, phone, notify_on_booking, is_active')
+        .eq('is_active', true),
+    ]);
+
+    await dispatchStaffCancelRequestAlert({
+      companyConfig: companyConfig || {},
+      staffRoster: staffRoster || [],
+      clinicName: CLINIC_SHENANDOAH,
+      clinicDisplayName: companyConfig?.name,
+      patientName: match.patient,
+      date: match.full_date,
+      time: match.time,
+      equipment: match.equipment,
+      locale: localeForClinic(CLINIC_SHENANDOAH),
+      source: 'sms_no',
+    }).catch(() => null);
+
+    return twiml('We received your cancellation request. The clinic will confirm soon; your slot stays reserved until then.');
   } catch (err) {
     return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
       status: 200,

@@ -18,7 +18,7 @@ const COPY = {
     status: 'Estado',
     cancel: 'Cancelar cita',
     reschedule: 'Reprogramar',
-    confirmCancel: '¿Confirmas que quieres cancelar esta cita?',
+    confirmCancel: '¿Enviar solicitud de cancelación? La clínica debe aprobarla antes de liberar el horario.',
     confirming: 'Procesando…',
     pickDate: 'Elige una nueva fecha',
     pickTime: 'Elige un horario',
@@ -27,9 +27,10 @@ const COPY = {
     submitReschedule: 'Confirmar nueva hora',
     lockedTitle: 'No disponible en línea',
     callUs: 'Llámanos',
-    doneCancel: 'Cita cancelada',
+    doneCancel: 'Solicitud enviada',
     doneReschedule: 'Cita reprogramada',
     closedHint: 'Esta cita ya no se puede modificar en línea.',
+    pendingHint: 'Tu solicitud quedó pendiente de confirmación de la clínica.',
   },
   en: {
     title: 'Manage my appointment',
@@ -42,7 +43,7 @@ const COPY = {
     status: 'Status',
     cancel: 'Cancel appointment',
     reschedule: 'Reschedule',
-    confirmCancel: 'Are you sure you want to cancel this appointment?',
+    confirmCancel: 'Send a cancellation request? The clinic must approve before the slot is freed.',
     confirming: 'Working…',
     pickDate: 'Choose a new date',
     pickTime: 'Choose a time',
@@ -51,9 +52,10 @@ const COPY = {
     submitReschedule: 'Confirm new time',
     lockedTitle: 'Not available online',
     callUs: 'Call us',
-    doneCancel: 'Appointment cancelled',
+    doneCancel: 'Request sent',
     doneReschedule: 'Appointment rescheduled',
     closedHint: 'This appointment can no longer be changed online.',
+    pendingHint: 'Your request is pending clinic confirmation.',
   },
 };
 
@@ -253,6 +255,9 @@ export default function PatientManagePortal() {
             {!loading && appointment && mode === 'done' && (
               <div className="text-center space-y-3 py-4">
                 <p className="text-lg font-black text-emerald-700 uppercase">{doneMessage}</p>
+                {appointment.check_in_status === 'Pendiente cancelación' && (
+                  <p className="text-sm text-amber-800 font-bold leading-relaxed">{t.pendingHint}</p>
+                )}
                 {appointment.check_in_status !== 'Cancelado' && (
                   <div className="text-left rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-1 text-sm">
                     <p><span className="font-bold">{t.date}:</span> {formatDateLabel(appointment.full_date, locale)}</p>

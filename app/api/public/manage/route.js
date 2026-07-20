@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
 import { verifyAppointmentManageToken } from '../../../../lib/appointmentManageToken.js';
 import {
+  CANCEL_REQUEST_STATUS,
   evaluatePatientSelfManage,
   formatClinicPhoneForPatient,
   publicAppointmentView,
@@ -20,6 +21,7 @@ import { sendAppointmentNotifyServer } from '../../../../lib/sendAppointmentNoti
 import { mergePortalAppointments, readDemoConfig } from '../../../../lib/demoOccupancyServer.js';
 import { bumpAgendaLiveRev } from '../../../../lib/agendaLiveRev.js';
 import { selectWithColumnFallback } from '../../../../lib/supabaseSelectSafe.js';
+import { dispatchStaffCancelRequestAlert } from '../../../../lib/staffBookingAlert.js';
 
 function sanitizeCompanyConfig(row) {
   if (!row) return null;
@@ -31,6 +33,15 @@ function sanitizeCompanyConfig(row) {
     ...safe
   } = row;
   return safe;
+}
+
+async function loadStaffRoster(supabase) {
+  const { data, error } = await supabase
+    .from('users_staff')
+    .select('name, email, phone, notify_on_booking, is_active')
+    .eq('is_active', true);
+  if (error) return [];
+  return data || [];
 }
 
 async function loadManageContext(token) {
@@ -178,8 +189,8 @@ export async function POST(request) {
 
     if (action === 'cancel') {
       const cancelNote = es
-        ? `[PACIENTE ONLINE ${stamp}] Cita cancelada por el paciente.`
-        : `[PATIENT ONLINE ${stamp}] Appointment cancelled by the patient.`;
+        ? `[PACIENTE ONLINE ${stamp}] Solicitud de cancelación — pendiente de aprobar en agenda.`
+        : `[PATIENT ONLINE ${stamp}] Cancellation requested — pending staff approval.`;
       const newNotes = ctx.appointment.notes
         ? `${ctx.appointment.notes}\n${cancelNote}`
         : cancelNote;
@@ -187,7 +198,7 @@ export async function POST(request) {
       const { error } = await ctx.supabase
         .from('appointments')
         .update({
-          check_in_status: 'Cancelado',
+          check_in_status: CANCEL_REQUEST_STATUS,
           notes: newNotes,
         })
         .eq('id', ctx.appointment.id);
@@ -200,16 +211,22 @@ export async function POST(request) {
 
       const updated = {
         ...ctx.appointment,
-        check_in_status: 'Cancelado',
+        check_in_status: CANCEL_REQUEST_STATUS,
         notes: newNotes,
       };
 
-      await sendAppointmentNotifyServer({
-        appointment: updated,
+      const staffRoster = await loadStaffRoster(ctx.supabase);
+      await dispatchStaffCancelRequestAlert({
         companyConfig: ctx.companyConfig,
+        staffRoster,
         clinicName: ctx.clinicName,
-        notifyType: 'cancel',
-        services: ctx.services,
+        clinicDisplayName: ctx.companyConfig.name,
+        patientName: updated.patient,
+        date: updated.full_date,
+        time: updated.time,
+        equipment: updated.equipment,
+        locale,
+        source: 'manage',
       }).catch(() => null);
 
       return NextResponse.json({
@@ -217,8 +234,8 @@ export async function POST(request) {
         action: 'cancel',
         appointment: publicAppointmentView(updated),
         message: es
-          ? 'Tu cita fue cancelada correctamente.'
-          : 'Your appointment was cancelled successfully.',
+          ? 'Recibimos tu solicitud de cancelación. La clínica la confirmará pronto; la cita sigue reservada hasta entonces.'
+          : 'We received your cancellation request. The clinic will confirm soon; your slot stays reserved until then.',
       });
     }
 
