@@ -91,6 +91,7 @@ import {
   syncAppointmentPatientName,
   withCanonicalPatientName,
 } from '../lib/patientNameSync';
+import { downloadCsv } from '../lib/reportCsvExport';
 import {
   sanitizeAppointmentNotesForDisplay,
   sanitizePatientNotesForDisplay,
@@ -3654,6 +3655,128 @@ export default function AppLayout() {
     printHTML(html, R.apptsTitle);
   };
 
+  const clinicSlugForExport = () => String(activeClinic || 'clinica').replace(/\s+/g, '_');
+
+  const downloadAppointmentsReportCsv = () => {
+    const R = L.p.reports;
+    if (!reportAppointments.length) return alert(R.downloadEmpty);
+    const start = reportStartDate <= reportEndDate ? reportStartDate : reportEndDate;
+    const end = reportStartDate <= reportEndDate ? reportEndDate : reportStartDate;
+    downloadCsv({
+      filename: `citas_${clinicSlugForExport()}_${start}_${end}.csv`,
+      headers: [
+        R.apptsColDate,
+        locale === 'en' ? 'Time' : 'Hora',
+        locale === 'en' ? 'Equipment' : 'Equipo',
+        R.apptsColPatient,
+        R.apptsColPhone,
+        R.apptsColAttendant,
+        R.apptsColStatus,
+      ],
+      rows: reportAppointments.map((a) => [
+        a.full_date || '',
+        a.time || '',
+        a.equipment || '',
+        a.patient || '',
+        a.phone || '',
+        a.attendant || '',
+        translateCheckInStatus(locale, a.check_in_status || 'Agendado'),
+      ]),
+    });
+  };
+
+  const downloadPatientReportCsv = () => {
+    const R = L.p.reports;
+    if (String(selectedPatientReport || '').trim().length <= 2) return alert(R.searchMin3);
+    const rows = (dbAppointments || [])
+      .filter((a) => normalizeStr(a.patient).includes(normalizeStr(selectedPatientReport)))
+      .sort((a, b) => String(b.full_date || '').localeCompare(String(a.full_date || '')));
+    if (!rows.length) return alert(R.downloadEmpty);
+    downloadCsv({
+      filename: `paciente_${clinicSlugForExport()}_${String(selectedPatientReport).trim().slice(0, 24)}.csv`,
+      headers: [
+        R.apptsColDate,
+        locale === 'en' ? 'Time' : 'Hora',
+        locale === 'en' ? 'Equipment' : 'Equipo',
+        R.apptsColPatient,
+        R.apptsColPhone,
+        R.apptsColStatus,
+      ],
+      rows: rows.map((a) => [
+        a.full_date || '',
+        a.time || '',
+        a.equipment || '',
+        a.patient || '',
+        a.phone || '',
+        translateCheckInStatus(locale, a.check_in_status || 'Agendado'),
+      ]),
+    });
+  };
+
+  const downloadAuditReportCsv = () => {
+    const R = L.p.reports;
+    if (!globalAuditLogs.length) return alert(R.downloadEmpty);
+    downloadCsv({
+      filename: `caja_negra_${clinicSlugForExport()}_${clinicNow.dateStr || 'hoy'}.csv`,
+      headers: [
+        locale === 'en' ? 'When' : 'Fecha/Hora',
+        locale === 'en' ? 'Patient / person' : 'Paciente / persona',
+        locale === 'en' ? 'Action' : 'Acción',
+        locale === 'en' ? 'By' : 'Por',
+        locale === 'en' ? 'Details' : 'Detalle',
+      ],
+      rows: globalAuditLogs.map((log) => [
+        log.timestamp ? new Date(log.timestamp).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX') : '',
+        log.patient_name || '',
+        log.action || '',
+        log.changed_by || '',
+        log.details || '',
+      ]),
+    });
+  };
+
+  const downloadSalesReportCsv = () => {
+    const R = L.p.reports;
+    const start = reportStartDate <= reportEndDate ? reportStartDate : reportEndDate;
+    const end = reportStartDate <= reportEndDate ? reportEndDate : reportStartDate;
+    const salesRows = dbPatients
+      .flatMap((p) => (p.packageHistory || []).map((tx) => ({
+        ...tx,
+        patientId: p.id,
+        patientName: p.patient,
+      })))
+      .filter((tx) => {
+        const d = String(tx.date || '').slice(0, 10);
+        if (!d) return true;
+        return d >= start && d <= end;
+      })
+      .sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+    if (!salesRows.length) return alert(R.downloadEmpty);
+    downloadCsv({
+      filename: `ventas_${clinicSlugForExport()}_${start}_${end}.csv`,
+      headers: [
+        locale === 'en' ? 'Ticket' : 'Ticket',
+        locale === 'en' ? 'Date' : 'Fecha',
+        R.apptsColPatient,
+        locale === 'en' ? 'Package / service' : 'Paquete / servicio',
+        locale === 'en' ? 'Sessions' : 'Sesiones',
+        locale === 'en' ? 'Amount' : 'Monto',
+        locale === 'en' ? 'Currency' : 'Moneda',
+        locale === 'en' ? 'Payment method' : 'Método de pago',
+      ],
+      rows: salesRows.map((tx) => [
+        tx.ticketNumber || tx.ticket_number || String(tx.id || '').slice(-6),
+        tx.date || '',
+        tx.patientName || '',
+        tx.serviceName || '',
+        tx.sessions ?? '',
+        tx.price ?? '',
+        currencyStr,
+        tx.paymentMethod || '',
+      ]),
+    });
+  };
+
   const printPatientBitacora = (patientName) => {
     const apps = dbAppointments.filter(a => String(a.patient) === String(patientName) && a.check_in_status === 'Finalizado').sort((a,b) => new Date(b.full_date) - new Date(a.full_date));
     if(apps.length === 0) return alert(a('noFinishedAppts'));
@@ -5366,13 +5489,22 @@ export default function AppLayout() {
                         className="w-full p-2.5 border border-slate-300 rounded-lg font-bold text-sm outline-none text-slate-900 bg-white"
                       />
                     </div>
-                    <button
-                      type="button"
-                      onClick={printAppointmentsReport}
-                      className="bg-slate-900 text-white px-4 py-2.5 rounded-lg text-xs font-black uppercase hover:bg-slate-800 transition shrink-0"
-                    >
-                      {L.p.reports.apptsPrint}
-                    </button>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={downloadAppointmentsReportCsv}
+                        className="bg-emerald-700 text-white px-4 py-2.5 rounded-lg text-xs font-black uppercase hover:bg-emerald-600 transition"
+                      >
+                        {L.p.reports.downloadExcel}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={printAppointmentsReport}
+                        className="bg-slate-900 text-white px-4 py-2.5 rounded-lg text-xs font-black uppercase hover:bg-slate-800 transition"
+                      >
+                        {L.p.reports.apptsPrint}
+                      </button>
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2 items-center">
                     <button type="button" onClick={() => setReportApptRangePreset('today')} className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200">{L.p.reports.apptsPresetToday}</button>
@@ -5448,6 +5580,13 @@ export default function AppLayout() {
               <div className="flex-1 flex flex-col">
                 <div className="flex flex-col md:flex-row gap-4 mb-4 items-end">
                   <input type="text" placeholder="Búsqueda Inteligente (Ignora acentos)..." value={selectedPatientReport} onChange={e => setSelectedPatientReport(e.target.value)} className="w-full max-w-md p-2.5 border border-slate-300 rounded-lg font-bold text-sm outline-none uppercase text-slate-900 bg-white" />
+                  <button
+                    type="button"
+                    onClick={downloadPatientReportCsv}
+                    className="bg-emerald-700 text-white px-4 py-2.5 rounded-lg text-xs font-black uppercase hover:bg-emerald-600 transition shrink-0"
+                  >
+                    {L.p.reports.downloadExcel}
+                  </button>
                 </div>
                 <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 overflow-auto">
                   <table className="w-full text-left border-collapse bg-white">
@@ -5475,14 +5614,23 @@ export default function AppLayout() {
             {/* CAJA NEGRA GLOBAL */}
             {reportFilter === 'Caja Negra' && (
               <div className="flex-1 flex flex-col">
-                <div className="flex items-center gap-2 mb-4 bg-slate-100 p-3 rounded-xl border border-slate-200">
+                <div className="flex items-center gap-2 mb-4 bg-slate-100 p-3 rounded-xl border border-slate-200 flex-wrap">
                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Mostrando los últimos 200 movimientos de la clínica en tiempo real</span>
-                   <button onClick={() => {
-                      if(activeSupabase) {
-                        activeSupabase.from('audit_logs').select('*').order('timestamp', { ascending: false }).limit(200)
-                        .then(({data}) => setGlobalAuditLogs(data || []));
-                      }
-                   }} className="ml-auto bg-white border border-slate-300 text-xs font-black uppercase px-3 py-1.5 rounded hover:bg-slate-50 transition shadow-sm">Refrescar 🔄</button>
+                   <div className="ml-auto flex gap-2">
+                     <button
+                       type="button"
+                       onClick={downloadAuditReportCsv}
+                       className="bg-emerald-700 text-white text-xs font-black uppercase px-3 py-1.5 rounded hover:bg-emerald-600 transition shadow-sm"
+                     >
+                       {L.p.reports.downloadExcel}
+                     </button>
+                     <button onClick={() => {
+                        if(activeSupabase) {
+                          activeSupabase.from('audit_logs').select('*').order('timestamp', { ascending: false }).limit(200)
+                          .then(({data}) => setGlobalAuditLogs(data || []));
+                        }
+                     }} className="bg-white border border-slate-300 text-xs font-black uppercase px-3 py-1.5 rounded hover:bg-slate-50 transition shadow-sm">Refrescar 🔄</button>
+                   </div>
                 </div>
                 <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 overflow-auto">
                   <table className="w-full text-left border-collapse bg-white">
@@ -5528,9 +5676,16 @@ export default function AppLayout() {
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col">
-                  <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6">
+                  <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6 sm:items-end">
                     <div className="min-w-0 flex-1"><label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Fecha Inicio</label><input type="date" value={reportStartDate} onChange={e => setReportStartDate(e.target.value)} className="w-full min-w-0 p-2 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white text-sm" /></div>
                     <div className="min-w-0 flex-1"><label className="block text-[10px] font-black uppercase text-slate-400 mb-1">Fecha Fin</label><input type="date" value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} className="w-full min-w-0 p-2 border border-slate-300 rounded-lg font-bold outline-none text-slate-900 bg-white text-sm" /></div>
+                    <button
+                      type="button"
+                      onClick={downloadSalesReportCsv}
+                      className="bg-emerald-700 text-white px-4 py-2.5 rounded-lg text-xs font-black uppercase hover:bg-emerald-600 transition shrink-0"
+                    >
+                      {L.p.reports.downloadExcel}
+                    </button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6 shrink-0">
                     <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-2xl flex flex-col justify-center items-center shadow-sm">
