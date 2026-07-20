@@ -22,6 +22,11 @@ import { mergePortalAppointments, readDemoConfig } from '../../../../lib/demoOcc
 import { bumpAgendaLiveRev } from '../../../../lib/agendaLiveRev.js';
 import { selectWithColumnFallback } from '../../../../lib/supabaseSelectSafe.js';
 import { dispatchStaffCancelRequestAlert } from '../../../../lib/staffBookingAlert.js';
+import {
+  insertAuditLog,
+  publicCancelAuditLabels,
+  publicRescheduleAuditLabels,
+} from '../../../../lib/auditLog.js';
 
 function sanitizeCompanyConfig(row) {
   if (!row) return null;
@@ -229,6 +234,17 @@ export async function POST(request) {
         source: 'manage',
       }).catch(() => null);
 
+      const cancelAudit = publicCancelAuditLabels(locale, 'manage');
+      await insertAuditLog(ctx.supabase, {
+        appointmentId: updated.id,
+        patientName: updated.patient,
+        action: cancelAudit.action,
+        changedBy: cancelAudit.changedBy,
+        details: es
+          ? `Solicitud pendiente de aprobar · ${updated.full_date} ${updated.time} · ${updated.equipment || ''}`
+          : `Pending approval · ${updated.full_date} ${updated.time} · ${updated.equipment || ''}`,
+      });
+
       return NextResponse.json({
         success: true,
         action: 'cancel',
@@ -296,6 +312,17 @@ export async function POST(request) {
       notifyType: 'reschedule',
       services: ctx.services,
     }).catch(() => null);
+
+    const rescheduleAudit = publicRescheduleAuditLabels(locale);
+    await insertAuditLog(ctx.supabase, {
+      appointmentId: updated.id || ctx.appointment.id,
+      patientName: updated.patient || ctx.appointment.patient,
+      action: rescheduleAudit.action,
+      changedBy: rescheduleAudit.changedBy,
+      details: es
+        ? `De ${ctx.appointment.full_date} ${ctx.appointment.time} → ${selectedDate} ${selectedTime}`
+        : `From ${ctx.appointment.full_date} ${ctx.appointment.time} → ${selectedDate} ${selectedTime}`,
+    });
 
     return NextResponse.json({
       success: true,

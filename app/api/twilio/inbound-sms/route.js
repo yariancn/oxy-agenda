@@ -10,6 +10,7 @@ import { CANCEL_REQUEST_STATUS } from '../../../../lib/appointmentManage.js';
 import { dispatchStaffCancelRequestAlert } from '../../../../lib/staffBookingAlert.js';
 import { bumpAgendaLiveRev } from '../../../../lib/agendaLiveRev.js';
 import { localeForClinic } from '../../../../lib/i18n.js';
+import { insertAuditLog, publicCancelAuditLabels } from '../../../../lib/auditLog.js';
 
 export async function POST(request) {
   try {
@@ -86,6 +87,13 @@ export async function POST(request) {
     if (updateErr) throw updateErr;
 
     if (reply === 'confirmed') {
+      await insertAuditLog(supabase, {
+        appointmentId: match.id,
+        patientName: match.patient,
+        action: 'CONFIRMACIÓN SMS (YES)',
+        changedBy: 'Patient (SMS)',
+        details: `${match.full_date} ${match.time} · ${match.equipment || ''} · reply: ${String(body || '').trim().slice(0, 40)}`,
+      });
       return twiml(`Thanks ${match.patient || ''}! Your appointment at ${match.time} is confirmed.`);
     }
 
@@ -111,6 +119,15 @@ export async function POST(request) {
       locale: localeForClinic(CLINIC_SHENANDOAH),
       source: 'sms_no',
     }).catch(() => null);
+
+    const cancelAudit = publicCancelAuditLabels(localeForClinic(CLINIC_SHENANDOAH), 'sms_no');
+    await insertAuditLog(supabase, {
+      appointmentId: match.id,
+      patientName: match.patient,
+      action: cancelAudit.action,
+      changedBy: cancelAudit.changedBy,
+      details: `Pending approval · ${match.full_date} ${match.time} · ${match.equipment || ''} · reply: ${String(body || '').trim().slice(0, 40)}`,
+    });
 
     return twiml('We received your cancellation request. The clinic will confirm soon; your slot stays reserved until then.');
   } catch (err) {
