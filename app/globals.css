@@ -56,10 +56,13 @@ select {
   max-width: 100%;
 }
 
-/* Calendario staff: barras de desplazamiento visibles */
+/* Calendario staff: barras de desplazamiento visibles + scroll estable en móvil */
 .calendar-h-scroll {
   scrollbar-width: thin;
   scrollbar-color: #64748b #e2e8f0;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
 }
 
 .calendar-h-scroll::-webkit-scrollbar {
@@ -80,4 +83,26 @@ select {
 
 .calendar-h-scroll::-webkit-scrollbar-thumb:hover {
   background: #475569;
+}
+
+/* Evita que el body “rebote” detrás del shell de la app (iOS) */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+/* Panel detalle cita: botón cerrar usable bajo notch / Dynamic Island */
+.appt-detail-panel {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.appt-detail-close {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  touch-action: manipulation;
 }

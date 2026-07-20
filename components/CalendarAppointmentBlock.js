@@ -135,7 +135,7 @@ export default function CalendarAppointmentBlock({
       onClick={onSelect}
       draggable={draggable}
       onDragStart={onDragStart}
-      className={`absolute ${paddingClass} p-0.5 sm:p-0.5 ${roundedClass} border border-l-[3px] shadow-sm cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-[1.02] hover:ring-1 hover:ring-black/10 hover:z-30 ${colorClasses} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1 z-30' : ''}`}
+      className={`absolute ${paddingClass} p-0.5 sm:p-0.5 ${roundedClass} border border-l-[3px] shadow-sm cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-[1.02] hover:ring-1 hover:ring-black/10 hover:z-30 ${colorClasses} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1 z-30' : ''} ${draggable ? '' : 'touch-pan-y'}`}
       style={{ top: `${topPx}px`, height: `${heightPx}px`, zIndex: 10 }}
     >
       {ultra ? (

@@ -2066,13 +2066,27 @@ export default function AppLayout() {
 
     let attempts = 0;
     let timerId = null;
-    const maxAttempts = 30;
+    let cancelled = false;
+    const maxAttempts = 12;
+    const el = calendarScrollRef.current;
+
+    const cancelAutoScroll = () => {
+      cancelled = true;
+      pendingScrollToNowRef.current = false;
+      if (timerId) window.clearTimeout(timerId);
+    };
+
+    // Si el usuario toca o hace scroll, no pelear con el auto-scroll a "ahora".
+    el?.addEventListener('touchstart', cancelAutoScroll, { passive: true, once: true });
+    el?.addEventListener('wheel', cancelAutoScroll, { passive: true, once: true });
+    el?.addEventListener('pointerdown', cancelAutoScroll, { passive: true, once: true });
 
     const tryScroll = () => {
+      if (cancelled || !pendingScrollToNowRef.current) return;
       attempts += 1;
-      const el = calendarScrollRef.current;
+      const scrollEl = calendarScrollRef.current;
       const hasTodayCol = viewMode === 'Día' || Boolean(
-        el?.querySelector(`[data-cal-day="${clinicNow.dateStr}"]`),
+        scrollEl?.querySelector(`[data-cal-day="${clinicNow.dateStr}"]`),
       );
       if (!hasTodayCol) {
         if (attempts < maxAttempts) timerId = window.setTimeout(tryScroll, 120);
@@ -2081,12 +2095,12 @@ export default function AppLayout() {
       }
 
       const topPx = (clinicNow.mins - calendarStartMins) * PIXELS_PER_MINUTE;
-      const targetTop = Math.max(0, topPx - (el?.clientHeight || 0) * 0.15);
-      const targetLeft = viewMode === 'Semana' ? getWeekScrollLeftForToday(el, clinicNow.dateStr) : null;
+      const targetTop = Math.max(0, topPx - (scrollEl?.clientHeight || 0) * 0.15);
+      const targetLeft = viewMode === 'Semana' ? getWeekScrollLeftForToday(scrollEl, clinicNow.dateStr) : null;
 
       const scrolled = scrollCalendarToNow('auto');
-      const topOk = !el || Math.abs(el.scrollTop - targetTop) < 12;
-      const leftOk = viewMode === 'Día' || targetLeft === null || Math.abs(el.scrollLeft - targetLeft) < 12;
+      const topOk = !scrollEl || Math.abs(scrollEl.scrollTop - targetTop) < 12;
+      const leftOk = viewMode === 'Día' || targetLeft === null || Math.abs(scrollEl.scrollLeft - targetLeft) < 12;
 
       if ((scrolled && topOk && leftOk) || attempts >= maxAttempts) {
         pendingScrollToNowRef.current = false;
@@ -2096,7 +2110,13 @@ export default function AppLayout() {
     };
 
     timerId = window.setTimeout(tryScroll, 100);
-    return () => { if (timerId) window.clearTimeout(timerId); };
+    return () => {
+      cancelled = true;
+      if (timerId) window.clearTimeout(timerId);
+      el?.removeEventListener('touchstart', cancelAutoScroll);
+      el?.removeEventListener('wheel', cancelAutoScroll);
+      el?.removeEventListener('pointerdown', cancelAutoScroll);
+    };
   }, [
     activeTab,
     dbStatus,
@@ -2107,8 +2127,6 @@ export default function AppLayout() {
     CALENDAR_HEIGHT,
     displayedEquipments.length,
     zoomScale,
-    dbAppointments.length,
-    weekDayLayouts,
   ]);
 
   useEffect(() => {
@@ -2159,8 +2177,13 @@ export default function AppLayout() {
       equipmentCount: displayedEquipments.length,
       isMobile: isMobileViewport,
     }));
-    if (activeTab === 'Agenda') pendingScrollToNowRef.current = true;
   }, [viewMode, equipmentFilter, displayedEquipments.length, isMobileViewport, zoomManual, activeTab]);
+
+  // Solo forzar scroll a "ahora" al cambiar vista/filtro, no en cada recálculo de zoom.
+  useEffect(() => {
+    if (!prefsHydratedRef.current || activeTab !== 'Agenda') return;
+    pendingScrollToNowRef.current = true;
+  }, [viewMode, equipmentFilter, activeTab]);
 
   useEffect(() => {
     if (!prefsHydratedRef.current) return;
@@ -4422,7 +4445,7 @@ export default function AppLayout() {
             </header>
 
             {/* --- CONTENEDOR DEL CALENDARIO: SCROLL UNIFICADO (CIRUGÍA CSS) --- */}
-            <div ref={calendarScrollRef} className={`calendar-h-scroll flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0 scroll-pb-16 ${fitAllEquipOnScreen ? 'overflow-x-hidden' : ''}`} style={{ scrollPaddingBottom: '4rem' }}>
+            <div ref={calendarScrollRef} className={`calendar-h-scroll flex-1 bg-white overflow-auto relative m-1.5 lg:m-4 rounded-lg lg:rounded-xl shadow-inner border border-slate-200 min-h-0 scroll-pb-16 overscroll-contain ${fitAllEquipOnScreen ? 'overflow-x-hidden' : ''}`} style={{ scrollPaddingBottom: '4rem' }}>
               <div className={`flex pb-16 ${fitAllEquipOnScreen ? 'w-full min-w-0' : 'min-w-max'}`}>
                 
                 <div className="w-16 md:w-20 shrink-0 border-r border-slate-200 bg-slate-50 sticky left-0 z-50" data-cal-time-col>
@@ -4520,7 +4543,7 @@ export default function AppLayout() {
                                 topPx={timeToPixels(app.time)}
                                 calculateEndTime={calculateEndTime}
                                 onSelect={() => openAppointmentDetails(app)}
-                                draggable={selectedSlot?.id !== app.id || !isRescheduling}
+                                draggable={!isMobileViewport && (selectedSlot?.id !== app.id || !isRescheduling)}
                                 onDragStart={(e) => handleDragStart(e, app)}
                               />
                             ))}
@@ -4635,7 +4658,7 @@ export default function AppLayout() {
                                     roundedClass="rounded-md"
                                     calculateEndTime={calculateEndTime}
                                     onSelect={() => openAppointmentDetails(app)}
-                                    draggable={selectedSlot?.id !== app.id || !isRescheduling}
+                                    draggable={!isMobileViewport && (selectedSlot?.id !== app.id || !isRescheduling)}
                                     onDragStart={(e) => handleDragStart(e, app)}
                                   />
                                 ))}
@@ -6539,10 +6562,10 @@ export default function AppLayout() {
           {!isRescheduling && (
             <div className="fixed inset-0 bg-slate-900/40 z-[9998]" onClick={closeAppointmentPanel} />
           )}
-          <div className={`fixed inset-0 sm:inset-y-0 sm:left-auto sm:right-0 h-full w-full sm:max-w-md bg-white shadow-2xl flex flex-col overflow-hidden sm:border-l border-slate-200 text-slate-900 ${isRescheduling ? 'z-[9999]' : 'z-[9999]'}`}>
-            <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-b flex justify-between items-center shrink-0">
-              <div>
-                <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight">
+          <div className={`appt-detail-panel fixed inset-0 sm:inset-y-0 sm:left-auto sm:right-0 h-[100dvh] max-h-[100dvh] w-full sm:max-w-md bg-white shadow-2xl flex flex-col overflow-hidden sm:border-l border-slate-200 text-slate-900 ${isRescheduling ? 'z-[9999]' : 'z-[9999]'}`}>
+            <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-4 border-b flex justify-between items-center shrink-0 gap-3">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight truncate">
                   {isRescheduling ? L.p.appt.reschedule : L.p.appt.detail}
                 </h3>
                 {isShenandoah(activeClinic) && (
@@ -6552,7 +6575,14 @@ export default function AppLayout() {
                   <p className="text-[9px] font-bold text-blue-600 uppercase mt-1">{L.p.appt.rescheduleHint}</p>
                 )}
               </div>
-              <button onClick={closeAppointmentPanel} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
+              <button
+                type="button"
+                onClick={closeAppointmentPanel}
+                aria-label={locale === 'en' ? 'Close' : 'Cerrar'}
+                className="appt-detail-close text-slate-500 hover:text-slate-900 hover:bg-slate-200 text-3xl font-black transition shrink-0 leading-none"
+              >
+                &times;
+              </button>
             </div>
             
             <div className="p-4 sm:p-8 overflow-y-auto flex-1 space-y-4 sm:space-y-5 min-h-0">
