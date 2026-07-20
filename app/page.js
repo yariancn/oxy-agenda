@@ -4388,7 +4388,7 @@ export default function AppLayout() {
                <span className="truncate mr-2 text-white">👤 {currentUser.name}</span>
                <button onClick={handleLogout} className="text-red-400 hover:text-red-300 shrink-0">{L.logout}</button>
              </div>
-             <span className="text-[8px] text-emerald-400">{L.accessLevel}: {currentUserLevel}</span>
+             <span className="text-[8px] text-emerald-400">{L.accessLevel}: {currentUserLevel}{currentUserLevel >= 99 ? (locale === 'en' ? ' (role unresolved)' : ' (rol no reconocido)') : ''}</span>
              {visibleClinics.length > 1 && (
                <span className="text-[8px] text-blue-300">{L.clinics}: {visibleClinics.map((c) => getClinicShortLabel(c)).join(' · ')}</span>
              )}
