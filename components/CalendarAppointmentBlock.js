@@ -20,7 +20,7 @@ function ConfirmationBadge({ status, locale, compact }) {
   const icon = status === CONFIRMATION_STATUS.CONFIRMED ? '✅'
     : status === CONFIRMATION_STATUS.DECLINED ? '❌'
       : status === CONFIRMATION_STATUS.NO_RESPONSE ? '⚠️'
-        : '⏳';
+        : '📱';
   return (
     <span
       title={label}

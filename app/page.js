@@ -6643,6 +6643,65 @@ export default function AppLayout() {
                 <span className="font-black text-slate-800 text-lg uppercase pr-6">{selectedSlot.is_new_patient ? '⭐ ' : ''}{selectedSlot.patient}</span>
                 <span className="text-[10px] text-blue-600 font-black uppercase tracking-widest">{selectedSlot.protocol}</span>
 
+                {isShenandoah(activeClinic) && selectedSlotConfirmationInfo ? (
+                  <div className={`mt-3 rounded-xl border-2 p-3 space-y-2 ${
+                    selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE
+                      ? confirmationStatusClass(selectedSlot.confirmation_status)
+                      : 'bg-sky-50 text-sky-900 border-sky-400'
+                  }`}>
+                    <p className="text-[10px] font-black uppercase flex flex-wrap items-center gap-1.5">
+                      <span aria-hidden>📱</span>
+                      <span>{locale === 'en' ? 'Houston SMS confirmation (YES/NO)' : 'Houston · Confirmación SMS (SI / NO)'}</span>
+                      {selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE ? (
+                        <span className="inline-flex items-center rounded-full bg-white/80 border px-2 py-0.5 text-[9px] font-black uppercase">
+                          {confirmationStatusLabel(selectedSlot.confirmation_status, locale)}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-white/80 border border-sky-300 px-2 py-0.5 text-[9px] font-black uppercase text-sky-800">
+                          {locale === 'en' ? 'Not sent yet' : 'Aún no enviado'}
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-[10px] font-bold normal-case leading-relaxed">
+                      {locale === 'en' ? selectedSlotConfirmationInfo.summaryEn : selectedSlotConfirmationInfo.summaryEs}
+                    </p>
+                    {selectedSlot.confirmation_status === CONFIRMATION_STATUS.PENDING ? (
+                      <p className="text-[10px] font-black uppercase text-slate-700 bg-white/70 border border-slate-200 rounded-lg px-2 py-1.5">
+                        {locale === 'en'
+                          ? 'Waiting for patient reply: YES to confirm · NO to cancel'
+                          : 'Esperando respuesta del paciente: SI para confirmar · NO para cancelar'}
+                      </p>
+                    ) : null}
+                    {selectedSlot.confirmation_reply && (
+                      <p className="text-xs font-bold normal-case">
+                        {locale === 'en' ? 'Reply:' : 'Respuesta:'} &quot;{selectedSlot.confirmation_reply}&quot;
+                        {selectedSlot.confirmation_replied_at && (
+                          <span className="text-[10px] font-bold opacity-80 block mt-0.5">
+                            {new Date(selectedSlot.confirmation_replied_at).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX')}
+                          </span>
+                        )}
+                      </p>
+                    )}
+                    {selectedSlot.confirmation_sent_at && (
+                      <p className="text-[9px] font-bold opacity-80 normal-case">
+                        {locale === 'en' ? 'Sent' : 'Enviado'}: {new Date(selectedSlot.confirmation_sent_at).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX')}
+                      </p>
+                    )}
+                    {selectedSlotConfirmationInfo.canSendManually && !isRescheduling ? (
+                      <button
+                        type="button"
+                        onClick={handleSendConfirmationNow}
+                        disabled={confirmationSending}
+                        className="w-full mt-1 bg-sky-600 text-white py-2.5 rounded-xl font-black uppercase text-[10px] hover:bg-sky-700 transition disabled:opacity-60"
+                      >
+                        {confirmationSending
+                          ? (locale === 'en' ? 'Sending…' : 'Enviando…')
+                          : (locale === 'en' ? 'Send confirmation SMS now' : 'Enviar confirmación SMS ahora')}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 <div className="mt-3 bg-violet-50 border border-violet-200 p-3 rounded-xl">
                   <p className="text-[10px] font-black uppercase text-violet-800">{L.p.appt.promoterSection}</p>
                   <select
@@ -6721,55 +6780,6 @@ export default function AppLayout() {
                   </div>
                   <p className="text-[8px] text-slate-500 font-bold uppercase">{L.p.appt.contactHint}</p>
                 </div>
-
-                {isShenandoah(activeClinic) && selectedSlotConfirmationInfo ? (
-                  <div className={`mt-3 rounded-xl border-2 p-3 space-y-2 ${
-                    selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE
-                      ? confirmationStatusClass(selectedSlot.confirmation_status)
-                      : 'bg-sky-50 text-sky-900 border-sky-300'
-                  }`}>
-                    <p className="text-[10px] font-black uppercase flex items-center gap-1.5">
-                      <span aria-hidden>📱</span>
-                      {locale === 'en' ? 'SMS confirmation (first session)' : 'Confirmación SMS (primera sesión)'}
-                      {selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE ? (
-                        <>
-                          {' · '}
-                          {confirmationStatusLabel(selectedSlot.confirmation_status, locale)}
-                        </>
-                      ) : null}
-                    </p>
-                    <p className="text-[10px] font-bold normal-case leading-relaxed">
-                      {locale === 'en' ? selectedSlotConfirmationInfo.summaryEn : selectedSlotConfirmationInfo.summaryEs}
-                    </p>
-                    {selectedSlot.confirmation_reply && (
-                      <p className="text-xs font-bold normal-case">
-                        {locale === 'en' ? 'Reply:' : 'Respuesta:'} &quot;{selectedSlot.confirmation_reply}&quot;
-                        {selectedSlot.confirmation_replied_at && (
-                          <span className="text-[10px] font-bold opacity-80 block mt-0.5">
-                            {new Date(selectedSlot.confirmation_replied_at).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX')}
-                          </span>
-                        )}
-                      </p>
-                    )}
-                    {selectedSlot.confirmation_sent_at && (
-                      <p className="text-[9px] font-bold opacity-80 normal-case">
-                        {locale === 'en' ? 'Sent' : 'Enviado'}: {new Date(selectedSlot.confirmation_sent_at).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX')}
-                      </p>
-                    )}
-                    {selectedSlotConfirmationInfo.canSendManually && !isRescheduling ? (
-                      <button
-                        type="button"
-                        onClick={handleSendConfirmationNow}
-                        disabled={confirmationSending}
-                        className="w-full mt-1 bg-sky-600 text-white py-2.5 rounded-xl font-black uppercase text-[10px] hover:bg-sky-700 transition disabled:opacity-60"
-                      >
-                        {confirmationSending
-                          ? (locale === 'en' ? 'Sending…' : 'Enviando…')
-                          : (locale === 'en' ? 'Send confirmation SMS now' : 'Enviar confirmación SMS ahora')}
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
 
                 <PatientSessionHistory
                   className="mt-3"
