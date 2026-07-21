@@ -22,7 +22,8 @@ export async function POST(request) {
 
   try {
     const body = await request.json().catch(() => ({}));
-    const kind = String(body.kind || 'ack').trim() === 'nudge' ? 'nudge' : 'ack';
+    const kindRaw = String(body.kind || 'ack').trim();
+    const kind = kindRaw === 'nudge' || kindRaw === 'day' ? kindRaw : 'ack';
     const name = String(body.name || '').trim();
     const email = String(body.email || '').trim();
     const source = String(body.source || 'hyperbaric').trim() || 'hyperbaric';

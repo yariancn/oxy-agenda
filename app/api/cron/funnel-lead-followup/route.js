@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { authorizeCron } from '../../../../lib/cronAuth.js';
-import { processDueFunnelFollowups } from '../../../../lib/funnelLeadNotify.js';
+import { processAllFunnelFollowups } from '../../../../lib/funnelLeadNotify.js';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -26,7 +26,7 @@ export async function GET(request) {
   if (denied) return denied;
 
   try {
-    const result = await processDueFunnelFollowups();
+    const result = await processAllFunnelFollowups();
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
