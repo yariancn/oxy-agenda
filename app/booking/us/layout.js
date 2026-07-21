@@ -1,3 +1,5 @@
+import MetaPixelOxy from '../../../components/MetaPixelOxy';
+
 export const metadata = {
   title: 'Book Online | OxyHyperbaric — REGENOXY LLC',
   description:
@@ -5,5 +7,10 @@ export const metadata = {
 };
 
 export default function BookingUSLayout({ children }) {
-  return children;
+  return (
+    <>
+      <MetaPixelOxy />
+      {children}
+    </>
+  );
 }

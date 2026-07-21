@@ -438,6 +438,22 @@ export default function PublicBookingPortal({
       }
 
       setStep(4);
+      try {
+        if (typeof window !== 'undefined' && typeof window.fbq === 'function') {
+          window.fbq('track', 'Schedule', {
+            content_name: selectedService?.name || 'Appointment',
+            content_category: 'wellness',
+          });
+        }
+        if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
+          window.parent.postMessage(
+            { type: 'oxy_funnel_booked', source: 'oxy-agenda' },
+            '*',
+          );
+        }
+      } catch (pixelErr) {
+        console.warn('Meta Schedule / parent postMessage failed', pixelErr);
+      }
     } catch (error) {
       alert(error.message || t.genericError);
     } finally {
