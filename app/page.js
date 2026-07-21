@@ -3099,9 +3099,15 @@ export default function AppLayout() {
       return false;
     }
 
+    let pastOverride = false;
     if (isPastTime(newFullDate, newTime)) {
-      alert(a('pastMove'));
-      return false;
+      const code = window.prompt(a('pastMoveCodePrompt'));
+      if (code == null) return false;
+      if (String(code).trim() !== '0000') {
+        alert(a('pastMoveCodeWrong'));
+        return false;
+      }
+      pastOverride = true;
     }
 
     const pInfo = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(original.patient));
@@ -3127,6 +3133,7 @@ export default function AppLayout() {
       newFullDate,
       outsideNormalHours,
       extendedSession,
+      pastOverride,
     });
     return true;
   };
@@ -3207,7 +3214,7 @@ export default function AppLayout() {
           move.app.id,
           move.app.patient,
           'REUBICACIÓN',
-          `De ${move.app.full_date} ${move.app.time} (${move.app.equipment}) a ${move.newFullDate} ${move.newTime} (${move.newEquipment})`,
+          `De ${move.app.full_date} ${move.app.time} (${move.app.equipment}) a ${move.newFullDate} ${move.newTime} (${move.newEquipment})${move.pastOverride ? ' [pasado autorizado 0000]' : ''}`,
         );
         await notifyPatientFromSlot({
           ...move.app,
@@ -3902,8 +3909,26 @@ export default function AppLayout() {
             <div
               key={`off-${timeStr}`}
               onClick={() => {
-                if (isPastTime(fullDate, timeStr)) {
+                if (isPastTime(fullDate, timeStr) && !(isRescheduling && selectedSlot?.id)) {
                   alert(a('pastScheduleAppt'));
+                  return;
+                }
+                if (isRescheduling && selectedSlot?.id) {
+                  setSelectedSlot({
+                    ...selectedSlot,
+                    time: timeStr,
+                    equipment,
+                    day,
+                    fullDate,
+                    full_date: fullDate,
+                    serviceId: srv.id,
+                    duration,
+                    buffer,
+                    sessionPreset: getPresetFromTimes(duration, buffer).id,
+                    outside_normal_hours: true,
+                  });
+                  setCurrentDate(new Date(fullDate + 'T12:00:00'));
+                  setViewMode('Día');
                   return;
                 }
                 openNewAppointment({
@@ -3930,7 +3955,7 @@ export default function AppLayout() {
           <div
             key={time}
             onClick={() => {
-              if (isPastTime(fullDate, time)) {
+              if (isPastTime(fullDate, time) && !(isRescheduling && selectedSlot?.id)) {
                 alert(a('pastScheduleAppt'));
                 return;
               }
@@ -8327,6 +8352,11 @@ export default function AppLayout() {
               <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-6 text-center">
                 <p className="text-xs font-black text-amber-700 uppercase">🟡 Fuera de horario definido</p>
                 <p className="text-[10px] font-bold text-amber-600 mt-1">Esta cita quedará marcada como fuera del horario normal del equipo.</p>
+              </div>
+            )}
+            {moveConfirmation.pastOverride && (
+              <div className="bg-orange-50 border border-orange-300 rounded-xl p-3 mb-6 text-center">
+                <p className="text-xs font-black text-orange-800 uppercase">{a('pastMoveOverrideHint')}</p>
               </div>
             )}
             <div className="flex flex-col sm:flex-row gap-2 sm:space-x-3 sm:gap-0">
