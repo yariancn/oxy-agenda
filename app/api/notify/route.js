@@ -23,7 +23,7 @@ export async function POST(request) {
       locale = 'es',
       type = 'both',
       prefers_email = true,
-      prefers_sms = true,
+      prefers_sms = false,
       notifyType = 'booking',
       emailTemplates = {},
       instructionsLabel = '',
@@ -95,7 +95,7 @@ export async function POST(request) {
 
     let smsTo = null;
 
-    if (phone && prefers_sms !== false && (type === 'both' || type === 'sms')) {
+    if (phone && prefers_sms === true && (type === 'both' || type === 'sms')) {
       smsTo = toE164Phone(phone, clinicName);
       const result = await sendPatientTextMessage({
         clinicName,

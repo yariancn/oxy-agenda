@@ -47,7 +47,7 @@ export default function PatientProfileModal({
     notes: sanitizePatientNotesForDisplay(initialData.patientNotes || initialData.notes || ''),
     is_blocked: initialData.is_blocked || false,
     prefers_email: initialData.prefers_email !== false,
-    prefers_sms: initialData.prefers_sms !== false,
+    prefers_sms: initialData.prefers_sms === true,
     wallets: repaired.wallets,
     packageHistory: initialData.packageHistory || [],
     historicoSesiones: initialData.historicoSesiones || 0,

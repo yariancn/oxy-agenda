@@ -333,7 +333,7 @@ export default function PublicBookingPortal({
         try {
           const patientNotifyPrefs = {
             prefers_email: true,
-            prefers_sms: locale !== 'en' || formData.smsConsent === true,
+            prefers_sms: formData.smsConsent === true,
           };
           const notifyChannels = resolveNotifyChannelsForPatient(
             dbConfig || {},

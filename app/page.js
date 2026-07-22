@@ -341,7 +341,7 @@ export default function AppLayout() {
   const [isEditingUser, setIsEditingUser] = useState(false);
 
   const [showNewPatientModal, setShowNewPatientModal] = useState(false);
-  const [newPatientData, setNewPatientData] = useState({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true });
+  const [newPatientData, setNewPatientData] = useState({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: false });
   
   const [showOOOModal, setShowOOOModal] = useState(false);
   const [oooData, setOOOData] = useState({
@@ -1019,7 +1019,7 @@ export default function AppLayout() {
         protocol: slot.protocol || targetPatient?.protocol || 'Wellness',
         notes: slot.patientNotes ?? sanitizePatientNotesForDisplay(targetPatient?.notes ?? ''),
         prefers_email: slot.prefers_email !== false,
-        prefers_sms: slot.prefers_sms !== false,
+        prefers_sms: slot.prefers_sms === true,
       });
       if (ensured.error) return ensured;
       return {
@@ -1228,7 +1228,7 @@ export default function AppLayout() {
         notes: sanitizePatientNotesForDisplay(p.notes || p.Notes || ''),
         is_blocked: p.is_blocked || false,
         prefers_email: p.prefers_email !== false,
-        prefers_sms: p.prefers_sms !== false,
+        prefers_sms: p.prefers_sms === true,
         wallets: repaired.wallets,
         packageHistory,
         historicoSesiones: p.historico_sesiones || 0,
@@ -1517,6 +1517,38 @@ export default function AppLayout() {
   useEffect(() => {
     if (currentUser) fetchAllData();
   }, [activeClinic, currentUser]);
+
+  // One-time SMS opt-in migrate + repair patients missing from directory but present on agenda.
+  useEffect(() => {
+    if (!currentUser) return;
+    const key = 'oxy_patient_dir_repair_v1';
+    if (typeof window !== 'undefined' && window.sessionStorage?.getItem(key)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await fetch('/api/staff/migrate-sms-optin', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ all: true }),
+        });
+        const res = await fetch('/api/staff/repair-orphan-patients', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ all: true, lookbackDays: 90 }),
+        });
+        if (!cancelled && res.ok) {
+          window.sessionStorage?.setItem(key, '1');
+          // Reload directory so newly created charts (e.g. Claudia) appear immediately.
+          await fetchAllData();
+        }
+      } catch {
+        /* ignore — can re-run on next session */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -2301,7 +2333,7 @@ export default function AppLayout() {
       serviceId: firstSrv?.id ?? '',
       is_new_patient: false,
       prefers_email: true,
-      prefers_sms: true,
+      prefers_sms: false,
       time: '',
       patient: '',
       outside_normal_hours: false,
@@ -2358,7 +2390,7 @@ export default function AppLayout() {
       sessionPreset: getPresetFromTimes(duration, buffer).id,
       is_new_patient: !exact,
       prefers_email: exact ? exact.prefers_email !== false : true,
-      prefers_sms: exact ? exact.prefers_sms !== false : true,
+      prefers_sms: exact ? exact.prefers_sms === true : false,
     };
   };
 
@@ -2668,7 +2700,7 @@ export default function AppLayout() {
       packageHistory: patInfo?.packageHistory || [],
       sessionPreset: getPresetFromTimes(app.duration, app.buffer).id,
       prefers_email: patInfo?.prefers_email !== false,
-      prefers_sms: patInfo?.prefers_sms !== false,
+      prefers_sms: patInfo?.prefers_sms === true,
       attendant: resolveDefaultAttendant(app.attendant),
       ...appointmentFlagsFromApp(app),
     }, patInfo));
@@ -2806,7 +2838,7 @@ export default function AppLayout() {
       return reportResult ? { skipped: true, reason } : null;
     }
 
-    if (!isManual && !forceNotify && prefersEmail === false && prefersSms === false) {
+    if (!isManual && !forceNotify && notifyType !== 'first' && prefersEmail === false && prefersSms !== true) {
       const reason = locale === 'en'
         ? 'Patient opted out of SMS and email.'
         : 'El paciente desactivó SMS y correo.';
@@ -4072,6 +4104,37 @@ export default function AppLayout() {
       let canonicalPhone = resolvedContact.phone;
       let canonicalEmail = resolvedContact.email;
       let isNewForAppointment = !!(slot.is_new_patient || newPatientForSlot);
+      let ensuredPatientId = slot.patientId || null;
+
+      const upsertLocalPatientFromEnsure = (ensured, extras = {}) => {
+        if (!ensured?.id) return;
+        const mapped = {
+          id: ensured.id,
+          patient: ensured.displayName || canonicalPatient,
+          phone: ensured.phone || canonicalPhone || '',
+          email: ensured.email || canonicalEmail || '',
+          protocol: slot.protocol || 'Wellness',
+          notes: sanitizePatientNotesForDisplay(slot.patientNotes || ''),
+          is_blocked: false,
+          prefers_email: slot.prefers_email !== false,
+          prefers_sms: slot.prefers_sms === true,
+          wallets: {},
+          packageHistory: [],
+          historicoSesiones: 0,
+          adeudo: 0,
+          sessionGroupId: null,
+          ...extras,
+        };
+        setDbPatients((prev) => {
+          const idx = (prev || []).findIndex((p) => String(p.id) === String(ensured.id));
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], ...mapped, wallets: next[idx].wallets || {}, packageHistory: next[idx].packageHistory || [] };
+            return next.sort((a, b) => a.patient.localeCompare(b.patient));
+          }
+          return [...(prev || []), mapped].sort((a, b) => a.patient.localeCompare(b.patient));
+        });
+      };
 
       const phoneDigits = digitsOnly(canonicalPhone).slice(-10);
       let namePolicy = 'keep_existing';
@@ -4118,7 +4181,7 @@ export default function AppLayout() {
           protocol: slot.protocol || 'Wellness',
           notes: slot.patientNotes || '',
           prefers_email: slot.prefers_email !== false,
-          prefers_sms: slot.prefers_sms !== false,
+          prefers_sms: slot.prefers_sms === true,
           namePolicy,
           forceCreate,
         });
@@ -4136,6 +4199,16 @@ export default function AppLayout() {
         canonicalPatient = ensured.displayName;
         canonicalPhone = ensured.phone;
         canonicalEmail = ensured.email;
+        ensuredPatientId = ensured.id || ensuredPatientId;
+        upsertLocalPatientFromEnsure(ensured, existingByPhone && !forceCreate ? {
+          wallets: existingByPhone.wallets,
+          packageHistory: existingByPhone.packageHistory,
+          historicoSesiones: existingByPhone.historicoSesiones,
+          adeudo: existingByPhone.adeudo,
+          sessionGroupId: existingByPhone.sessionGroupId,
+          is_blocked: existingByPhone.is_blocked,
+          notes: existingByPhone.notes,
+        } : {});
         if (ensured.isNew || ensured.forceCreated) isNewForAppointment = true;
       } else if (newPatientForSlot && !slot.id) {
         setAppointmentSaveFeedback({
@@ -4161,6 +4234,7 @@ export default function AppLayout() {
         if (contactResult.phone) canonicalPhone = contactResult.phone;
         if (contactResult.email) canonicalEmail = contactResult.email;
         if (contactResult.patient) canonicalPatient = contactResult.patient;
+        if (slot.patientId) ensuredPatientId = slot.patientId;
       }
 
       const basePayload = {
@@ -4181,6 +4255,7 @@ export default function AppLayout() {
         is_extended_block: isExtendedSession(slot),
         clinic: normalizeClinicId(activeClinic),
         promoter_code: normalizePromoCode(slot.promoter_code) || null,
+        ...(ensuredPatientId ? { patient_id: ensuredPatientId } : {}),
       };
 
       let createdCount = 0;
@@ -5884,8 +5959,8 @@ export default function AppLayout() {
                   </h4>
                   <p className="text-xs text-slate-500">
                     {locale === 'en'
-                      ? 'Turn each situation on/off. First visit always uses email + SMS. For the others, set defaults — patient prefs still win for that person.'
-                      : 'Enciende o apaga cada situación. Primera visita siempre va por correo + SMS. En las demás, elige defaults — las preferencias del paciente mandan.'}
+                      ? 'Turn each situation on/off. First visit always uses email + SMS. Everything else defaults to email only — enable SMS per patient with their checkbox.'
+                      : 'Enciende o apaga cada situación. Primera visita siempre va por correo + SMS. El resto va solo por correo — el SMS se activa por paciente con su checkbox.'}
                   </p>
                   <div className="space-y-3">
                     {messageTypeCards.map((card) => {
@@ -5894,7 +5969,7 @@ export default function AppLayout() {
                       const smsKey = `notify_use_sms_${card.id}`;
                       const forceBothChannels = card.id === 'first';
                       const useEmail = forceBothChannels ? true : dbCompanyConfig[emailKey] !== false;
-                      const useSms = forceBothChannels ? true : dbCompanyConfig[smsKey] !== false;
+                      const useSms = forceBothChannels ? true : dbCompanyConfig[smsKey] === true;
                       const channels = resolveNotifyChannels(dbCompanyConfig, card.id);
                       const editing = emailTemplateTab === card.id;
                       return (
@@ -7327,7 +7402,7 @@ export default function AppLayout() {
                     <p className="text-[8px] font-bold text-indigo-800/90">{L.p.appt.notifyPrefsHint}</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-[9px] font-black uppercase text-indigo-900">
-                        <input type="checkbox" checked={selectedSlot.prefers_sms !== false} onChange={e => setSelectedSlot({ ...selectedSlot, prefers_sms: e.target.checked })} className="w-4 h-4 shrink-0" />
+                        <input type="checkbox" checked={selectedSlot.prefers_sms === true} onChange={e => setSelectedSlot({ ...selectedSlot, prefers_sms: e.target.checked })} className="w-4 h-4 shrink-0" />
                         {L.modals.patient.receiveSms}
                       </label>
                       <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-[9px] font-black uppercase text-indigo-900">
@@ -7407,7 +7482,7 @@ export default function AppLayout() {
                                   email: savedEmail,
                                   notes: selectedSlot.patientNotes ?? p.notes,
                                   prefers_email: selectedSlot.prefers_email !== false,
-                                  prefers_sms: selectedSlot.prefers_sms !== false,
+                                  prefers_sms: selectedSlot.prefers_sms === true,
                                 }
                                 : p
                             )));
@@ -7722,7 +7797,7 @@ export default function AppLayout() {
                       protocol: exact ? exact.protocol : (prev?.protocol || ''),
                       patientNotes: exact ? exact.notes : (prev?.patientNotes || ''),
                       prefers_email: exact ? exact.prefers_email !== false : prev?.prefers_email !== false,
-                      prefers_sms: exact ? exact.prefers_sms !== false : prev?.prefers_sms !== false,
+                      prefers_sms: exact ? exact.prefers_sms === true : prev?.prefers_sms === true,
                       is_blocked: exact ? !!exact.is_blocked : false,
                     }));
                   }}
@@ -7736,7 +7811,7 @@ export default function AppLayout() {
                       protocol: p.protocol || '',
                       patientNotes: p.notes || '',
                       prefers_email: p.prefers_email !== false,
-                      prefers_sms: p.prefers_sms !== false,
+                      prefers_sms: p.prefers_sms === true,
                       is_blocked: !!p.is_blocked,
                     }));
                     if (p.is_blocked) {
@@ -7797,7 +7872,7 @@ export default function AppLayout() {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <label className="flex items-center gap-2 rounded-lg border-2 border-indigo-300 bg-white px-3 py-2 text-[10px] font-black uppercase text-indigo-900">
-                      <input type="checkbox" checked={selectedSlot?.prefers_sms !== false} onChange={e => setSelectedSlot({...selectedSlot, prefers_sms: e.target.checked})} className="w-4 h-4 shrink-0" />
+                      <input type="checkbox" checked={selectedSlot?.prefers_sms === true} onChange={e => setSelectedSlot({...selectedSlot, prefers_sms: e.target.checked})} className="w-4 h-4 shrink-0" />
                       {L.modals.patient.receiveSms}
                     </label>
                     <label className="flex items-center gap-2 rounded-lg border-2 border-indigo-300 bg-white px-3 py-2 text-[10px] font-black uppercase text-indigo-900">
@@ -8059,7 +8134,7 @@ export default function AppLayout() {
               <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
                 <div className="flex items-center gap-2">
                   <input type="checkbox" checked={newPatientData.prefers_sms} onChange={e => setNewPatientData({...newPatientData, prefers_sms: e.target.checked})} className="w-4 h-4" />
-                  <label className="text-[10px] font-black uppercase text-slate-700">Recibir SMS</label>
+                  <label className="text-[10px] font-black uppercase text-slate-700">{L.modals.patient.receiveSms}</label>
                 </div>
                 <div className="flex items-center gap-2">
                   <input type="checkbox" checked={newPatientData.prefers_email} onChange={e => setNewPatientData({...newPatientData, prefers_email: e.target.checked})} className="w-4 h-4" />
@@ -8091,7 +8166,7 @@ export default function AppLayout() {
                   autoCloseMs: 1000,
                   onDone: () => {
                     setShowNewPatientModal(false);
-                    setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true });
+                    setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: false });
                   },
                   action: async () => {
                     const result = await savePatientToDB(activeSupabase, {
@@ -8127,7 +8202,7 @@ export default function AppLayout() {
                   onDone: () => {
                     setShowNewPatientModal(false);
                     setShowNewAppointment(true);
-                    setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: true });
+                    setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: false });
                   },
                   action: async () => {
                     const result = await savePatientToDB(activeSupabase, {
@@ -8386,7 +8461,7 @@ export default function AppLayout() {
                 email: profilePatient?.email || selectedSlot.email || '',
                 patientNotes: sanitizePatientNotesForDisplay(profilePatient?.notes || selectedSlot.patientNotes || ''),
                 prefers_email: profilePatient?.prefers_email !== false && selectedSlot.prefers_email !== false,
-                prefers_sms: profilePatient?.prefers_sms !== false && selectedSlot.prefers_sms !== false,
+                prefers_sms: (profilePatient?.prefers_sms ?? selectedSlot.prefers_sms) === true,
               };
             })()}
             appointments={dbAppointments}

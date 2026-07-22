@@ -5,7 +5,7 @@ import {
   resolveNotifyChannelsForPatient,
 } from '../lib/notifySettings.js';
 
-// Admin: reminder email-only
+// Admin: reminder email-only (SMS not explicitly enabled)
 const configEmailOnlyReminder = {
   notify_channel_email: true,
   notify_channel_sms: true,
@@ -18,13 +18,29 @@ const clinic = resolveNotifyChannels(configEmailOnlyReminder, 'reminder');
 assert.equal(clinic.sendEmail, true);
 assert.equal(clinic.sendSms, false);
 
-// Patient wants SMS → SMS wins over Admin email-only
+// Patient SMS opt-in → SMS for non-first
 const patientWantsSms = resolveNotifyChannelsForPatient(configEmailOnlyReminder, 'reminder', {
   prefers_email: true,
   prefers_sms: true,
 });
 assert.equal(patientWantsSms.sendEmail, true);
 assert.equal(patientWantsSms.sendSms, true);
+
+// Default patient (SMS not opted in) → email only
+const defaultPatient = resolveNotifyChannelsForPatient(configEmailOnlyReminder, 'reminder', {
+  prefers_email: true,
+  prefers_sms: false,
+});
+assert.equal(defaultPatient.sendEmail, true);
+assert.equal(defaultPatient.sendSms, false);
+
+// Undefined SMS prefs also mean opt-out (email only)
+const undefinedSms = resolveNotifyChannelsForPatient(configEmailOnlyReminder, 'booking', {
+  prefers_email: true,
+  prefers_sms: undefined,
+});
+assert.equal(undefinedSms.sendEmail, true);
+assert.equal(undefinedSms.sendSms, false);
 
 // Patient SMS only
 const smsOnlyPatient = resolveNotifyChannelsForPatient(configEmailOnlyReminder, 'reminder', {
@@ -50,7 +66,6 @@ const clinicSmsOff = resolveNotifyChannelsForPatient({
 assert.equal(clinicSmsOff.sendEmail, true);
 assert.equal(clinicSmsOff.sendSms, false);
 
-// Auto notify no longer blocked just because per-event SMS is off
 assert.equal(getAutoNotifyBlockReason(configEmailOnlyReminder, 'reminder', 'es'), null);
 
 // First visit always email + SMS (ignores patient opt-out and per-event toggles)
@@ -71,5 +86,13 @@ const firstClinic = resolveNotifyChannels({
 }, 'first');
 assert.equal(firstClinic.sendEmail, true);
 assert.equal(firstClinic.sendSms, true);
+
+// Clinic defaults: non-first SMS off unless explicitly true
+const bookingClinic = resolveNotifyChannels({
+  notify_channel_email: true,
+  notify_channel_sms: true,
+}, 'booking');
+assert.equal(bookingClinic.sendEmail, true);
+assert.equal(bookingClinic.sendSms, false);
 
 console.log('verify-patient-notify-channels: OK');
