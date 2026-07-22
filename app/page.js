@@ -1072,14 +1072,19 @@ export default function AppLayout() {
         setDbErrorMessage('');
       }
 
-      // Motor de Paginación para evadir el límite de 1000 de Supabase
+      // Motor de Paginación para evadir el límite de 1000 de Supabase.
+      // CRITICAL: always ORDER BY a unique column before range — without it Postgres
+      // returns an unstable physical order and patients randomly disappear across loads
+      // (e.g. found when booking Monday, missing when booking Tuesday).
       const fetchPaginated = async (table, {
         clinicScoped = false,
         dateCol = null,
         dateFrom = null,
         dateTo = null,
+        orderCol = 'id',
       } = {}) => {
         let allData = [];
+        const seenIds = new Set();
         let from = 0;
         const step = 1000;
         let useClinicFilter = clinicScoped && shouldScopeTableByClinic(clinicId);
@@ -1088,11 +1093,14 @@ export default function AppLayout() {
           if (useClinicFilter) query = query.eq('clinic', clinicId);
           if (dateCol && dateFrom) query = query.gte(dateCol, dateFrom);
           if (dateCol && dateTo) query = query.lte(dateCol, dateTo);
+          // Stable unique order is required for correct OFFSET/RANGE pagination.
+          query = query.order(orderCol, { ascending: true });
           let result = await query.range(from, from + step - 1);
           if (result?.error && useClinicFilter && isMissingClinicColumnError(result.error)) {
             useClinicFilter = false;
             from = 0;
             allData = [];
+            seenIds.clear();
             continue;
           }
           result = assertDbResult(table, result);
@@ -1101,7 +1109,14 @@ export default function AppLayout() {
             data = filterRowsByClinic(data, clinicId);
           }
           if (!data || data.length === 0) break;
-          allData = [...allData, ...data];
+          for (const row of data) {
+            const key = row?.id != null ? String(row.id) : null;
+            if (key) {
+              if (seenIds.has(key)) continue;
+              seenIds.add(key);
+            }
+            allData.push(row);
+          }
           if (data.length < step) break;
           from += step;
         }
@@ -1521,7 +1536,7 @@ export default function AppLayout() {
   // One-time SMS opt-in migrate + repair patients missing from directory but present on agenda.
   useEffect(() => {
     if (!currentUser) return;
-    const key = 'oxy_patient_dir_repair_v1';
+    const key = 'oxy_patient_dir_repair_v2';
     if (typeof window !== 'undefined' && window.sessionStorage?.getItem(key)) return;
     let cancelled = false;
     (async () => {
@@ -1767,6 +1782,24 @@ export default function AppLayout() {
     () => dbAppointments.map((app) => withCanonicalPatientName(app, dbPatients)),
     [dbAppointments, dbPatients],
   );
+
+  // Unique names/phones from agenda so autocomplete works even if a chart was missing from a bad page load.
+  const patientAppointmentHints = useMemo(() => {
+    const byName = new Map();
+    for (const app of dbAppointments || []) {
+      const name = String(app.patient || '').trim();
+      if (!name) continue;
+      const key = normalizeStr(name);
+      if (!key || byName.has(key)) continue;
+      byName.set(key, {
+        patient: name,
+        phone: app.phone || '',
+        email: app.email || '',
+        patient_id: app.patient_id || null,
+      });
+    }
+    return [...byName.values()];
+  }, [dbAppointments]);
 
   const getAssessmentAppsForDay = useCallback((fullDate) => {
     if (!assessmentService) return [];
@@ -7779,6 +7812,7 @@ export default function AppLayout() {
                 <label className="text-[10px] font-black uppercase text-slate-500">Paciente</label>
                 <PatientSearchInput
                   patients={dbPatients}
+                  appointmentHints={patientAppointmentHints}
                   value={selectedSlot?.patient || ''}
                   selectedPatientId={selectedSlot?.patientId || null}
                   placeholder={L.p.appt.searchPatient}
@@ -7788,12 +7822,15 @@ export default function AppLayout() {
                   className="w-full p-3 border border-slate-300 rounded-xl font-bold uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white mt-1"
                   onQueryChange={(pName) => {
                     const exact = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(pName));
+                    const hint = !exact
+                      ? patientAppointmentHints.find((h) => normalizeStr(h.patient) === normalizeStr(pName))
+                      : null;
                     setSelectedSlot((prev) => ({
                       ...(prev || createEmptyAppointmentDraft()),
                       patient: pName,
                       patientId: exact?.id || null,
-                      phone: exact ? exact.phone : (prev?.phone || ''),
-                      email: exact ? exact.email : (prev?.email || ''),
+                      phone: exact ? exact.phone : (hint?.phone || prev?.phone || ''),
+                      email: exact ? exact.email : (hint?.email || prev?.email || ''),
                       protocol: exact ? exact.protocol : (prev?.protocol || ''),
                       patientNotes: exact ? exact.notes : (prev?.patientNotes || ''),
                       prefers_email: exact ? exact.prefers_email !== false : prev?.prefers_email !== false,
@@ -7805,7 +7842,7 @@ export default function AppLayout() {
                     setSelectedSlot((prev) => ({
                       ...(prev || createEmptyAppointmentDraft()),
                       patient: p.patient,
-                      patientId: p.id,
+                      patientId: p.id || null,
                       phone: p.phone || '',
                       email: p.email || '',
                       protocol: p.protocol || '',
