@@ -2,6 +2,14 @@
 -- NO ejecutar en Houston: usa scripts/supabase-tx-repair-all.sql en Supabase TX.
 -- Cubre citas de Oxygengdl y Oxygengdl2 (misma BD); GDL2 está bloqueada en la app.
 
+-- Preferencias de aviso en expediente (fuente única)
+ALTER TABLE patients
+  ADD COLUMN IF NOT EXISTS prefers_email boolean DEFAULT true,
+  ADD COLUMN IF NOT EXISTS prefers_sms boolean DEFAULT false;
+
+UPDATE patients SET prefers_sms = false WHERE prefers_sms IS NULL;
+UPDATE patients SET prefers_email = true WHERE prefers_email IS NULL;
+
 ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS patient_id uuid REFERENCES patients(id) ON DELETE SET NULL;
 

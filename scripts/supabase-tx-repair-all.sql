@@ -2,6 +2,22 @@
 -- Ejecutar UNA vez en el SQL Editor del proyecto Supabase TX (NO en GDL).
 -- Para Guadalajara usa scripts/supabase-gdl-repair-all.sql en la BD GDL.
 
+-- Preferencias de notificación en expediente (fuente única; no usar appointments.prefers_*)
+ALTER TABLE patients
+  ADD COLUMN IF NOT EXISTS prefers_email boolean DEFAULT true,
+  ADD COLUMN IF NOT EXISTS prefers_sms boolean DEFAULT false;
+
+ALTER TABLE patients
+  ALTER COLUMN prefers_sms SET DEFAULT false;
+
+UPDATE patients
+SET prefers_sms = false
+WHERE prefers_sms IS NULL;
+
+UPDATE patients
+SET prefers_email = true
+WHERE prefers_email IS NULL;
+
 ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS patient_id uuid REFERENCES patients(id) ON DELETE SET NULL;
 
