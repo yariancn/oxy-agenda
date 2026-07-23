@@ -334,6 +334,7 @@ export default function PublicBookingPortal({
           const patientNotifyPrefs = {
             prefers_email: true,
             prefers_sms: formData.smsConsent === true,
+            prefers_sms_reminder: true,
           };
           const notifyChannels = resolveNotifyChannelsForPatient(
             dbConfig || {},

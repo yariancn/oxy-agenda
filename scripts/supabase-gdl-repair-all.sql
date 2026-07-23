@@ -5,10 +5,12 @@
 -- Preferencias de aviso en expediente (fuente única)
 ALTER TABLE patients
   ADD COLUMN IF NOT EXISTS prefers_email boolean DEFAULT true,
-  ADD COLUMN IF NOT EXISTS prefers_sms boolean DEFAULT false;
+  ADD COLUMN IF NOT EXISTS prefers_sms boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS prefers_sms_reminder boolean DEFAULT true;
 
 UPDATE patients SET prefers_sms = false WHERE prefers_sms IS NULL;
 UPDATE patients SET prefers_email = true WHERE prefers_email IS NULL;
+UPDATE patients SET prefers_sms_reminder = true WHERE prefers_sms_reminder IS NULL;
 
 ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS patient_id uuid REFERENCES patients(id) ON DELETE SET NULL;
@@ -64,7 +66,7 @@ ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS reminder_sent_at timestamptz;
 
 ALTER TABLE company_config
-  ADD COLUMN IF NOT EXISTS notify_auto_reminder boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS notify_auto_reminder boolean DEFAULT true,
   ADD COLUMN IF NOT EXISTS notify_sms_reminder text,
   ADD COLUMN IF NOT EXISTS notify_subject_reminder text,
   ADD COLUMN IF NOT EXISTS notify_body_reminder text,

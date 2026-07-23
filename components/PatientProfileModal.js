@@ -48,6 +48,7 @@ export default function PatientProfileModal({
     is_blocked: initialData.is_blocked || false,
     prefers_email: initialData.prefers_email !== false,
     prefers_sms: initialData.prefers_sms === true,
+    prefers_sms_reminder: initialData.prefers_sms_reminder !== false,
     wallets: repaired.wallets,
     packageHistory: initialData.packageHistory || [],
     historicoSesiones: initialData.historicoSesiones || 0,
@@ -376,14 +377,18 @@ export default function PatientProfileModal({
                 <p className="text-[10px] font-black uppercase text-indigo-900">{t.notifyPrefsTitle}</p>
                 <p className="text-[8px] font-bold text-indigo-800/90 mt-1">{t.notifyPrefsHint}</p>
               </div>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900 flex-1">
-                  <input type="checkbox" checked={formData.prefers_sms} onChange={(e) => handleChange('prefers_sms', e.target.checked)} className="w-4 h-4 shrink-0" />
-                  {t.receiveSms}
-                </label>
-                <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900 flex-1">
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900">
                   <input type="checkbox" checked={formData.prefers_email} onChange={(e) => handleChange('prefers_email', e.target.checked)} className="w-4 h-4 shrink-0" />
                   {t.receiveEmail}
+                </label>
+                <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900">
+                  <input type="checkbox" checked={formData.prefers_sms_reminder} onChange={(e) => handleChange('prefers_sms_reminder', e.target.checked)} className="w-4 h-4 shrink-0" />
+                  {t.receiveSmsReminder}
+                </label>
+                <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900">
+                  <input type="checkbox" checked={formData.prefers_sms} onChange={(e) => handleChange('prefers_sms', e.target.checked)} className="w-4 h-4 shrink-0" />
+                  {t.receiveSms}
                 </label>
               </div>
             </div>

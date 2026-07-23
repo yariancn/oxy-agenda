@@ -342,7 +342,7 @@ export default function AppLayout() {
   const [isEditingUser, setIsEditingUser] = useState(false);
 
   const [showNewPatientModal, setShowNewPatientModal] = useState(false);
-  const [newPatientData, setNewPatientData] = useState({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: false });
+  const [newPatientData, setNewPatientData] = useState({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: false, prefers_sms_reminder: true });
   
   const [showOOOModal, setShowOOOModal] = useState(false);
   const [oooData, setOOOData] = useState({
@@ -446,7 +446,7 @@ export default function AppLayout() {
         ? `Sent automatically about ${dbCompanyConfig.reminder_hours || 24} hours before the appointment (once per day check).`
         : `Se envía solo, unas ${dbCompanyConfig.reminder_hours || 24} horas antes de la cita (revisión una vez al día).`,
       autoKey: 'notify_auto_reminder',
-      defaultOn: false,
+      defaultOn: true,
     },
   ];
 
@@ -960,6 +960,7 @@ export default function AppLayout() {
       notes: pData.notes,
       prefers_email: pData.prefers_email,
       prefers_sms: pData.prefers_sms,
+      prefers_sms_reminder: pData.prefers_sms_reminder,
       namePolicy,
       forceCreate,
     });
@@ -998,6 +999,7 @@ export default function AppLayout() {
         notes: slot.patientNotes ?? sanitizePatientNotesForDisplay(pat.notes ?? ''),
         prefers_email: pat.prefers_email,
         prefers_sms: pat.prefers_sms,
+        prefers_sms_reminder: pat.prefers_sms_reminder,
       });
       if (upRes.error) return { error: upRes.error };
       return {
@@ -1023,6 +1025,7 @@ export default function AppLayout() {
         notes: slot.patientNotes ?? sanitizePatientNotesForDisplay(targetPatient?.notes ?? ''),
         prefers_email: true,
         prefers_sms: false,
+        prefers_sms_reminder: true,
       });
       if (ensured.error) return ensured;
       return {
@@ -1247,6 +1250,7 @@ export default function AppLayout() {
         is_blocked: p.is_blocked || false,
         prefers_email: p.prefers_email !== false,
         prefers_sms: p.prefers_sms === true,
+        prefers_sms_reminder: p.prefers_sms_reminder !== false,
         wallets: repaired.wallets,
         packageHistory,
         historicoSesiones: p.historico_sesiones || 0,
@@ -1319,9 +1323,19 @@ export default function AppLayout() {
           notify_auto_booking: resC.data.notify_auto_booking !== false,
           notify_auto_reschedule: resC.data.notify_auto_reschedule !== false,
           notify_auto_cancel: resC.data.notify_auto_cancel !== false,
-          notify_auto_reminder: resC.data.notify_auto_reminder === true,
+          notify_auto_reminder: resC.data.notify_auto_reminder !== false,
           notify_channel_email: resC.data.notify_channel_email !== false,
           notify_channel_sms: resC.data.notify_channel_sms !== false,
+          notify_use_email_first: resC.data.notify_use_email_first !== false,
+          notify_use_sms_first: resC.data.notify_use_sms_first !== false,
+          notify_use_email_booking: resC.data.notify_use_email_booking !== false,
+          notify_use_sms_booking: resC.data.notify_use_sms_booking !== false,
+          notify_use_email_reschedule: resC.data.notify_use_email_reschedule !== false,
+          notify_use_sms_reschedule: resC.data.notify_use_sms_reschedule !== false,
+          notify_use_email_cancel: resC.data.notify_use_email_cancel !== false,
+          notify_use_sms_cancel: resC.data.notify_use_sms_cancel !== false,
+          notify_use_email_reminder: resC.data.notify_use_email_reminder !== false,
+          notify_use_sms_reminder: resC.data.notify_use_sms_reminder !== false,
           notify_on_booking: resC.data.notify_on_booking !== false,
           notify_staff_on_booking: resC.data.notify_staff_on_booking === true,
           staff_alert_first_sessions_only: resC.data.staff_alert_first_sessions_only === true,
@@ -2370,6 +2384,7 @@ export default function AppLayout() {
       is_new_patient: false,
       prefers_email: true,
       prefers_sms: false,
+      prefers_sms_reminder: true,
       time: '',
       patient: '',
       outside_normal_hours: false,
@@ -2427,6 +2442,7 @@ export default function AppLayout() {
       is_new_patient: !exact,
       prefers_email: exact ? exact.prefers_email !== false : true,
       prefers_sms: exact ? exact.prefers_sms === true : false,
+      prefers_sms_reminder: exact ? exact.prefers_sms_reminder !== false : true,
     };
   };
 
@@ -2737,6 +2753,7 @@ export default function AppLayout() {
       sessionPreset: getPresetFromTimes(app.duration, app.buffer).id,
       prefers_email: patInfo?.prefers_email !== false,
       prefers_sms: patInfo?.prefers_sms === true,
+      prefers_sms_reminder: patInfo?.prefers_sms_reminder !== false,
       attendant: resolveDefaultAttendant(app.attendant),
       ...appointmentFlagsFromApp(app),
     }, patInfo));
@@ -2823,6 +2840,7 @@ export default function AppLayout() {
       email: contact.email,
       prefers_email: pat ? pat.prefers_email !== false : true,
       prefers_sms: pat ? pat.prefers_sms === true : false,
+      prefers_sms_reminder: pat ? pat.prefers_sms_reminder !== false : true,
     };
   };
 
@@ -2862,23 +2880,17 @@ export default function AppLayout() {
 
     const prefersEmail = contact.prefers_email;
     const prefersSms = contact.prefers_sms;
-    // Patient prefs dominate Admin → Messages per-event Correo/SMS.
+    const prefersSmsReminder = contact.prefers_sms_reminder;
     const { sendEmail, sendSms } = resolveNotifyChannelsForPatient(dbCompanyConfig, notifyType, {
       prefers_email: prefersEmail,
       prefers_sms: prefersSms,
+      prefers_sms_reminder: prefersSmsReminder,
     });
     if (!sendEmail && !sendSms) {
       const reason = locale === 'en'
         ? 'Patient opted out of SMS and email (or clinic-wide channels are off).'
         : 'El paciente desactivó SMS y correo (o los canales de clínica están apagados).';
       if (showSuccess) alert(reason);
-      return reportResult ? { skipped: true, reason } : null;
-    }
-
-    if (!isManual && !forceNotify && notifyType !== 'first' && prefersEmail === false && prefersSms !== true) {
-      const reason = locale === 'en'
-        ? 'Patient opted out of SMS and email.'
-        : 'El paciente desactivó SMS y correo.';
       return reportResult ? { skipped: true, reason } : null;
     }
 
@@ -4155,6 +4167,7 @@ export default function AppLayout() {
           is_blocked: false,
           prefers_email: slot.prefers_email !== false,
           prefers_sms: slot.prefers_sms === true,
+          prefers_sms_reminder: slot.prefers_sms_reminder !== false,
           wallets: {},
           packageHistory: [],
           historicoSesiones: 0,
@@ -4219,6 +4232,7 @@ export default function AppLayout() {
           notes: slot.patientNotes || '',
           prefers_email: slot.prefers_email !== false,
           prefers_sms: slot.prefers_sms === true,
+          prefers_sms_reminder: slot.prefers_sms_reminder !== false,
           namePolicy,
           forceCreate,
         });
@@ -4367,6 +4381,7 @@ export default function AppLayout() {
           email: canonicalEmail,
           prefers_email: slot.prefers_email ?? resolvedContact.prefers_email,
           prefers_sms: slot.prefers_sms ?? resolvedContact.prefers_sms,
+          prefers_sms_reminder: slot.prefers_sms_reminder ?? resolvedContact.prefers_sms_reminder,
           is_new_patient: isNewForAppointment,
         }, { reportResult: true });
         const staffNotifyResult = await alertStaffNewBooking({
@@ -5996,8 +6011,8 @@ export default function AppLayout() {
                   </h4>
                   <p className="text-xs text-slate-500">
                     {locale === 'en'
-                      ? 'Turn each situation on/off. First visit always uses email + SMS. Everything else defaults to email only — enable SMS per patient with their checkbox.'
-                      : 'Enciende o apaga cada situación. Primera visita siempre va por correo + SMS. El resto va solo por correo — el SMS se activa por paciente con su checkbox.'}
+                      ? 'Turn each situation on/off. Clinic defaults keep email + SMS available. First visit always uses both. Patient chart controls: email, reminder SMS, and booking/change SMS.'
+                      : 'Enciende o apaga cada situación. En clínica quedan correo + SMS disponibles. Primera visita siempre usa ambos. En el expediente: correo, SMS recordatorio y SMS de programación/cambios.'}
                   </p>
                   <div className="space-y-3">
                     {messageTypeCards.map((card) => {
@@ -6006,7 +6021,7 @@ export default function AppLayout() {
                       const smsKey = `notify_use_sms_${card.id}`;
                       const forceBothChannels = card.id === 'first';
                       const useEmail = forceBothChannels ? true : dbCompanyConfig[emailKey] !== false;
-                      const useSms = forceBothChannels ? true : dbCompanyConfig[smsKey] === true;
+                      const useSms = forceBothChannels ? true : dbCompanyConfig[smsKey] !== false;
                       const channels = resolveNotifyChannels(dbCompanyConfig, card.id);
                       const editing = emailTemplateTab === card.id;
                       return (
@@ -7824,6 +7839,7 @@ export default function AppLayout() {
                       patientNotes: exact ? exact.notes : (prev?.patientNotes || ''),
                       prefers_email: exact ? exact.prefers_email !== false : prev?.prefers_email !== false,
                       prefers_sms: exact ? exact.prefers_sms === true : prev?.prefers_sms === true,
+                      prefers_sms_reminder: exact ? exact.prefers_sms_reminder !== false : prev?.prefers_sms_reminder !== false,
                       is_blocked: exact ? !!exact.is_blocked : false,
                     }));
                   }}
@@ -7838,6 +7854,7 @@ export default function AppLayout() {
                       patientNotes: p.notes || '',
                       prefers_email: p.prefers_email !== false,
                       prefers_sms: p.prefers_sms === true,
+                      prefers_sms_reminder: p.prefers_sms_reminder !== false,
                       is_blocked: !!p.is_blocked,
                     }));
                     if (p.is_blocked) {
@@ -8148,14 +8165,18 @@ export default function AppLayout() {
                   {dbProtocols.filter(p => p.is_active).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
                 </select>
               </div>
-              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" checked={newPatientData.prefers_email} onChange={e => setNewPatientData({...newPatientData, prefers_email: e.target.checked})} className="w-4 h-4" />
+                  <label className="text-[10px] font-black uppercase text-slate-700">{L.modals.patient.receiveEmail}</label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input type="checkbox" checked={newPatientData.prefers_sms_reminder} onChange={e => setNewPatientData({...newPatientData, prefers_sms_reminder: e.target.checked})} className="w-4 h-4" />
+                  <label className="text-[10px] font-black uppercase text-slate-700">{L.modals.patient.receiveSmsReminder}</label>
+                </div>
                 <div className="flex items-center gap-2">
                   <input type="checkbox" checked={newPatientData.prefers_sms} onChange={e => setNewPatientData({...newPatientData, prefers_sms: e.target.checked})} className="w-4 h-4" />
                   <label className="text-[10px] font-black uppercase text-slate-700">{L.modals.patient.receiveSms}</label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" checked={newPatientData.prefers_email} onChange={e => setNewPatientData({...newPatientData, prefers_email: e.target.checked})} className="w-4 h-4" />
-                  <label className="text-[10px] font-black uppercase text-slate-700">Recibir Correo</label>
                 </div>
               </div>
               <div className="bg-amber-50 p-3 border border-amber-200 rounded-xl">
@@ -8183,7 +8204,7 @@ export default function AppLayout() {
                   autoCloseMs: 1000,
                   onDone: () => {
                     setShowNewPatientModal(false);
-                    setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: false });
+                    setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: false, prefers_sms_reminder: true });
                   },
                   action: async () => {
                     const result = await savePatientToDB(activeSupabase, {
@@ -8194,6 +8215,7 @@ export default function AppLayout() {
                       notes: newPatientData.notes,
                       prefers_email: newPatientData.prefers_email,
                       prefers_sms: newPatientData.prefers_sms,
+                      prefers_sms_reminder: newPatientData.prefers_sms_reminder,
                     });
                     if (result.cancelled || result.error?.message === 'CANCELADO') {
                       return { cancelled: true };
@@ -8219,7 +8241,7 @@ export default function AppLayout() {
                   onDone: () => {
                     setShowNewPatientModal(false);
                     setShowNewAppointment(true);
-                    setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: false });
+                    setNewPatientData({ name: '', phone: '', email: '', protocol: 'Wellness', notes: '', prefers_email: true, prefers_sms: false, prefers_sms_reminder: true });
                   },
                   action: async () => {
                     const result = await savePatientToDB(activeSupabase, {
@@ -8230,6 +8252,7 @@ export default function AppLayout() {
                       notes: newPatientData.notes,
                       prefers_email: newPatientData.prefers_email,
                       prefers_sms: newPatientData.prefers_sms,
+                      prefers_sms_reminder: newPatientData.prefers_sms_reminder,
                     });
                     if (result.cancelled || result.error?.message === 'CANCELADO') {
                       return { cancelled: true };
@@ -8246,6 +8269,7 @@ export default function AppLayout() {
                       patientNotes: newPatientData.notes,
                       prefers_email: newPatientData.prefers_email,
                       prefers_sms: newPatientData.prefers_sms,
+                      prefers_sms_reminder: newPatientData.prefers_sms_reminder,
                       status: 'available',
                       is_new_patient: !result.linkedExisting,
                     });
@@ -8479,6 +8503,7 @@ export default function AppLayout() {
                 patientNotes: sanitizePatientNotesForDisplay(profilePatient?.notes || selectedSlot.patientNotes || ''),
                 prefers_email: profilePatient?.prefers_email !== false,
                 prefers_sms: profilePatient?.prefers_sms === true,
+                prefers_sms_reminder: profilePatient?.prefers_sms_reminder !== false,
               };
             })()}
             appointments={dbAppointments}
@@ -8640,6 +8665,7 @@ export default function AppLayout() {
                   is_blocked: ud.is_blocked,
                   prefers_email: ud.prefers_email !== false,
                   prefers_sms: ud.prefers_sms === true,
+                  prefers_sms_reminder: ud.prefers_sms_reminder !== false,
                   wallets: repairedWallets,
                   packageHistory: ud.packageHistory,
                   historicoSesiones: ud.historicoSesiones,
@@ -8661,6 +8687,7 @@ export default function AppLayout() {
                       is_blocked: !!ud.is_blocked,
                       prefers_email: ud.prefers_email !== false,
                       prefers_sms: ud.prefers_sms === true,
+                      prefers_sms_reminder: ud.prefers_sms_reminder !== false,
                       wallets: repairedWallets,
                       packageHistory: ud.packageHistory,
                       historicoSesiones: ud.historicoSesiones,
@@ -8695,6 +8722,7 @@ export default function AppLayout() {
                   notes: ud.notes || '',
                   prefers_email: ud.prefers_email !== false,
                   prefers_sms: ud.prefers_sms === true,
+                  prefers_sms_reminder: ud.prefers_sms_reminder !== false,
                 });
                 if (ensured.error) {
                   return alert(a('saveClientError', ensured.error.message));
@@ -8714,6 +8742,7 @@ export default function AppLayout() {
                       patientNotes: ud.notes,
                       prefers_email: ud.prefers_email !== false,
                       prefers_sms: ud.prefers_sms === true,
+                      prefers_sms_reminder: ud.prefers_sms_reminder !== false,
                     }
                     : prev
                 ));
