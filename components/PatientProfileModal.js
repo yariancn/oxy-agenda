@@ -180,6 +180,7 @@ export default function PatientProfileModal({
     const newTransaction = {
       id: Date.now(),
       ticketNumber: ticketNumber || Date.now(),
+      createdAt: new Date().toISOString(),
       date: new Date().toLocaleDateString(locale === 'en' ? 'en-US' : 'es-MX', {
         year: 'numeric',
         month: 'short',

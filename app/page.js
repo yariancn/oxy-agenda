@@ -93,6 +93,7 @@ import {
   withCanonicalPatientName,
 } from '../lib/patientNameSync';
 import { downloadCsv } from '../lib/reportCsvExport';
+import { buildSalesReportCsv } from '../lib/salesReportExport';
 import {
   sanitizeAppointmentNotesForDisplay,
   sanitizePatientNotesForDisplay,
@@ -3825,43 +3826,20 @@ export default function AppLayout() {
 
   const downloadSalesReportCsv = () => {
     const R = L.p.reports;
-    const start = reportStartDate <= reportEndDate ? reportStartDate : reportEndDate;
-    const end = reportStartDate <= reportEndDate ? reportEndDate : reportStartDate;
-    const salesRows = dbPatients
-      .flatMap((p) => (p.packageHistory || []).map((tx) => ({
-        ...tx,
-        patientId: p.id,
-        patientName: p.patient,
-      })))
-      .filter((tx) => {
-        const d = String(tx.date || '').slice(0, 10);
-        if (!d) return true;
-        return d >= start && d <= end;
-      })
-      .sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-    if (!salesRows.length) return alert(R.downloadEmpty);
+    const built = buildSalesReportCsv({
+      patients: dbPatients,
+      sessionGroups: dbSessionGroups,
+      startDate: reportStartDate,
+      endDate: reportEndDate,
+      currency: currencyStr,
+      locale,
+      clinicSlug: clinicSlugForExport(),
+    });
+    if (!built.csvRows.length) return alert(R.downloadEmpty);
     downloadCsv({
-      filename: `ventas_${clinicSlugForExport()}_${start}_${end}.csv`,
-      headers: [
-        locale === 'en' ? 'Ticket' : 'Ticket',
-        locale === 'en' ? 'Date' : 'Fecha',
-        R.apptsColPatient,
-        locale === 'en' ? 'Package / service' : 'Paquete / servicio',
-        locale === 'en' ? 'Sessions' : 'Sesiones',
-        locale === 'en' ? 'Amount' : 'Monto',
-        locale === 'en' ? 'Currency' : 'Moneda',
-        locale === 'en' ? 'Payment method' : 'Método de pago',
-      ],
-      rows: salesRows.map((tx) => [
-        tx.ticketNumber || tx.ticket_number || String(tx.id || '').slice(-6),
-        tx.date || '',
-        tx.patientName || '',
-        tx.serviceName || '',
-        tx.sessions ?? '',
-        tx.price ?? '',
-        currencyStr,
-        tx.paymentMethod || '',
-      ]),
+      filename: built.filename,
+      headers: built.headers,
+      rows: built.csvRows,
     });
   };
 
@@ -5843,7 +5821,18 @@ export default function AppLayout() {
                     <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-2xl flex flex-col justify-center items-center shadow-sm">
                       <span className="text-xs font-black text-emerald-800 uppercase tracking-widest mb-2">Ingresos Totales ({currencyStr})</span>
                       <span className="text-4xl font-black text-emerald-600">
-                        ${dbPatients.flatMap(p => p.packageHistory || []).filter(tx => tx.price > 0).reduce((acc, curr) => acc + (Number(curr.price) || 0), 0).toLocaleString()} {currencyStr}
+                        ${(() => {
+                          const { rows } = buildSalesReportCsv({
+                            patients: dbPatients,
+                            sessionGroups: dbSessionGroups,
+                            startDate: reportStartDate,
+                            endDate: reportEndDate,
+                          });
+                          return rows
+                            .filter((tx) => Number(tx.price) > 0)
+                            .reduce((acc, curr) => acc + (Number(curr.price) || 0), 0)
+                            .toLocaleString();
+                        })()} {currencyStr}
                       </span>
                     </div>
                     <div className="bg-slate-50 border border-slate-200 p-6 rounded-2xl flex flex-col justify-center items-center shadow-sm">
@@ -5862,10 +5851,12 @@ export default function AppLayout() {
                      <table className="w-full text-left border-collapse bg-white">
                         <thead className="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-200 sticky top-10 shadow-sm">
                            <tr>
-                              <th className="p-4">Fecha Ticket</th>
+                              <th className="p-4">Ticket / Fecha</th>
                               <th className="p-4">Paciente</th>
-                              <th className="p-4">Paquete Vendido</th>
-                              <th className="p-4 text-right">Monto / Método</th>
+                              <th className="p-4">Paquete</th>
+                              <th className="p-4 text-center">Sesiones</th>
+                              <th className="p-4 text-right">Cantidad pagada</th>
+                              <th className="p-4">Tipo de pago</th>
                               <th className="p-4 text-center">Acciones</th>
                            </tr>
                         </thead>
@@ -5880,11 +5871,14 @@ export default function AppLayout() {
                                  <td className="p-4 font-black text-slate-800 text-sm uppercase">{tx.patientName}</td>
                                  <td className="p-4">
                                     <p className="font-bold text-blue-600 text-xs uppercase">{tx.serviceName}</p>
-                                    <p className="text-[9px] font-black text-slate-400 uppercase mt-0.5">+{tx.sessions} SESIONES A CARTERA</p>
+                                    {tx.partialPayment ? (
+                                      <p className="text-[9px] font-black text-amber-600 uppercase mt-0.5">Pago parcial</p>
+                                    ) : null}
                                  </td>
-                                 <td className="p-4 text-right">
-                                    <p className="font-black text-emerald-600 text-sm">${tx.price} {currencyStr}</p>
-                                    <p className="text-[9px] font-black text-slate-400 uppercase mt-0.5 bg-slate-100 inline-block px-2 py-0.5 rounded">{tx.paymentMethod || 'Tarjeta'}</p>
+                                 <td className="p-4 text-center font-black text-slate-800 text-sm">{tx.sessions ?? '—'}</td>
+                                 <td className="p-4 text-right font-black text-emerald-600 text-sm">${tx.price} {currencyStr}</td>
+                                 <td className="p-4">
+                                    <span className="text-[9px] font-black text-slate-500 uppercase bg-slate-100 inline-block px-2 py-0.5 rounded">{tx.paymentMethod || '—'}</span>
                                  </td>
                                  <td className="p-4 text-center">
                                    <div className="flex flex-col gap-1 items-center">
@@ -5902,7 +5896,7 @@ export default function AppLayout() {
                                    </div>
                                  </td>
                               </tr>
-                           ))}
+                            ))}
                         </tbody>
                      </table>
                   </div>
