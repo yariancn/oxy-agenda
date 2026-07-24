@@ -1,8 +1,8 @@
 "use client";
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useStaffLocale } from './StaffLocaleContext';
 import PosReceiptModal from './PosReceiptModal';
-import { adjustWalletSessions, applyPurchaseSessions, priceWalletKey, reversePurchaseSessions, sumWalletBalance, resolveWalletStorageKey, formatWalletKeyLabel, repairLegacyWalletKeys } from '../lib/sessionWallet';
+import { adjustWalletSessions, applyPurchaseSessions, priceWalletKey, reversePurchaseSessions, sumWalletBalance, resolveWalletStorageKey, formatWalletKeyLabel, reconcilePatientWalletState } from '../lib/sessionWallet';
 import { sumPurchasedSessions } from '../lib/sessionSummary';
 import { canCreateSessionGroup, canJoinSessionGroup, isGroupTitular } from '../lib/sessionGroup';
 import { sanitizePatientNotesForDisplay } from '../lib/patientNotes';
@@ -36,7 +36,13 @@ export default function PatientProfileModal({
   const canCancelSales = currentUserLevel <= 2;
 
   const [formData, setFormData] = useState(() => {
-    const repaired = repairLegacyWalletKeys(initialData.wallets || {}, initialData.packageHistory || []);
+    const packageHistory = initialData.packageHistory || [];
+    const reconciled = reconcilePatientWalletState({
+      wallets: initialData.wallets || {},
+      adeudo: Number(initialData.adeudo) || 0,
+      historicoSesiones: initialData.historicoSesiones || 0,
+      packageHistory,
+    });
     return {
     id: initialData.patientId || initialData.patient_id || null,
     patient: initialData.patient || '',
@@ -49,12 +55,26 @@ export default function PatientProfileModal({
     prefers_email: initialData.prefers_email !== false,
     prefers_sms: initialData.prefers_sms === true,
     prefers_sms_reminder: initialData.prefers_sms_reminder !== false,
-    wallets: repaired.wallets,
-    packageHistory: initialData.packageHistory || [],
+    wallets: reconciled.wallets,
+    packageHistory,
     historicoSesiones: initialData.historicoSesiones || 0,
-    adeudo: Number(initialData.adeudo) || 0,
+    adeudo: reconciled.adeudo,
+    _walletAutoFixed: reconciled.changed,
   };
   });
+
+  const walletAutoSaved = useRef(false);
+  useEffect(() => {
+    if (walletAutoSaved.current) return;
+    if (!formData.id || !formData._walletAutoFixed) return;
+    walletAutoSaved.current = true;
+    onPersistPurchase?.({
+      patientId: formData.id,
+      wallets: formData.wallets,
+      adeudo: formData.adeudo,
+      packageHistory: formData.packageHistory,
+    }).catch(() => {});
+  }, [formData, onPersistPurchase]);
 
   const [posService, setPosService] = useState('');
   const [posQty, setPosQty] = useState(1);

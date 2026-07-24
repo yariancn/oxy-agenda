@@ -12,6 +12,7 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
   const [hasSignature, setHasSignature] = useState(false);
   const [isSealing, setIsSealing] = useState(false);
   const [isAgreed, setIsAgreed] = useState(true);
+  const [skipCharge, setSkipCharge] = useState(false);
   const [vitals, setVitals] = useState({ pa: '', temp: '', hr: '' });
 
   const summaryLines = useMemo(() => {
@@ -97,7 +98,7 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
     if (!hasSignature) return alert(t.needSignature);
     setIsSealing(true);
     try {
-      await onSeal(canvasRef.current.toDataURL('image/png'), vitals, summaryLines);
+      await onSeal(canvasRef.current.toDataURL('image/png'), vitals, summaryLines, { skipCharge });
     } catch (err) {
       alert(t.sealError?.(err?.message || err) || String(err?.message || err));
     } finally {
@@ -159,7 +160,14 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
             </div>
           )}
 
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+            <label className="flex items-start space-x-3 cursor-pointer">
+              <input type="checkbox" checked={skipCharge} onChange={(e) => setSkipCharge(e.target.checked)} className="mt-1 w-5 h-5 shrink-0" />
+              <span className="text-xs text-slate-700 font-bold uppercase leading-relaxed">
+                {t.skipChargeLabel}
+                <span className="block text-[10px] font-bold text-slate-500 normal-case mt-1">{t.skipChargeHint}</span>
+              </span>
+            </label>
             <label className="flex items-start space-x-3 cursor-pointer">
               <input type="checkbox" checked={isAgreed} onChange={(e) => setIsAgreed(e.target.checked)} className="mt-1 w-5 h-5 shrink-0" />
               <span className="text-xs text-slate-700 font-bold uppercase leading-relaxed">

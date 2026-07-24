@@ -127,12 +127,10 @@ import { buildPromoterBookingUrl, normalizePromoCode, resolvePromoterContext } f
 import { resolveNextTicketNumber } from '../lib/ticketNumber';
 import { formatSaleAuditDetail, formatSaleCancelAuditDetail } from '../lib/saleAudit';
 import {
-  adjustWalletSessions,
-  applyPurchaseSessions,
   consumeSessionFromWallet,
-  creditSessionToWallet,
   hasPaidSessionBalance,
   persistWalletAfterConsume,
+  reconcilePatientWalletState,
   repairLegacyWalletKeys,
   resolveWalletContext,
   reverseNoShowWalletImpact,
@@ -1240,7 +1238,14 @@ export default function AppLayout() {
 
       const safePatients = (patientsData || []).map(p => {
         const packageHistory = p.package_history || [];
-        const repaired = repairLegacyWalletKeys(p.wallets || {}, packageHistory);
+        // Silent auto-balance: paid sessions clear false debt; leftover orphans trim to match takes.
+        // Real unpaid takes stay in adeudo until POS payment (or staff skips charge on seal).
+        const reconciled = reconcilePatientWalletState({
+          wallets: p.wallets || {},
+          adeudo: Number(p.adeudo) || 0,
+          historicoSesiones: p.historico_sesiones || 0,
+          packageHistory,
+        });
         return {
         id: p.id,
         patient: String(p.Name || p.name || p.Nombre || 'Sin Nombre'),
@@ -1252,12 +1257,12 @@ export default function AppLayout() {
         prefers_email: p.prefers_email !== false,
         prefers_sms: p.prefers_sms === true,
         prefers_sms_reminder: p.prefers_sms_reminder !== false,
-        wallets: repaired.wallets,
+        wallets: reconciled.wallets,
         packageHistory,
         historicoSesiones: p.historico_sesiones || 0,
-        adeudo: Number(p.adeudo) || 0,
+        adeudo: reconciled.adeudo,
         sessionGroupId: p.session_group_id || null,
-        _walletRepairPending: repaired.changed,
+        _walletRepairPending: reconciled.changed,
       };
       });
 
@@ -1265,7 +1270,10 @@ export default function AppLayout() {
 
       const walletRepairs = safePatients.filter((p) => p._walletRepairPending);
       if (walletRepairs.length && clinicDb) {
-        await Promise.all(walletRepairs.map((p) => clinicDb.from('patients').update({ wallets: p.wallets }).eq('id', p.id)));
+        await Promise.all(walletRepairs.map((p) => clinicDb.from('patients').update({
+          wallets: p.wallets,
+          adeudo: p.adeudo,
+        }).eq('id', p.id)));
       }
 
       try {
@@ -1275,7 +1283,10 @@ export default function AppLayout() {
           setDbSessionGroups(safeGroups);
           const groupRepairs = safeGroups.filter((g) => g._walletRepairPending);
           if (groupRepairs.length && clinicDb) {
-            await Promise.all(groupRepairs.map((g) => clinicDb.from('session_groups').update({ wallets: g.wallets }).eq('id', g.id)));
+            await Promise.all(groupRepairs.map((g) => clinicDb.from('session_groups').update({
+              wallets: g.wallets,
+              adeudo: g.adeudo,
+            }).eq('id', g.id)));
           }
           setSessionGroupsEnabled(true);
         } else {
@@ -2671,7 +2682,7 @@ export default function AppLayout() {
     });
   }, [dbPatients]);
 
-  const processSessionDeduction = async (patient, equipment, servicePrice) => {
+  const processSessionDeduction = async (patient, equipment, servicePrice, { skipCharge = false } = {}) => {
     if (!patient?.id) return { deducted: false, nextAdeudo: 0, walletContext: null };
     const sessionGroup = getPatientSessionGroup(patient);
     const walletContext = resolveWalletContext({
@@ -2689,8 +2700,19 @@ export default function AppLayout() {
         skippedAssessment: true,
       };
     }
+    if (skipCharge) {
+      // Courtesy: do not touch wallet, adeudo, or paid-session historico.
+      return {
+        deducted: false,
+        nextAdeudo: walletContext.adeudo,
+        walletContext,
+        consumed: { deducted: false, walletKey: null },
+        skippedCharge: true,
+      };
+    }
     const consumed = consumeSessionFromWallet(walletContext.wallets, equipment, servicePrice);
     let nextAdeudo = walletContext.adeudo;
+    // No paid balance left → patient owes this session (red debt) until they pay at POS.
     if (!consumed.deducted) nextAdeudo += 1;
 
     await persistWalletAfterConsume({
@@ -3407,16 +3429,21 @@ export default function AppLayout() {
           equipment: app.equipment,
           servicePrice,
         });
-        const nextWallets = creditSessionToWallet(walletContext.wallets, {
+        // Same undo path as no-show: clear false adeudo first, else return 1 to wallet.
+        const reversed = reverseNoShowWalletImpact(walletContext.wallets, walletContext.adeudo, {
           equipment: app.equipment,
           servicePrice,
           packageHistory: walletContext.packageHistory,
         });
-        if (walletContext.source === 'group' && walletContext.groupId) {
-          await activeSupabase.from('session_groups').update({ wallets: nextWallets }).eq('id', walletContext.groupId);
-        } else {
-          await activeSupabase.from('patients').update({ wallets: nextWallets }).eq('id', p.id);
-        }
+        const nextHistorico = Math.max(0, (p.historicoSesiones || 0) - 1);
+        await persistWalletAfterConsume({
+          supabase: activeSupabase,
+          walletContext,
+          consumed: { wallets: reversed.wallets, deducted: true },
+          nextAdeudo: reversed.adeudo,
+          patientId: p.id,
+          historicoSesiones: nextHistorico,
+        });
       }
       await activeSupabase.from('appointments').update({ check_in_status: 'Devuelto' }).eq('id', app.id);
       await logAudit(app.id, app.patient, 'DEVOLUCIÓN DE SESIÓN', `Sesión devuelta a cartera por cancelación de cobro.`);
@@ -8755,7 +8782,7 @@ export default function AppLayout() {
           <BitacoraModal 
             selectedSlot={selectedSlot} 
             onClose={() => setShowBitacora(false)} 
-            onSeal={async (sd, vt, summaryLines) => {
+            onSeal={async (sd, vt, summaryLines, sealOpts = {}) => {
               const appointmentId = selectedSlot?.id;
               if (!appointmentId) {
                 throw new Error(locale === 'en'
@@ -8778,6 +8805,7 @@ export default function AppLayout() {
 
               const sealPatientName = pat.patient || selectedSlot.patient;
               const attendantName = selectedSlot.attendant || currentUser?.name || '';
+              const skipCharge = !!sealOpts.skipCharge;
 
               await runBusyAction({
                 workingTitle: locale === 'en' ? 'Sealing attendance…' : 'Sellando asistencia…',
@@ -8789,11 +8817,12 @@ export default function AppLayout() {
                   setSelectedSlot(null);
                 },
                 action: async () => {
-                  // Adeudo / empty wallet must not block seal — records debt if no paid balance.
-                  const { deducted, nextAdeudo, consumed, skippedAssessment } = await processSessionDeduction(
+                  // Default: deduct paid session or record red adeudo. skipCharge = courtesy (no debt).
+                  const { deducted, nextAdeudo, consumed, skippedAssessment, skippedCharge } = await processSessionDeduction(
                     pat,
                     eq,
                     servicePrice,
+                    { skipCharge },
                   );
 
                   const sealPayload = {
@@ -8828,6 +8857,10 @@ export default function AppLayout() {
                     auditStr += locale === 'en'
                       ? ' Assessment: no wallet or debt movement.'
                       : ' Valoración: sin movimiento de cartera ni adeudo.';
+                  } else if (skippedCharge) {
+                    auditStr += locale === 'en'
+                      ? ' Courtesy: session not deducted (no debt).'
+                      : ' Cortesía: sesión no descontada (sin adeudo).';
                   } else if (!deducted) {
                     auditStr += locale === 'en'
                       ? ` No paid balance: debt +1 (total debt: ${nextAdeudo}).`
