@@ -4,6 +4,7 @@ import { useStaffLocale } from './StaffLocaleContext';
 import PosReceiptModal from './PosReceiptModal';
 import { adjustWalletSessions, applyPurchaseSessions, priceWalletKey, reversePurchaseSessions, sumWalletBalance, resolveWalletStorageKey, formatWalletKeyLabel, reconcilePatientWalletState } from '../lib/sessionWallet';
 import { sumPurchasedSessions } from '../lib/sessionSummary';
+import { countPackageChargedSessions } from '../lib/patientAppointmentHistory';
 import { canCreateSessionGroup, canJoinSessionGroup, isGroupTitular } from '../lib/sessionGroup';
 import { sanitizePatientNotesForDisplay } from '../lib/patientNotes';
 import PatientSessionHistory from './PatientSessionHistory';
@@ -37,10 +38,15 @@ export default function PatientProfileModal({
 
   const [formData, setFormData] = useState(() => {
     const packageHistory = initialData.packageHistory || [];
+    const chargedFromAppointments = countPackageChargedSessions(appointments, {
+      patientId: initialData.patientId || initialData.patient_id || initialData.id,
+      patientName: initialData.patient,
+    });
     const reconciled = reconcilePatientWalletState({
       wallets: initialData.wallets || {},
       adeudo: Number(initialData.adeudo) || 0,
       historicoSesiones: initialData.historicoSesiones || 0,
+      chargedFromAppointments,
       packageHistory,
     });
     return {
@@ -57,7 +63,7 @@ export default function PatientProfileModal({
     prefers_sms_reminder: initialData.prefers_sms_reminder !== false,
     wallets: reconciled.wallets,
     packageHistory,
-    historicoSesiones: initialData.historicoSesiones || 0,
+    historicoSesiones: reconciled.historicoSesiones,
     adeudo: reconciled.adeudo,
     _walletAutoFixed: reconciled.changed,
   };
@@ -73,6 +79,7 @@ export default function PatientProfileModal({
       wallets: formData.wallets,
       adeudo: formData.adeudo,
       packageHistory: formData.packageHistory,
+      historicoSesiones: formData.historicoSesiones,
     }).catch(() => {});
   }, [formData, onPersistPurchase]);
 

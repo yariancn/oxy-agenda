@@ -146,6 +146,7 @@ import {
   reverseGroupPurchase,
 } from '../lib/sessionGroup';
 import { buildSessionSummary, getServicePrice } from '../lib/sessionSummary';
+import { countPackageChargedSessions } from '../lib/patientAppointmentHistory';
 import {
   buildNotifyContent,
   formatBookingNotifyFeedback,
@@ -1236,19 +1237,25 @@ export default function AppLayout() {
       assertDbResult('protocols', resProt);
       assertDbResult('user_roles', resRoles);
 
+      const appointmentsForBalance = appointmentsData || [];
       const safePatients = (patientsData || []).map(p => {
         const packageHistory = p.package_history || [];
-        // Silent auto-balance: paid sessions clear false debt; leftover orphans trim to match takes.
-        // Real unpaid takes stay in adeudo until POS payment (or staff skips charge on seal).
+        const patientName = String(p.Name || p.name || p.Nombre || 'Sin Nombre');
+        const chargedFromAppointments = countPackageChargedSessions(appointmentsForBalance, {
+          patientId: p.id,
+          patientName,
+        });
+        // Silent auto-balance using real charged visits (Finalizado + No Asistió).
         const reconciled = reconcilePatientWalletState({
           wallets: p.wallets || {},
           adeudo: Number(p.adeudo) || 0,
           historicoSesiones: p.historico_sesiones || 0,
+          chargedFromAppointments,
           packageHistory,
         });
         return {
         id: p.id,
-        patient: String(p.Name || p.name || p.Nombre || 'Sin Nombre'),
+        patient: patientName,
         phone: String(p.Phone || p.phone || ''),
         email: String(p.Email || p.email || ''),
         protocol: String(p.protocol || ''),
@@ -1259,7 +1266,7 @@ export default function AppLayout() {
         prefers_sms_reminder: p.prefers_sms_reminder !== false,
         wallets: reconciled.wallets,
         packageHistory,
-        historicoSesiones: p.historico_sesiones || 0,
+        historicoSesiones: reconciled.historicoSesiones,
         adeudo: reconciled.adeudo,
         sessionGroupId: p.session_group_id || null,
         _walletRepairPending: reconciled.changed,
@@ -1273,6 +1280,7 @@ export default function AppLayout() {
         await Promise.all(walletRepairs.map((p) => clinicDb.from('patients').update({
           wallets: p.wallets,
           adeudo: p.adeudo,
+          historico_sesiones: p.historicoSesiones,
         }).eq('id', p.id)));
       }
 
@@ -2577,8 +2585,12 @@ export default function AppLayout() {
 
   const selectedSlotSessionSummary = useMemo(() => {
     if (!selectedSlot) return null;
+    const charged = countPackageChargedSessions(dbAppointments, {
+      patientId: selectedSlot.patientId,
+      patientName: selectedSlot.patient,
+    });
     return buildSessionSummary({
-      historicoSesiones: selectedSlot.historicoSesiones,
+      historicoSesiones: Math.max(Number(selectedSlot.historicoSesiones) || 0, charged),
       adeudo: selectedSlot.adeudo,
       wallets: selectedSlot.wallets,
       packageHistory: selectedSlot.packageHistory,
@@ -2588,7 +2600,7 @@ export default function AppLayout() {
       groupMembers: selectedSlot.groupMembers,
       patientName: selectedSlot.patient,
     });
-  }, [selectedSlot, dbServices]);
+  }, [selectedSlot, dbServices, dbAppointments]);
 
   const selectedSlotConfirmationInfo = useMemo(() => {
     if (!selectedSlot || !isShenandoah(activeClinic)) return null;
@@ -2715,16 +2727,23 @@ export default function AppLayout() {
     // No paid balance left → patient owes this session (red debt) until they pay at POS.
     if (!consumed.deducted) nextAdeudo += 1;
 
+    // Prefer appointment count (+ this visit) over a stale historico_sesiones counter.
+    const chargedAlready = countPackageChargedSessions(dbAppointments, {
+      patientId: patient.id,
+      patientName: patient.patient,
+    });
+    const nextHistorico = chargedAlready + 1;
+
     await persistWalletAfterConsume({
       supabase: activeSupabase,
       walletContext,
       consumed,
       nextAdeudo,
       patientId: patient.id,
-      historicoSesiones: (patient.historicoSesiones || 0) + 1,
+      historicoSesiones: nextHistorico,
     });
 
-    return { deducted: consumed.deducted, nextAdeudo, walletContext, consumed };
+    return { deducted: consumed.deducted, nextAdeudo, walletContext, consumed, nextHistorico };
   };
 
   const resolveDefaultAttendant = useCallback((appAttendant) => {
@@ -2749,13 +2768,38 @@ export default function AppLayout() {
       )));
     }
     let repairedWallets = {};
+    let nextAdeudo = patInfo?.adeudo || 0;
+    let nextHistorico = patInfo?.historicoSesiones || 0;
     if (patInfo) {
-      const repaired = repairLegacyWalletKeys(patInfo.wallets || {}, patInfo.packageHistory || []);
-      repairedWallets = repaired.wallets;
-      if (repaired.changed && patInfo.id && activeSupabase) {
-        activeSupabase.from('patients').update({ wallets: repaired.wallets }).eq('id', patInfo.id);
+      const chargedFromAppointments = countPackageChargedSessions(dbAppointments, {
+        patientId: patInfo.id,
+        patientName: patInfo.patient,
+      });
+      const reconciled = reconcilePatientWalletState({
+        wallets: patInfo.wallets || {},
+        adeudo: Number(patInfo.adeudo) || 0,
+        historicoSesiones: patInfo.historicoSesiones || 0,
+        chargedFromAppointments,
+        packageHistory: patInfo.packageHistory || [],
+      });
+      repairedWallets = reconciled.wallets;
+      nextAdeudo = reconciled.adeudo;
+      nextHistorico = reconciled.historicoSesiones;
+      if (reconciled.changed && patInfo.id && activeSupabase) {
+        activeSupabase.from('patients').update({
+          wallets: reconciled.wallets,
+          adeudo: reconciled.adeudo,
+          historico_sesiones: reconciled.historicoSesiones,
+        }).eq('id', patInfo.id);
         setDbPatients((prev) => prev.map((p) => (
-          String(p.id) === String(patInfo.id) ? { ...p, wallets: repaired.wallets } : p
+          String(p.id) === String(patInfo.id)
+            ? {
+              ...p,
+              wallets: reconciled.wallets,
+              adeudo: reconciled.adeudo,
+              historicoSesiones: reconciled.historicoSesiones,
+            }
+            : p
         )));
       }
     }
@@ -2770,8 +2814,8 @@ export default function AppLayout() {
       protocol: patInfo?.protocol || app.protocol,
       notes: sanitizeAppointmentNotesForDisplay(app.notes),
       wallets: patInfo ? repairedWallets : {},
-      historicoSesiones: patInfo?.historicoSesiones || 0,
-      adeudo: patInfo?.adeudo || 0,
+      historicoSesiones: nextHistorico,
+      adeudo: nextAdeudo,
       packageHistory: patInfo?.packageHistory || [],
       sessionPreset: getPresetFromTimes(app.duration, app.buffer).id,
       prefers_email: patInfo?.prefers_email !== false,
@@ -7703,7 +7747,7 @@ export default function AppLayout() {
                           ? L.modals.bitacora.debtHeadline(selectedSlotSessionSummary.adeudo)
                           : L.p.appt.sessionsPaidSummary(selectedSlotSessionSummary?.used || 0, selectedSlotSessionSummary?.totalPurchased || 0)}
                     </span>
-                    <span className="text-sm font-black text-slate-800 bg-slate-100 px-2 rounded">{selectedSlot.historicoSesiones || 0}</span>
+                    <span className="text-sm font-black text-slate-800 bg-slate-100 px-2 rounded">{selectedSlotSessionSummary?.used ?? selectedSlot.historicoSesiones ?? 0}</span>
                   </div>
                   {selectedSlotSessionSummary?.isAssessment ? (
                     <p className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 normal-case">
@@ -8636,25 +8680,31 @@ export default function AppLayout() {
             onLogSale={(tx, patientName) => {
               logAudit(null, patientName, 'VENTA POS', formatSaleAuditDetail(tx, currencyStr));
             }}
-            onPersistPurchase={async ({ patientId, wallets, adeudo, packageHistory }) => {
+            onPersistPurchase={async ({ patientId, wallets, adeudo, packageHistory, historicoSesiones }) => {
               const id = patientId || selectedSlot.patientId;
               if (!id) throw new Error(locale === 'en' ? 'Save the patient profile first (missing ID).' : 'Guarda el expediente del paciente primero (falta ID).');
               const repaired = repairLegacyWalletKeys(wallets, packageHistory);
-              let res = await activeSupabase.from('patients').update({
+              const patch = {
                 wallets: repaired.wallets,
                 adeudo: adeudo ?? 0,
                 package_history: packageHistory,
-              }).eq('id', id);
+              };
+              if (historicoSesiones != null) patch.historico_sesiones = historicoSesiones;
+              let res = await activeSupabase.from('patients').update(patch).eq('id', id);
               if (res.error && /column|adeudo/i.test(res.error.message || '')) {
-                res = await activeSupabase.from('patients').update({
-                  wallets: repaired.wallets,
-                  package_history: packageHistory,
-                }).eq('id', id);
+                const { adeudo: _a, ...withoutAdeudo } = patch;
+                res = await activeSupabase.from('patients').update(withoutAdeudo).eq('id', id);
               }
               if (res.error) throw new Error(res.error.message);
               setDbPatients((prev) => prev.map((p) => (
                 String(p.id) === String(id)
-                  ? { ...p, wallets: repaired.wallets, adeudo: adeudo ?? 0, packageHistory }
+                  ? {
+                    ...p,
+                    wallets: repaired.wallets,
+                    adeudo: adeudo ?? 0,
+                    packageHistory,
+                    ...(historicoSesiones != null ? { historicoSesiones } : {}),
+                  }
                   : p
               )));
               applySessionDataToSelectedSlot({
@@ -8662,6 +8712,7 @@ export default function AppLayout() {
                 wallets: repaired.wallets,
                 adeudo: adeudo ?? 0,
                 packageHistory,
+                ...(historicoSesiones != null ? { historicoSesiones } : {}),
               });
               broadcastLiveDataUpdated(activeClinic);
             }}
