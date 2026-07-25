@@ -5,7 +5,7 @@ import PosReceiptModal from './PosReceiptModal';
 import { adjustWalletSessions, applyPurchaseSessions, priceWalletKey, reversePurchaseSessions, sumWalletBalance, resolveWalletStorageKey, formatWalletKeyLabel, reconcilePatientWalletState } from '../lib/sessionWallet';
 import { sumPurchasedSessions } from '../lib/sessionSummary';
 import { countPackageChargedSessions } from '../lib/patientAppointmentHistory';
-import { canCreateSessionGroup, canJoinSessionGroup, isGroupTitular } from '../lib/sessionGroup';
+import { canCreateSessionGroup, canJoinSessionGroup, isGroupTitular, patientMatchesSharedSearch, classifySharedWalletCandidate } from '../lib/sessionGroup';
 import { sanitizePatientNotesForDisplay } from '../lib/patientNotes';
 import PatientSessionHistory from './PatientSessionHistory';
 
@@ -109,43 +109,38 @@ export default function PatientProfileModal({
   const groupPending = sumWalletBalance(sessionGroup?.wallets || (isTitular ? {} : formData.wallets));
   const historyForBalance = (isTitular && sessionGroup ? sessionGroup.packageHistory : formData.packageHistory) || [];
   const openPackageBalanceDue = historyForBalance.reduce((sum, tx) => sum + (Number(tx.balanceDue) || 0), 0);
-  const eligibleCreateMembers = (allPatients || []).filter((p) => {
-    if (!p?.id || String(p.id) === String(formData.id)) return false;
-    if (p.sessionGroupId) return false;
-    return canJoinSessionGroup(p, { id: '__new__', adeudo: 0 }).ok;
-  });
-  const eligibleAddMembers = (allPatients || []).filter((p) => {
-    if (!p?.id || String(p.id) === String(formData.id)) return false;
-    if (p.sessionGroupId) return false;
-    return true;
-  });
-  const memberSearchKey = String(memberSearch || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
-  const memberSearchDigits = String(memberSearch || '').replace(/\D/g, '');
+  const memberSearchKey = String(memberSearch || '').trim();
+  const searching = Boolean(memberSearchKey);
 
-  const matchesMemberSearch = (p) => {
-    if (!memberSearchKey && !memberSearchDigits) return false;
-    const name = String(p.patient || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase();
-    const phone = String(p.phone || '').replace(/\D/g, '');
-    if (memberSearchKey && name.includes(memberSearchKey)) return true;
-    if (memberSearchDigits && phone.includes(memberSearchDigits)) return true;
-    return false;
+  // Search the full directory — never hide a name match (e.g. Marisol with wallet).
+  const searchHits = searching
+    ? (allPatients || [])
+      .filter((p) => p?.id && String(p.id) !== String(formData.id))
+      .filter((p) => patientMatchesSharedSearch(p, memberSearchKey))
+      .map((p) => ({
+        patient: p,
+        ...classifySharedWalletCandidate(p, {
+          titularId: formData.id,
+          group: sessionGroup || { id: null, adeudo: 0 },
+        }),
+      }))
+      .sort((a, b) => {
+        if (a.status !== b.status) return a.status === 'ok' ? -1 : 1;
+        return String(a.patient.patient || '').localeCompare(String(b.patient.patient || ''), undefined, { sensitivity: 'base' });
+      })
+    : [];
+
+  const selectableHits = searchHits.filter((h) => h.status === 'ok');
+  const selectedCreatePatients = (allPatients || []).filter((p) => membersToCreate.includes(p.id));
+
+  const joinReasonLabel = (reason) => {
+    if (reason === 'member_debt' || reason === 'group_debt') return t.sharedWalletBlockedDebt;
+    if (reason === 'other_group') return t.sharedWalletBlockedOtherGroup;
+    if (reason === 'member_has_wallet') return t.sharedWalletBlockedMemberWallet;
+    if (reason === 'will_migrate_wallet') return t.sharedWalletWillMigrateWallet;
+    if (reason === 'is_titular') return t.sharedWalletIsTitular;
+    return reason || '';
   };
-
-  // Search-first: do not dump A–Z directory. Type any letter (incl. Z) to find that one patient.
-  const filteredCreateMembers = (memberSearchKey || memberSearchDigits)
-    ? eligibleCreateMembers.filter(matchesMemberSearch)
-    : [];
-  const filteredAddMembers = (memberSearchKey || memberSearchDigits)
-    ? eligibleAddMembers.filter(matchesMemberSearch)
-    : [];
-  const selectedCreatePatients = eligibleCreateMembers.filter((p) => membersToCreate.includes(p.id));
 
   const toggleCreateMember = (patientId) => {
     setMembersToCreate((prev) => (
@@ -554,28 +549,48 @@ export default function PatientProfileModal({
                     </div>
                   )}
                   <div className="max-h-52 overflow-y-auto space-y-1 border border-violet-100 rounded-lg p-2 bg-violet-50/40">
-                    {eligibleCreateMembers.length === 0 ? (
-                      <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoEligibleMembers}</p>
-                    ) : !(memberSearchKey || memberSearchDigits) ? (
+                    {!searching ? (
                       <p className="text-[9px] font-bold text-slate-500 normal-case leading-snug">{t.sharedWalletTypeToFind}</p>
-                    ) : filteredCreateMembers.length === 0 ? (
+                    ) : searchHits.length === 0 ? (
                       <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoSearchMatches}</p>
                     ) : (
-                      filteredCreateMembers.map((p) => (
-                        <label key={p.id} className="flex items-center gap-2 text-[10px] font-bold uppercase text-violet-900 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={membersToCreate.includes(p.id)}
-                            onChange={() => toggleCreateMember(p.id)}
-                          />
-                          <span className="truncate">{p.patient}{p.phone ? ` · ${p.phone}` : ''}</span>
-                        </label>
-                      ))
+                      searchHits.map(({ patient: p, status, reason, walletBalance }) => {
+                        const canPick = status === 'ok';
+                        return (
+                          <label
+                            key={p.id}
+                            className={`flex items-start gap-2 text-[10px] font-bold uppercase px-1 py-1 rounded ${
+                              canPick ? 'text-violet-900 cursor-pointer' : 'text-slate-500 cursor-not-allowed bg-slate-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="mt-0.5"
+                              disabled={!canPick}
+                              checked={membersToCreate.includes(p.id)}
+                              onChange={() => canPick && toggleCreateMember(p.id)}
+                            />
+                            <span className="min-w-0">
+                              <span className="block truncate">{p.patient}{p.phone ? ` · ${p.phone}` : ''}</span>
+                              {reason === 'will_migrate_wallet' && (
+                                <span className="block text-[8px] font-bold text-emerald-700 normal-case">
+                                  {t.sharedWalletWillMigrateWalletDetail(walletBalance)}
+                                </span>
+                              )}
+                              {!canPick && (
+                                <span className="block text-[8px] font-bold text-orange-700 normal-case">
+                                  {joinReasonLabel(reason)}
+                                </span>
+                              )}
+                            </span>
+                          </label>
+                        );
+                      })
                     )}
                   </div>
-                  {(memberSearchKey || memberSearchDigits) && filteredCreateMembers.length > 0 && (
+                  {searching && selectableHits.length > 0 && (
                     <p className="text-[8px] font-bold text-violet-700/80 uppercase">
-                      {t.sharedWalletMatchCount(filteredCreateMembers.length)}
+                      {t.sharedWalletMatchCount(searchHits.length)}
                       {membersToCreate.length > 0 ? ` · ${t.sharedWalletSelectedCount(membersToCreate.length)}` : ''}
                     </p>
                   )}
@@ -585,7 +600,7 @@ export default function PatientProfileModal({
                     onClick={async () => {
                       setSharedBusy(true);
                       try {
-                        const memberPatients = eligibleCreateMembers.filter((p) => membersToCreate.includes(p.id));
+                        const memberPatients = (allPatients || []).filter((p) => membersToCreate.includes(p.id));
                         await onCreateSessionGroup?.({
                           name: sharedGroupName.trim() || `Grupo ${formData.patient}`,
                           titularPatient: { ...formData, id: formData.id },
@@ -683,25 +698,42 @@ export default function PatientProfileModal({
                         autoComplete="off"
                       />
                       <div className="max-h-40 overflow-y-auto space-y-1 border border-violet-100 rounded-lg p-2 bg-violet-50/40">
-                        {!(memberSearchKey || memberSearchDigits) ? (
+                        {!searching ? (
                           <p className="text-[9px] font-bold text-slate-500 normal-case leading-snug">{t.sharedWalletTypeToFind}</p>
-                        ) : filteredAddMembers.length === 0 ? (
+                        ) : searchHits.length === 0 ? (
                           <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoSearchMatches}</p>
                         ) : (
-                          filteredAddMembers.map((p) => (
-                            <button
-                              key={p.id}
-                              type="button"
-                              onClick={() => setMemberToAdd(String(p.id))}
-                              className={`w-full text-left text-[10px] font-bold uppercase px-2 py-1.5 rounded ${
-                                String(memberToAdd) === String(p.id)
-                                  ? 'bg-violet-700 text-white'
-                                  : 'bg-white text-violet-900 hover:bg-violet-100'
-                              }`}
-                            >
-                              {p.patient}{p.phone ? ` · ${p.phone}` : ''}
-                            </button>
-                          ))
+                          searchHits.map(({ patient: p, status, reason, walletBalance }) => {
+                            const canPick = status === 'ok';
+                            const selected = String(memberToAdd) === String(p.id);
+                            return (
+                              <button
+                                key={p.id}
+                                type="button"
+                                disabled={!canPick}
+                                onClick={() => canPick && setMemberToAdd(String(p.id))}
+                                className={`w-full text-left text-[10px] font-bold uppercase px-2 py-1.5 rounded ${
+                                  !canPick
+                                    ? 'bg-slate-100 text-slate-500 cursor-not-allowed'
+                                    : selected
+                                      ? 'bg-violet-700 text-white'
+                                      : 'bg-white text-violet-900 hover:bg-violet-100'
+                                }`}
+                              >
+                                <span className="block truncate">{p.patient}{p.phone ? ` · ${p.phone}` : ''}</span>
+                                {reason === 'will_migrate_wallet' && (
+                                  <span className={`block text-[8px] font-bold normal-case ${selected ? 'text-violet-100' : 'text-emerald-700'}`}>
+                                    {t.sharedWalletWillMigrateWalletDetail(walletBalance)}
+                                  </span>
+                                )}
+                                {!canPick && (
+                                  <span className="block text-[8px] font-bold text-orange-700 normal-case">
+                                    {joinReasonLabel(reason)}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })
                         )}
                       </div>
                       <button
