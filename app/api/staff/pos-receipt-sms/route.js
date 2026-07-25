@@ -5,6 +5,7 @@ import { sendMexicoSms } from '../../../../lib/smsMexico.js';
 import { sendTwilioSms } from '../../../../lib/clinicMessaging.js';
 import { isShenandoah, normalizeClinicId } from '../../../../lib/clinicRegistry.js';
 import { readStaffSessionFromRequest } from '../../../../lib/staffSession.js';
+import { assertStaffClinicAccess } from '../../../../lib/staffDbServer.js';
 
 export async function POST(request) {
   try {
@@ -15,6 +16,11 @@ export async function POST(request) {
 
     const body = await request.json();
     const clinicName = normalizeClinicId(body.clinic || 'Oxygengdl');
+    try {
+      assertStaffClinicAccess(user, clinicName);
+    } catch {
+      return NextResponse.json({ error: 'Clinic access denied' }, { status: 403 });
+    }
     const receipt = body.receipt;
     const companyConfig = body.companyConfig || {};
     const locale = body.locale === 'en' ? 'en' : 'es';

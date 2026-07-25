@@ -3,6 +3,7 @@ import { CLINIC_SHENANDOAH, isShenandoah, normalizeClinicId } from '../../../../
 import { readStaffSessionFromRequest } from '../../../../lib/staffSession.js';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
 import { sendConfirmationSmsForAppointment } from '../../../../lib/appointmentConfirmation.js';
+import { assertStaffClinicAccess } from '../../../../lib/staffDbServer.js';
 
 const ERROR_MESSAGES = {
   not_houston: 'SMS confirmation is only for Houston.',
@@ -24,6 +25,11 @@ export async function POST(request) {
 
     const body = await request.json();
     const clinicName = normalizeClinicId(body.clinic || CLINIC_SHENANDOAH);
+    try {
+      assertStaffClinicAccess(user, clinicName);
+    } catch {
+      return NextResponse.json({ error: 'Clinic access denied' }, { status: 403 });
+    }
     if (!isShenandoah(clinicName)) {
       return NextResponse.json({ ok: false, error: 'not_houston' }, { status: 400 });
     }

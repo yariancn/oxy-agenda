@@ -127,8 +127,10 @@ import { buildPromoterBookingUrl, normalizePromoCode, resolvePromoterContext } f
 import { resolveNextTicketNumber } from '../lib/ticketNumber';
 import { formatSaleAuditDetail, formatSaleCancelAuditDetail } from '../lib/saleAudit';
 import {
+  appendAppointmentChargeVia,
   consumeSessionFromWallet,
   hasPaidSessionBalance,
+  parseAppointmentChargeVia,
   persistWalletAfterConsume,
   reconcilePatientWalletState,
   repairLegacyWalletKeys,
@@ -2748,7 +2750,48 @@ export default function AppLayout() {
       historicoSesiones: nextHistorico,
     });
 
-    return { deducted: consumed.deducted, nextAdeudo, walletContext, consumed, nextHistorico };
+    // Keep in-memory balances in sync so a second seal/no-show before refresh
+    // does not re-read a stale wallet and double-charge or skip a charge.
+    if (walletContext.source === 'group' && walletContext.groupId) {
+      setDbSessionGroups((prev) => prev.map((g) => (
+        String(g.id) === String(walletContext.groupId)
+          ? { ...g, wallets: consumed.wallets, adeudo: nextAdeudo }
+          : g
+      )));
+      applySessionDataToSelectedSlot({
+        patientId: patient.id,
+        sessionGroup: {
+          ...(sessionGroup || { id: walletContext.groupId }),
+          wallets: consumed.wallets,
+          adeudo: nextAdeudo,
+        },
+      });
+    } else {
+      setDbPatients((prev) => prev.map((p) => (
+        String(p.id) === String(patient.id)
+          ? {
+            ...p,
+            wallets: consumed.wallets,
+            adeudo: nextAdeudo,
+            historicoSesiones: nextHistorico,
+          }
+          : p
+      )));
+      applySessionDataToSelectedSlot({
+        patientId: patient.id,
+        wallets: consumed.wallets,
+        adeudo: nextAdeudo,
+      });
+    }
+
+    return {
+      deducted: consumed.deducted,
+      nextAdeudo,
+      walletContext,
+      consumed,
+      nextHistorico,
+      chargedVia: consumed.deducted ? 'wallet' : 'adeudo',
+    };
   };
 
   const resolveDefaultAttendant = useCallback((appAttendant) => {
@@ -3168,34 +3211,57 @@ export default function AppLayout() {
       const p = dbPatients.find(x => String(x.id) === String(patientId));
       if (!p) return alert(a('patientNotFound'));
 
-      const reversed = reversePurchaseSessions(p.wallets, p.adeudo, tx, p.packageHistory);
-      const newHistory = (p.packageHistory || []).filter(t => String(t.id) !== String(tx.id));
-
-      let res = await activeSupabase.from('patients').update({
-         wallets: reversed.wallets,
-         adeudo: reversed.adeudo,
-         package_history: newHistory
-      }).eq('id', p.id);
-
-      if (res.error && /column|adeudo/i.test(res.error.message || '')) {
-        await activeSupabase.from('patients').update({
+      if (p.sessionGroupId) {
+        const group = dbSessionGroups.find((g) => String(g.id) === String(p.sessionGroupId));
+        if (!group) return alert(a('saleCancelError'));
+        const reversed = reverseGroupPurchase(group, tx);
+        const history = (group.packageHistory || []).filter((t) => String(t.id) !== String(tx.id));
+        const { error } = await activeSupabase.from('session_groups').update({
           wallets: reversed.wallets,
-          package_history: newHistory,
+          adeudo: reversed.adeudo,
+          package_history: history,
+        }).eq('id', group.id);
+        if (error) throw error;
+        setDbSessionGroups((prev) => prev.map((g) => (
+          String(g.id) === String(group.id)
+            ? { ...g, wallets: reversed.wallets, adeudo: reversed.adeudo, packageHistory: history }
+            : g
+        )));
+        applySessionDataToSelectedSlot({
+          patientId,
+          sessionGroup: { ...group, wallets: reversed.wallets, adeudo: reversed.adeudo, packageHistory: history },
+        });
+      } else {
+        const reversed = reversePurchaseSessions(p.wallets, p.adeudo, tx, p.packageHistory);
+        const newHistory = (p.packageHistory || []).filter(t => String(t.id) !== String(tx.id));
+
+        let res = await activeSupabase.from('patients').update({
+           wallets: reversed.wallets,
+           adeudo: reversed.adeudo,
+           package_history: newHistory
         }).eq('id', p.id);
+
+        if (res.error && /column|adeudo/i.test(res.error.message || '')) {
+          await activeSupabase.from('patients').update({
+            wallets: reversed.wallets,
+            package_history: newHistory,
+          }).eq('id', p.id);
+        }
+
+        setDbPatients((prev) => prev.map((row) => (
+          String(row.id) === String(patientId)
+            ? { ...row, wallets: reversed.wallets, adeudo: reversed.adeudo, packageHistory: newHistory }
+            : row
+        )));
+        applySessionDataToSelectedSlot({
+          patientId,
+          wallets: reversed.wallets,
+          adeudo: reversed.adeudo,
+          packageHistory: newHistory,
+        });
       }
 
       await logAudit(null, patientName, 'REVERSIÓN DE VENTA', formatSaleCancelAuditDetail(tx, currencyStr));
-      setDbPatients((prev) => prev.map((p) => (
-        String(p.id) === String(patientId)
-          ? { ...p, wallets: reversed.wallets, adeudo: reversed.adeudo, packageHistory: newHistory }
-          : p
-      )));
-      applySessionDataToSelectedSlot({
-        patientId,
-        wallets: reversed.wallets,
-        adeudo: reversed.adeudo,
-        packageHistory: newHistory,
-      });
       alert(a('saleCancelled'));
       fetchAllData();
     } catch (e) {
@@ -3421,12 +3487,28 @@ export default function AppLayout() {
         if (status === 'No Asistió') {
           if (isAssessmentService(eq)) {
             await logAudit(id, patientName, 'NO ASISTIÓ', 'Valoración: no afecta cartera ni adeudo.');
+            await activeSupabase.from('appointments').update({ check_in_status: 'No Asistió' }).eq('id', id);
           } else {
             const p = resolvePatientForAppointment(app, dbPatients)
               || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(patientName));
+            // Mark status first (guarded) so a retry cannot double-charge after a partial failure.
+            const { data: marked, error: markErr } = await activeSupabase
+              .from('appointments')
+              .update({ check_in_status: 'No Asistió' })
+              .eq('id', id)
+              .neq('check_in_status', 'No Asistió')
+              .select('id, notes');
+            if (markErr) throw markErr;
+            if (!marked?.length) {
+              throw new Error(locale === 'en'
+                ? 'This visit is already marked no-show.'
+                : 'Esta cita ya está marcada como No Asistió.');
+            }
             if (p) {
               const servicePrice = getServicePrice(dbServices, eq);
-              const { deducted, nextAdeudo } = await processSessionDeduction(p, eq, servicePrice);
+              const { deducted, nextAdeudo, chargedVia } = await processSessionDeduction(p, eq, servicePrice);
+              const nextNotes = appendAppointmentChargeVia(marked[0]?.notes || app.notes || '', chargedVia);
+              await activeSupabase.from('appointments').update({ notes: nextNotes }).eq('id', id);
 
               await logAudit(id, patientName, 'NO ASISTIÓ', deducted
                 ? `No asistió. Se descontó 1 sesión pagada de cartera (${eq}).`
@@ -3434,7 +3516,6 @@ export default function AppLayout() {
             }
           }
 
-          await activeSupabase.from('appointments').update({ check_in_status: 'No Asistió' }).eq('id', id);
           try {
             await fetch('/api/staff/promoter-no-show', {
               method: 'POST',
@@ -3483,6 +3564,7 @@ export default function AppLayout() {
           equipment: app.equipment,
           servicePrice,
           packageHistory: walletContext.packageHistory,
+          chargedVia: parseAppointmentChargeVia(app.notes) || 'wallet',
         });
         const nextHistorico = Math.max(0, (p.historicoSesiones || 0) - 1);
         await persistWalletAfterConsume({
@@ -3519,6 +3601,7 @@ export default function AppLayout() {
         equipment: eq,
         servicePrice,
         packageHistory: walletContext.packageHistory,
+        chargedVia: parseAppointmentChargeVia(app.notes),
       });
       const nextHistorico = Math.max(0, (p.historicoSesiones || 0) - 1);
       await persistWalletAfterConsume({
@@ -3529,6 +3612,7 @@ export default function AppLayout() {
         patientId: p.id,
         historicoSesiones: nextHistorico,
       });
+      const cleanedNotes = String(app.notes || '').replace(/\s*⟦oxy:(wallet|adeudo)⟧/g, '').trim();
       await logAudit(
         app.id,
         patientName,
@@ -3537,13 +3621,21 @@ export default function AppLayout() {
           ? `Sesión de no-show no cobrada. Adeudo −1 (ahora ${reversed.adeudo}).`
           : `Sesión de no-show no cobrada. +1 sesión a cartera (${eq}).`,
       );
+      if (nextStatus) {
+        await activeSupabase.from('appointments').update({
+          check_in_status: nextStatus,
+          notes: cleanedNotes || null,
+        }).eq('id', app.id);
+      } else if (cleanedNotes !== String(app.notes || '').trim()) {
+        await activeSupabase.from('appointments').update({ notes: cleanedNotes || null }).eq('id', app.id);
+      }
     } else {
       await logAudit(app.id, patientName, auditLabel, 'Ajuste de no-show (valoración o sin expediente).');
+      if (nextStatus) {
+        await activeSupabase.from('appointments').update({ check_in_status: nextStatus }).eq('id', app.id);
+      }
     }
 
-    if (nextStatus) {
-      await activeSupabase.from('appointments').update({ check_in_status: nextStatus }).eq('id', app.id);
-    }
     return true;
   };
 
@@ -8976,14 +9068,7 @@ export default function AppLayout() {
                   setSelectedSlot(null);
                 },
                 action: async () => {
-                  // Default: deduct paid session or record red adeudo. skipCharge = courtesy (no debt).
-                  const { deducted, nextAdeudo, consumed, skippedAssessment, skippedCharge } = await processSessionDeduction(
-                    pat,
-                    eq,
-                    servicePrice,
-                    { skipCharge },
-                  );
-
+                  // Seal status first (idempotent) so a retry cannot double-charge.
                   const sealPayload = {
                     check_in_status: 'Finalizado',
                     attendant: attendantName,
@@ -8992,7 +9077,9 @@ export default function AppLayout() {
                   let sealRes = await activeSupabase
                     .from('appointments')
                     .update(sealPayload)
-                    .eq('id', appointmentId);
+                    .eq('id', appointmentId)
+                    .neq('check_in_status', 'Finalizado')
+                    .select('id, notes');
 
                   // Fallback if signature column is missing (do NOT treat trigger WHERE errors as signature issues).
                   if (sealRes.error && /signature|column|schema cache/i.test(sealRes.error.message || '')
@@ -9006,9 +9093,32 @@ export default function AppLayout() {
                         attendant: attendantName,
                         notes: prevNotes ? `${prevNotes}\n${noteLine}` : noteLine,
                       })
-                      .eq('id', appointmentId);
+                      .eq('id', appointmentId)
+                      .neq('check_in_status', 'Finalizado')
+                      .select('id, notes');
                   }
                   if (sealRes.error) throw sealRes.error;
+                  if (!sealRes.data?.length) {
+                    throw new Error(locale === 'en'
+                      ? 'This visit is already sealed.'
+                      : 'Esta cita ya está sellada.');
+                  }
+
+                  // Default: deduct paid session or record red adeudo. skipCharge = courtesy (no debt).
+                  const { deducted, nextAdeudo, consumed, skippedAssessment, skippedCharge, chargedVia } = await processSessionDeduction(
+                    pat,
+                    eq,
+                    servicePrice,
+                    { skipCharge },
+                  );
+
+                  if (!skippedAssessment && !skippedCharge && chargedVia) {
+                    const nextNotes = appendAppointmentChargeVia(
+                      sealRes.data[0]?.notes || selectedSlot.notes || '',
+                      chargedVia,
+                    );
+                    await activeSupabase.from('appointments').update({ notes: nextNotes }).eq('id', appointmentId);
+                  }
 
                   let auditStr = a('bitacoraSealedAuditDetail', attendantName);
                   if (summaryLines?.headline) auditStr += ` ${summaryLines.headline}.`;

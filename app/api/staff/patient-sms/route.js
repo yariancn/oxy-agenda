@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { normalizeClinicId } from '../../../../lib/clinicRegistry.js';
 import { readStaffSessionFromRequest } from '../../../../lib/staffSession.js';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
+import { assertStaffClinicAccess } from '../../../../lib/staffDbServer.js';
 import {
   listPatientSmsPresets,
   runStaffPatientSms,
@@ -24,6 +25,11 @@ export async function POST(request) {
 
     const body = await request.json();
     const clinicName = normalizeClinicId(body.clinic);
+    try {
+      assertStaffClinicAccess(user, clinicName);
+    } catch {
+      return NextResponse.json({ error: 'Clinic access denied' }, { status: 403 });
+    }
     const appointmentId = body.appointmentId;
     const preset = String(body.preset || 'reminder').trim();
     const customNote = body.customNote || '';

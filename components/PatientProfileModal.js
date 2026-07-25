@@ -207,102 +207,100 @@ export default function PatientProfileModal({
     const unitPrice = sessions > 0 ? total / sessions : (parseFloat(posUnitPrice) || 0);
 
     setCharging(true);
-    let ticketNumber = null;
     try {
-      if (onAllocateTicketNumber) {
-        ticketNumber = await onAllocateTicketNumber();
+      let ticketNumber = null;
+      try {
+        if (onAllocateTicketNumber) {
+          ticketNumber = await onAllocateTicketNumber();
+        }
+      } catch {
+        ticketNumber = null;
       }
-    } catch {
-      ticketNumber = null;
-    } finally {
-      setCharging(false);
-    }
 
-    const newTransaction = {
-      id: Date.now(),
-      ticketNumber: ticketNumber || Date.now(),
-      createdAt: new Date().toISOString(),
-      date: new Date().toLocaleDateString(locale === 'en' ? 'en-US' : 'es-MX', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      serviceName: posService,
-      equipment: resolveWalletStorageKey({ serviceName: posService, equipment: baseService, unitPrice }),
-      sessions,
-      unitPrice,
-      price: total,
-      paymentMethod: posPaymentMethod,
-      operator: locale === 'en' ? 'POS' : 'Caja POS',
-      ticketNotes: posNotes.trim(),
-      patient: formData.patient,
-      phone: formData.phone,
-      email: formData.email,
-      dob: formData.dob,
-      protocol: formData.protocol,
-      debtCleared: 0,
-      addedToWallet: 0,
-      partialPayment: false,
-      packageTotalSessions: null,
-      balanceDue: 0,
-    };
+      const newTransaction = {
+        id: Date.now(),
+        ticketNumber: ticketNumber || Date.now(),
+        createdAt: new Date().toISOString(),
+        date: new Date().toLocaleDateString(locale === 'en' ? 'en-US' : 'es-MX', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        serviceName: posService,
+        equipment: resolveWalletStorageKey({ serviceName: posService, equipment: baseService, unitPrice }),
+        sessions,
+        unitPrice,
+        price: total,
+        paymentMethod: posPaymentMethod,
+        operator: locale === 'en' ? 'POS' : 'Caja POS',
+        ticketNotes: posNotes.trim(),
+        patient: formData.patient,
+        phone: formData.phone,
+        email: formData.email,
+        dob: formData.dob,
+        protocol: formData.protocol,
+        debtCleared: 0,
+        addedToWallet: 0,
+        partialPayment: false,
+        packageTotalSessions: null,
+        balanceDue: 0,
+      };
 
-    if (posPartial) {
-      const packageTotal = Math.max(sessions, Number(posPackageTotal) || sessions);
-      const balanceDue = Math.max(0, parseFloat(posBalanceDue) || 0);
-      newTransaction.partialPayment = true;
-      newTransaction.packageTotalSessions = packageTotal;
-      newTransaction.balanceDue = balanceDue;
-      const partialNote = t.partialTicketNote(sessions, packageTotal, balanceDue.toFixed(2));
-      newTransaction.ticketNotes = [posNotes.trim(), partialNote].filter(Boolean).join(' · ');
-    }
+      if (posPartial) {
+        const packageTotal = Math.max(sessions, Number(posPackageTotal) || sessions);
+        const balanceDue = Math.max(0, parseFloat(posBalanceDue) || 0);
+        newTransaction.partialPayment = true;
+        newTransaction.packageTotalSessions = packageTotal;
+        newTransaction.balanceDue = balanceDue;
+        const partialNote = t.partialTicketNote(sessions, packageTotal, balanceDue.toFixed(2));
+        newTransaction.ticketNotes = [posNotes.trim(), partialNote].filter(Boolean).join(' · ');
+      }
 
-    const useGroup = isTitular && sessionGroup?.id && onGroupPurchase;
-    const walletKey = useGroup
-      ? priceWalletKey(unitPrice)
-      : resolveWalletStorageKey({ serviceName: posService, equipment: baseService, unitPrice });
-    const applied = applyPurchaseSessions(
-      useGroup ? (sessionGroup.wallets || {}) : formData.wallets,
-      useGroup ? (sessionGroup.adeudo || 0) : formData.adeudo,
-      walletKey,
-      sessions,
-    );
-    newTransaction.debtCleared = applied.debtCleared;
-    newTransaction.addedToWallet = applied.addedToWallet;
-    newTransaction.unitPrice = unitPrice;
-    if (applied.debtCleared > 0 || applied.addedToWallet > 0) {
-      setLastPurchaseNote(t.purchaseDebtCleared(applied.debtCleared, applied.addedToWallet));
-    }
+      const useGroup = isTitular && sessionGroup?.id && onGroupPurchase;
+      const walletKey = useGroup
+        ? priceWalletKey(unitPrice)
+        : resolveWalletStorageKey({ serviceName: posService, equipment: baseService, unitPrice });
+      const applied = applyPurchaseSessions(
+        useGroup ? (sessionGroup.wallets || {}) : formData.wallets,
+        useGroup ? (sessionGroup.adeudo || 0) : formData.adeudo,
+        walletKey,
+        sessions,
+      );
+      newTransaction.debtCleared = applied.debtCleared;
+      newTransaction.addedToWallet = applied.addedToWallet;
+      newTransaction.unitPrice = unitPrice;
+      if (applied.debtCleared > 0 || applied.addedToWallet > 0) {
+        setLastPurchaseNote(t.purchaseDebtCleared(applied.debtCleared, applied.addedToWallet));
+      }
 
-    const nextPackageHistory = [newTransaction, ...(formData.packageHistory || [])];
+      const nextPackageHistory = [newTransaction, ...(formData.packageHistory || [])];
 
-    if (useGroup) {
-      const nextGroupHistory = [newTransaction, ...(sessionGroup.packageHistory || [])];
-      onGroupPurchase({
-        groupId: sessionGroup.id,
-        wallets: applied.wallets,
-        adeudo: applied.adeudo,
-        transaction: newTransaction,
-      });
-      onSessionUpdated?.({
-        patientId: formData.id,
-        sessionGroup: {
-          ...sessionGroup,
+      if (useGroup) {
+        const nextGroupHistory = [newTransaction, ...(sessionGroup.packageHistory || [])];
+        await onGroupPurchase({
+          groupId: sessionGroup.id,
           wallets: applied.wallets,
           adeudo: applied.adeudo,
-          packageHistory: nextGroupHistory,
-        },
-      });
-    } else {
-      setFormData((prev) => ({
-        ...prev,
-        wallets: applied.wallets,
-        adeudo: applied.adeudo,
-        packageHistory: nextPackageHistory,
-      }));
-      try {
+          transaction: newTransaction,
+        });
+        onSessionUpdated?.({
+          patientId: formData.id,
+          sessionGroup: {
+            ...sessionGroup,
+            wallets: applied.wallets,
+            adeudo: applied.adeudo,
+            packageHistory: nextGroupHistory,
+          },
+        });
+      } else {
+        setFormData((prev) => ({
+          ...prev,
+          wallets: applied.wallets,
+          adeudo: applied.adeudo,
+          packageHistory: nextPackageHistory,
+        }));
         await onPersistPurchase?.({
           patientId: formData.id,
           wallets: applied.wallets,
@@ -316,28 +314,28 @@ export default function PatientProfileModal({
           adeudo: applied.adeudo,
           packageHistory: nextPackageHistory,
         });
-      } catch (err) {
-        alert(err?.message || String(err));
-        return;
       }
+
+      onLogSale?.(newTransaction, formData.patient);
+      setReceipt(newTransaction);
+
+      setPosService('');
+      setPosQty(1);
+      setPosUnitPrice('');
+      setPosPrice('');
+      setPosNotes('');
+      setPosPartial(false);
+      setPosPackageTotal('');
+      setPosBalanceDue('');
+      setPosPaymentMethod(paymentOptions[0].value);
+    } catch (err) {
+      alert(err?.message || String(err));
+    } finally {
+      setCharging(false);
     }
-
-    onLogSale?.(newTransaction, formData.patient);
-
-    setReceipt(newTransaction);
-
-    setPosService('');
-    setPosQty(1);
-    setPosUnitPrice('');
-    setPosPrice('');
-    setPosNotes('');
-    setPosPartial(false);
-    setPosPackageTotal('');
-    setPosBalanceDue('');
-    setPosPaymentMethod(paymentOptions[0].value);
   };
 
-  const handleCancelTransaction = (txToCancel) => {
+  const handleCancelTransaction = async (txToCancel) => {
     if (!window.confirm(t.cancelPaymentConfirm(txToCancel.price, txToCancel.sessions, txToCancel.serviceName))) {
       return;
     }
@@ -346,7 +344,11 @@ export default function PatientProfileModal({
 
     const useGroup = isTitular && sessionGroup?.id && onGroupCancelSale;
     if (useGroup) {
-      onGroupCancelSale({ groupId: sessionGroup.id, transaction: txToCancel });
+      try {
+        await onGroupCancelSale({ groupId: sessionGroup.id, transaction: txToCancel });
+      } catch (err) {
+        alert(err?.message || String(err));
+      }
       return;
     }
 
