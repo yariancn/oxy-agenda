@@ -98,6 +98,7 @@ export default function PatientProfileModal({
   const [sharedGroupName, setSharedGroupName] = useState('');
   const [memberToAdd, setMemberToAdd] = useState('');
   const [membersToCreate, setMembersToCreate] = useState([]);
+  const [memberSearch, setMemberSearch] = useState('');
   const [sharedBusy, setSharedBusy] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
 
@@ -113,6 +114,21 @@ export default function PatientProfileModal({
     if (p.sessionGroupId) return false;
     return canJoinSessionGroup(p, { id: '__new__', adeudo: 0 }).ok;
   });
+  const memberSearchKey = String(memberSearch || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+  const filteredCreateMembers = memberSearchKey
+    ? eligibleCreateMembers.filter((p) => {
+      const name = String(p.patient || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+      const phone = String(p.phone || '').replace(/\D/g, '');
+      return name.includes(memberSearchKey) || phone.includes(memberSearchKey.replace(/\D/g, ''));
+    })
+    : eligibleCreateMembers;
 
   const toggleCreateMember = (patientId) => {
     setMembersToCreate((prev) => (
@@ -494,11 +510,20 @@ export default function PatientProfileModal({
                     className="w-full p-2.5 rounded-lg border border-violet-200 text-xs font-bold uppercase"
                   />
                   <label className="text-[9px] font-black uppercase text-violet-800 block pt-1">{t.sharedWalletPickMembers}</label>
-                  <div className="max-h-36 overflow-y-auto space-y-1 border border-violet-100 rounded-lg p-2 bg-violet-50/40">
+                  <input
+                    type="search"
+                    value={memberSearch}
+                    onChange={(e) => setMemberSearch(e.target.value)}
+                    placeholder={t.sharedWalletSearchMembers}
+                    className="w-full p-2 rounded-lg border border-violet-200 text-[10px] font-bold uppercase mb-1"
+                  />
+                  <div className="max-h-52 overflow-y-auto space-y-1 border border-violet-100 rounded-lg p-2 bg-violet-50/40">
                     {eligibleCreateMembers.length === 0 ? (
                       <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoEligibleMembers}</p>
+                    ) : filteredCreateMembers.length === 0 ? (
+                      <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoSearchMatches}</p>
                     ) : (
-                      eligibleCreateMembers.slice(0, 80).map((p) => (
+                      filteredCreateMembers.map((p) => (
                         <label key={p.id} className="flex items-center gap-2 text-[10px] font-bold uppercase text-violet-900 cursor-pointer">
                           <input
                             type="checkbox"
@@ -510,6 +535,10 @@ export default function PatientProfileModal({
                       ))
                     )}
                   </div>
+                  <p className="text-[8px] font-bold text-violet-700/80 uppercase">
+                    {t.sharedWalletEligibleCount(filteredCreateMembers.length, eligibleCreateMembers.length)}
+                    {membersToCreate.length > 0 ? ` · ${t.sharedWalletSelectedCount(membersToCreate.length)}` : ''}
+                  </p>
                   <button
                     type="button"
                     disabled={sharedBusy || !formData.id}
@@ -524,6 +553,7 @@ export default function PatientProfileModal({
                         });
                         setSharedGroupName('');
                         setMembersToCreate([]);
+                        setMemberSearch('');
                         setFormData((prev) => ({
                           ...prev,
                           wallets: {},
