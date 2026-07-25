@@ -8699,7 +8699,7 @@ export default function AppLayout() {
               ]);
               const patientsForEnrich = dbPatients.map((p) => (
                 linkedIds.has(String(p.id))
-                  ? { ...p, sessionGroupId: group.id, wallets: {} }
+                  ? { ...p, sessionGroupId: group.id, wallets: {}, adeudo: 0 }
                   : p
               ));
               // Ensure titular exists in enrich list even if not yet in dbPatients shape
@@ -8708,11 +8708,12 @@ export default function AppLayout() {
                   ...titularPatient,
                   sessionGroupId: group.id,
                   wallets: {},
+                  adeudo: 0,
                 });
               }
               for (const m of linkedMembers) {
                 if (!patientsForEnrich.some((p) => String(p.id) === String(m.id))) {
-                  patientsForEnrich.push({ ...m, sessionGroupId: group.id, wallets: {} });
+                  patientsForEnrich.push({ ...m, sessionGroupId: group.id, wallets: {}, adeudo: 0 });
                 }
               }
               const enriched = enrichGroupForDisplay(group, patientsForEnrich);
@@ -8722,7 +8723,7 @@ export default function AppLayout() {
               });
               setDbPatients((prev) => prev.map((p) => (
                 linkedIds.has(String(p.id))
-                  ? { ...p, sessionGroupId: group.id, wallets: {}, adeudo: String(p.id) === String(titularPatient.id) ? 0 : p.adeudo }
+                  ? { ...p, sessionGroupId: group.id, wallets: {}, adeudo: 0 }
                   : p
               )));
               applySessionDataToSelectedSlot({
@@ -8738,33 +8739,41 @@ export default function AppLayout() {
             }}
             onAddGroupMember={async ({ groupId, memberPatient }) => {
               const group = dbSessionGroups.find((g) => g.id === groupId);
-              await addSessionGroupMember(activeSupabase, group, memberPatient);
+              const updated = await addSessionGroupMember(activeSupabase, group, memberPatient);
+              const nextGroup = {
+                ...group,
+                id: groupId,
+                wallets: updated?.wallets ?? group?.wallets,
+                adeudo: updated?.adeudo ?? group?.adeudo,
+              };
+              setDbSessionGroups((prev) => prev.map((g) => (
+                String(g.id) === String(groupId) ? { ...g, ...nextGroup } : g
+              )));
               setDbPatients((prev) => prev.map((p) => (
                 String(p.id) === String(memberPatient.id)
-                  ? { ...p, sessionGroupId: groupId, wallets: {} }
+                  ? { ...p, sessionGroupId: groupId, wallets: {}, adeudo: 0 }
                   : p
               )));
               const nextMembers = [
                 ...(group?.members || []),
-                { ...memberPatient, sessionGroupId: groupId, wallets: {} },
+                { ...memberPatient, sessionGroupId: groupId, wallets: {}, adeudo: 0 },
               ];
               const enriched = enrichGroupForDisplay(
-                { ...group, id: groupId },
+                nextGroup,
                 dbPatients.map((p) => (
                   String(p.id) === String(memberPatient.id)
-                    ? { ...p, sessionGroupId: groupId, wallets: {} }
+                    ? { ...p, sessionGroupId: groupId, wallets: {}, adeudo: 0 }
                     : p
                 )).concat(
                   dbPatients.some((p) => String(p.id) === String(memberPatient.id))
                     ? []
-                    : [{ ...memberPatient, sessionGroupId: groupId, wallets: {} }],
+                    : [{ ...memberPatient, sessionGroupId: groupId, wallets: {}, adeudo: 0 }],
                 ),
               );
               applySessionDataToSelectedSlot({
                 patientId: selectedSlot?.patientId || group?.titularPatientId,
                 sessionGroup: enriched || {
-                  ...group,
-                  id: groupId,
+                  ...nextGroup,
                   members: nextMembers,
                 },
               });

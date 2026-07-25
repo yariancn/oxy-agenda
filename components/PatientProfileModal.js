@@ -134,12 +134,20 @@ export default function PatientProfileModal({
   const selectedCreatePatients = (allPatients || []).filter((p) => membersToCreate.includes(p.id));
 
   const joinReasonLabel = (reason) => {
-    if (reason === 'member_debt' || reason === 'group_debt') return t.sharedWalletBlockedDebt;
     if (reason === 'other_group') return t.sharedWalletBlockedOtherGroup;
     if (reason === 'member_has_wallet') return t.sharedWalletBlockedMemberWallet;
     if (reason === 'will_migrate_wallet') return t.sharedWalletWillMigrateWallet;
+    if (reason === 'will_migrate_adeudo') return t.sharedWalletWillMigrateAdeudo;
+    if (reason === 'will_migrate_both') return t.sharedWalletWillMigrateBoth;
     if (reason === 'is_titular') return t.sharedWalletIsTitular;
     return reason || '';
+  };
+
+  const migrateHint = (reason, walletBalance, adeudo) => {
+    if (reason === 'will_migrate_both') return t.sharedWalletWillMigrateBothDetail(walletBalance, adeudo);
+    if (reason === 'will_migrate_adeudo') return t.sharedWalletWillMigrateAdeudoDetail(adeudo);
+    if (reason === 'will_migrate_wallet') return t.sharedWalletWillMigrateWalletDetail(walletBalance);
+    return null;
   };
 
   const toggleCreateMember = (patientId) => {
@@ -554,8 +562,9 @@ export default function PatientProfileModal({
                     ) : searchHits.length === 0 ? (
                       <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoSearchMatches}</p>
                     ) : (
-                      searchHits.map(({ patient: p, status, reason, walletBalance }) => {
+                      searchHits.map(({ patient: p, status, reason, walletBalance, adeudo }) => {
                         const canPick = status === 'ok';
+                        const hint = migrateHint(reason, walletBalance, adeudo);
                         return (
                           <label
                             key={p.id}
@@ -572,9 +581,9 @@ export default function PatientProfileModal({
                             />
                             <span className="min-w-0">
                               <span className="block truncate">{p.patient}{p.phone ? ` · ${p.phone}` : ''}</span>
-                              {reason === 'will_migrate_wallet' && (
+                              {hint && (
                                 <span className="block text-[8px] font-bold text-emerald-700 normal-case">
-                                  {t.sharedWalletWillMigrateWalletDetail(walletBalance)}
+                                  {hint}
                                 </span>
                               )}
                               {!canPick && (
@@ -616,10 +625,7 @@ export default function PatientProfileModal({
                         }));
                       } catch (e) {
                         const map = {
-                          titular_debt: t.sharedWalletBlockedDebt,
                           already_in_group: t.sharedWalletBlockedOtherGroup,
-                          member_debt: t.sharedWalletBlockedDebt,
-                          group_debt: t.sharedWalletBlockedDebt,
                           member_has_wallet: t.sharedWalletBlockedMemberWallet,
                           other_group: t.sharedWalletBlockedOtherGroup,
                         };
@@ -641,8 +647,10 @@ export default function PatientProfileModal({
                 </p>
               )}
 
-              {sessionGroupsEnabled && !inGroup && !canCreateSessionGroup({ ...formData, id: formData.id }).ok && (formData.adeudo || 0) > 0 && (
-                <p className="text-[9px] font-black uppercase text-orange-800 bg-orange-100 border border-orange-300 rounded-lg p-2">{t.sharedWalletBlockedDebt}</p>
+              {sessionGroupsEnabled && !inGroup && canCreateSessionGroup({ ...formData, id: formData.id }).willMigrateAdeudo && (
+                <p className="text-[9px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded-lg p-2 normal-case">
+                  {t.sharedWalletTitularDebtWillPool(formData.adeudo)}
+                </p>
               )}
 
               {inGroup && sessionGroup && (
@@ -703,9 +711,10 @@ export default function PatientProfileModal({
                         ) : searchHits.length === 0 ? (
                           <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoSearchMatches}</p>
                         ) : (
-                          searchHits.map(({ patient: p, status, reason, walletBalance }) => {
+                          searchHits.map(({ patient: p, status, reason, walletBalance, adeudo }) => {
                             const canPick = status === 'ok';
                             const selected = String(memberToAdd) === String(p.id);
+                            const hint = migrateHint(reason, walletBalance, adeudo);
                             return (
                               <button
                                 key={p.id}
@@ -721,9 +730,9 @@ export default function PatientProfileModal({
                                 }`}
                               >
                                 <span className="block truncate">{p.patient}{p.phone ? ` · ${p.phone}` : ''}</span>
-                                {reason === 'will_migrate_wallet' && (
+                                {hint && (
                                   <span className={`block text-[8px] font-bold normal-case ${selected ? 'text-violet-100' : 'text-emerald-700'}`}>
-                                    {t.sharedWalletWillMigrateWalletDetail(walletBalance)}
+                                    {hint}
                                   </span>
                                 )}
                                 {!canPick && (
@@ -743,13 +752,11 @@ export default function PatientProfileModal({
                           const candidate = allPatients.find((p) => String(p.id) === String(memberToAdd));
                           const check = canJoinSessionGroup(candidate, sessionGroup);
                           if (!check.ok) {
-                            const msg = check.reason === 'member_debt' || check.reason === 'group_debt'
-                              ? t.sharedWalletBlockedDebt
-                              : check.reason === 'other_group'
-                                ? t.sharedWalletBlockedOtherGroup
-                                : check.reason === 'member_has_wallet'
-                                  ? t.sharedWalletBlockedMemberWallet
-                                  : check.reason;
+                            const msg = check.reason === 'other_group'
+                              ? t.sharedWalletBlockedOtherGroup
+                              : check.reason === 'member_has_wallet'
+                                ? t.sharedWalletBlockedMemberWallet
+                                : check.reason;
                             return alert(msg);
                           }
                           setSharedBusy(true);
