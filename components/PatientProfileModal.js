@@ -50,7 +50,7 @@ export default function PatientProfileModal({
       packageHistory,
     });
     return {
-    id: initialData.patientId || initialData.patient_id || null,
+    id: initialData.patientId || initialData.patient_id || initialData.id || null,
     patient: initialData.patient || '',
     phone: initialData.phone || '',
     email: initialData.email || '',
@@ -628,6 +628,9 @@ export default function PatientProfileModal({
                           already_in_group: t.sharedWalletBlockedOtherGroup,
                           member_has_wallet: t.sharedWalletBlockedMemberWallet,
                           other_group: t.sharedWalletBlockedOtherGroup,
+                          missing_titular_id: t.sharedWalletMissingTitularId,
+                          missing_group_id: t.sharedWalletMissingGroupId,
+                          missing_member_id: t.sharedWalletMissingMemberId,
                         };
                         alert(map[e.message] || e.message || String(e));
                       } finally {
