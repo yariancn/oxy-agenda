@@ -16,9 +16,14 @@ export async function GET(request) {
 
   try {
     user = await refreshStaffSessionUser(user);
+    if (!user) {
+      const response = NextResponse.json({ user: null });
+      response.cookies.set(STAFF_SESSION_COOKIE, '', { ...staffSessionCookieOptions(), maxAge: 0 });
+      return response;
+    }
     user = normalizeStaffSessionUser(user, { roleLevel: user?.accessLevel });
   } catch {
-    /* keep existing session */
+    /* keep existing session on transient refresh errors */
   }
 
   const response = NextResponse.json({ user });

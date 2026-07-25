@@ -2,9 +2,17 @@ import { NextResponse } from 'next/server';
 import { buildNotifyContent, toE164Phone } from '../../../lib/appointmentNotify.js';
 import { getResendApiKey, getResendFromAddress } from '../../../lib/resendConfig.js';
 import { sendPatientTextMessage, textChannelLabel } from '../../../lib/clinicMessaging.js';
+import { normalizeClinicId } from '../../../lib/clinicRegistry.js';
+import { readStaffSessionFromRequest } from '../../../lib/staffSession.js';
+import { assertStaffClinicAccess } from '../../../lib/staffDbServer.js';
 
 export async function POST(request) {
   try {
+    const user = readStaffSessionFromRequest(request);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const {
       patientName,
@@ -35,15 +43,22 @@ export async function POST(request) {
       cancelLimitHours = 24,
     } = body;
 
+    const clinicId = normalizeClinicId(clinicName);
+    try {
+      assertStaffClinicAccess(user, clinicId);
+    } catch {
+      return NextResponse.json({ success: false, error: 'Clinic access denied' }, { status: 403 });
+    }
+
     let emailStatus = locale === 'en' ? 'Not requested' : 'No solicitado';
     let smsStatus = locale === 'en' ? 'Not requested' : 'No solicitado';
-    const textChannel = textChannelLabel(clinicName, locale);
+    const textChannel = textChannelLabel(clinicId, locale);
 
     const { subject, emailHtml, smsBody, whatsappBodyParams } = buildNotifyContent({
       locale,
       notifyType,
       patientName,
-      clinicName,
+      clinicName: clinicId,
       clinicDisplayName,
       date,
       time,
@@ -68,7 +83,7 @@ export async function POST(request) {
       if (!resendKey) {
         emailStatus = locale === 'en' ? 'Missing RESEND_API_KEY on server' : 'Falta RESEND_API_KEY en el servidor';
       } else {
-        const fromEmail = getResendFromAddress(clinicName);
+        const fromEmail = getResendFromAddress(clinicId);
 
         const emailReq = await fetch('https://api.resend.com/emails', {
           method: 'POST',
@@ -96,9 +111,9 @@ export async function POST(request) {
     let smsTo = null;
 
     if (phone && prefers_sms === true && (type === 'both' || type === 'sms')) {
-      smsTo = toE164Phone(phone, clinicName);
+      smsTo = toE164Phone(phone, clinicId);
       const result = await sendPatientTextMessage({
-        clinicName,
+        clinicName: clinicId,
         phone,
         smsBody,
         whatsappBodyParams,

@@ -245,7 +245,9 @@ async function checkHttp(baseUrl) {
 
     const body = await response.json();
 
-    if (response.ok && body.success) {
+    if (response.status === 401) {
+      record('pass', `/api/notify → 401 (protegido; requiere sesión staff)`, ok);
+    } else if (response.ok && body.success) {
       record('pass', `/api/notify → ${response.status} (endpoint activo)`, ok);
     } else {
       record('fail', `/api/notify → respuesta inesperada: ${JSON.stringify(body)}`, fail);
