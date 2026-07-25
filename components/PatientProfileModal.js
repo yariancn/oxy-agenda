@@ -97,6 +97,7 @@ export default function PatientProfileModal({
   const [lastPurchaseNote, setLastPurchaseNote] = useState('');
   const [sharedGroupName, setSharedGroupName] = useState('');
   const [memberToAdd, setMemberToAdd] = useState('');
+  const [membersToCreate, setMembersToCreate] = useState([]);
   const [sharedBusy, setSharedBusy] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
 
@@ -107,6 +108,19 @@ export default function PatientProfileModal({
   const groupPending = sumWalletBalance(sessionGroup?.wallets || (isTitular ? {} : formData.wallets));
   const historyForBalance = (isTitular && sessionGroup ? sessionGroup.packageHistory : formData.packageHistory) || [];
   const openPackageBalanceDue = historyForBalance.reduce((sum, tx) => sum + (Number(tx.balanceDue) || 0), 0);
+  const eligibleCreateMembers = (allPatients || []).filter((p) => {
+    if (!p?.id || String(p.id) === String(formData.id)) return false;
+    if (p.sessionGroupId) return false;
+    return canJoinSessionGroup(p, { id: '__new__', adeudo: 0 }).ok;
+  });
+
+  const toggleCreateMember = (patientId) => {
+    setMembersToCreate((prev) => (
+      prev.includes(patientId)
+        ? prev.filter((id) => id !== patientId)
+        : [...prev, patientId]
+    ));
+  };
 
   const paymentOptions = locale === 'en'
     ? [
@@ -466,6 +480,9 @@ export default function PatientProfileModal({
 
               {sessionGroupsEnabled && !inGroup && canCreateSessionGroup({ ...formData, id: formData.id }).ok && (
                 <div className="space-y-2 bg-white rounded-lg border border-violet-200 p-3">
+                  <p className="text-[9px] font-bold text-violet-800 leading-snug normal-case">
+                    {t.sharedWalletCreateSteps}
+                  </p>
                   <label className="text-[9px] font-black uppercase text-violet-800 block">{t.sharedWalletGroupName}</label>
                   <input
                     type="text"
@@ -474,17 +491,42 @@ export default function PatientProfileModal({
                     placeholder={t.sharedWalletGroupNamePh}
                     className="w-full p-2.5 rounded-lg border border-violet-200 text-xs font-bold uppercase"
                   />
+                  <label className="text-[9px] font-black uppercase text-violet-800 block pt-1">{t.sharedWalletPickMembers}</label>
+                  <div className="max-h-36 overflow-y-auto space-y-1 border border-violet-100 rounded-lg p-2 bg-violet-50/40">
+                    {eligibleCreateMembers.length === 0 ? (
+                      <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoEligibleMembers}</p>
+                    ) : (
+                      eligibleCreateMembers.slice(0, 80).map((p) => (
+                        <label key={p.id} className="flex items-center gap-2 text-[10px] font-bold uppercase text-violet-900 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={membersToCreate.includes(p.id)}
+                            onChange={() => toggleCreateMember(p.id)}
+                          />
+                          <span className="truncate">{p.patient}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
                   <button
                     type="button"
                     disabled={sharedBusy || !formData.id}
                     onClick={async () => {
                       setSharedBusy(true);
                       try {
+                        const memberPatients = eligibleCreateMembers.filter((p) => membersToCreate.includes(p.id));
                         await onCreateSessionGroup?.({
                           name: sharedGroupName.trim() || `Grupo ${formData.patient}`,
                           titularPatient: { ...formData, id: formData.id },
+                          memberPatients,
                         });
                         setSharedGroupName('');
+                        setMembersToCreate([]);
+                        setFormData((prev) => ({
+                          ...prev,
+                          wallets: {},
+                          adeudo: 0,
+                        }));
                       } catch (e) {
                         const map = {
                           titular_debt: t.sharedWalletBlockedDebt,
@@ -506,6 +548,12 @@ export default function PatientProfileModal({
                 </div>
               )}
 
+              {sessionGroupsEnabled && inGroup && !sessionGroup && (
+                <p className="text-[9px] font-bold text-amber-800 bg-amber-100 border border-amber-300 rounded-lg p-2 uppercase">
+                  {t.sharedWalletLoadingGroup}
+                </p>
+              )}
+
               {sessionGroupsEnabled && !inGroup && !canCreateSessionGroup({ ...formData, id: formData.id }).ok && (formData.adeudo || 0) > 0 && (
                 <p className="text-[9px] font-black uppercase text-orange-800 bg-orange-100 border border-orange-300 rounded-lg p-2">{t.sharedWalletBlockedDebt}</p>
               )}
@@ -524,7 +572,7 @@ export default function PatientProfileModal({
                     <>
                       <p className="text-[9px] font-black uppercase text-violet-700 mt-2">{t.sharedWalletMembers}</p>
                       <ul className="space-y-1">
-                        {(sessionGroup.members || []).filter((m) => m.id !== formData.id).map((m) => (
+                        {(sessionGroup.members || []).filter((m) => String(m.id) !== String(formData.id)).map((m) => (
                           <li key={m.id} className="flex justify-between items-center text-[10px] font-bold uppercase bg-slate-50 rounded px-2 py-1">
                             <span>{m.patient} · {m.historicoSesiones || 0} ses.</span>
                             <button
@@ -545,6 +593,9 @@ export default function PatientProfileModal({
                           </li>
                         ))}
                       </ul>
+                      {(sessionGroup.members || []).filter((m) => String(m.id) !== String(formData.id)).length === 0 && (
+                        <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoMembersYet}</p>
+                      )}
                       <div className="flex gap-2 pt-2">
                         <select
                           value={memberToAdd}
@@ -562,7 +613,7 @@ export default function PatientProfileModal({
                           type="button"
                           disabled={sharedBusy || !memberToAdd}
                           onClick={async () => {
-                            const candidate = allPatients.find((p) => p.id === memberToAdd);
+                            const candidate = allPatients.find((p) => String(p.id) === String(memberToAdd));
                             const check = canJoinSessionGroup(candidate, sessionGroup);
                             if (!check.ok) {
                               const msg = check.reason === 'member_debt' || check.reason === 'group_debt'

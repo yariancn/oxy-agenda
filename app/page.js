@@ -2657,7 +2657,7 @@ export default function AppLayout() {
   const applySessionDataToSelectedSlot = useCallback((patch = {}) => {
     setSelectedSlot((prev) => {
       if (!prev) return prev;
-      const { patientId, wallets, adeudo, packageHistory, sessionGroup } = patch;
+      const { patientId, wallets, adeudo, packageHistory, sessionGroup, sessionGroupId } = patch;
       const pat = patientId
         ? dbPatients.find((p) => String(p.id) === String(patientId))
         : null;
@@ -2666,10 +2666,12 @@ export default function AppLayout() {
         (patientId && prevPatientId && String(prevPatientId) === String(patientId))
         || (pat && normalizeStr(pat.patient) === normalizeStr(prev.patient))
         || (pat && prev.phone && digitsOnly(pat.phone).slice(-10) === digitsOnly(prev.phone).slice(-10));
-      const matchesGroup =
-        sessionGroup?.id && prev.sessionGroup?.id === sessionGroup.id;
+      const matchesExistingGroup =
+        sessionGroup?.id && prev.sessionGroup?.id && String(prev.sessionGroup.id) === String(sessionGroup.id);
+      // New shared group on this patient (create flow) — prev has no group yet.
+      const matchesNewGroupOnPatient = Boolean(matchesPatient && sessionGroup?.id);
 
-      if (!matchesPatient && !matchesGroup) return prev;
+      if (!matchesPatient && !matchesExistingGroup && !matchesNewGroupOnPatient) return prev;
 
       const next = { ...prev };
 
@@ -2683,11 +2685,14 @@ export default function AppLayout() {
         next.packageHistory = packageHistory ?? next.packageHistory ?? [];
       }
 
-      if (matchesGroup && sessionGroup) {
+      if ((matchesExistingGroup || matchesNewGroupOnPatient) && sessionGroup) {
         const enriched = enrichGroupForDisplay(sessionGroup, dbPatients);
         next.sessionGroup = enriched;
         next.groupMembers = enriched?.members || [];
         next.sessionGroupId = sessionGroup.id;
+      } else if (matchesPatient && sessionGroupId != null) {
+        next.sessionGroupId = sessionGroupId || null;
+        if (!sessionGroupId) next.sessionGroup = null;
       }
 
       return next;
@@ -8586,18 +8591,109 @@ export default function AppLayout() {
               return selectedSlot.sessionGroup || getPatientSessionGroup(profilePat);
             })()}
             onSessionUpdated={applySessionDataToSelectedSlot}
-            onCreateSessionGroup={async ({ name, titularPatient }) => {
-              await createSessionGroup(activeSupabase, { name, titularPatient, patients: dbPatients });
-              await fetchAllData();
+            onCreateSessionGroup={async ({ name, titularPatient, memberPatients = [] }) => {
+              const { group, linkedMembers } = await createSessionGroup(activeSupabase, {
+                name,
+                titularPatient,
+                memberPatients,
+              });
+              const linkedIds = new Set([
+                String(titularPatient.id),
+                ...linkedMembers.map((m) => String(m.id)),
+              ]);
+              const patientsForEnrich = dbPatients.map((p) => (
+                linkedIds.has(String(p.id))
+                  ? { ...p, sessionGroupId: group.id, wallets: {} }
+                  : p
+              ));
+              // Ensure titular exists in enrich list even if not yet in dbPatients shape
+              if (!patientsForEnrich.some((p) => String(p.id) === String(titularPatient.id))) {
+                patientsForEnrich.push({
+                  ...titularPatient,
+                  sessionGroupId: group.id,
+                  wallets: {},
+                });
+              }
+              for (const m of linkedMembers) {
+                if (!patientsForEnrich.some((p) => String(p.id) === String(m.id))) {
+                  patientsForEnrich.push({ ...m, sessionGroupId: group.id, wallets: {} });
+                }
+              }
+              const enriched = enrichGroupForDisplay(group, patientsForEnrich);
+              setDbSessionGroups((prev) => {
+                const without = (prev || []).filter((g) => String(g.id) !== String(group.id));
+                return [...without, group];
+              });
+              setDbPatients((prev) => prev.map((p) => (
+                linkedIds.has(String(p.id))
+                  ? { ...p, sessionGroupId: group.id, wallets: {}, adeudo: String(p.id) === String(titularPatient.id) ? 0 : p.adeudo }
+                  : p
+              )));
+              applySessionDataToSelectedSlot({
+                patientId: titularPatient.id,
+                wallets: {},
+                adeudo: 0,
+                packageHistory: [],
+                sessionGroup: enriched,
+              });
+              broadcastLiveDataUpdated(activeClinic);
+              await fetchAllData({ silent: true });
+              return enriched;
             }}
             onAddGroupMember={async ({ groupId, memberPatient }) => {
               const group = dbSessionGroups.find((g) => g.id === groupId);
               await addSessionGroupMember(activeSupabase, group, memberPatient);
-              await fetchAllData();
+              setDbPatients((prev) => prev.map((p) => (
+                String(p.id) === String(memberPatient.id)
+                  ? { ...p, sessionGroupId: groupId, wallets: {} }
+                  : p
+              )));
+              const nextMembers = [
+                ...(group?.members || []),
+                { ...memberPatient, sessionGroupId: groupId, wallets: {} },
+              ];
+              const enriched = enrichGroupForDisplay(
+                { ...group, id: groupId },
+                dbPatients.map((p) => (
+                  String(p.id) === String(memberPatient.id)
+                    ? { ...p, sessionGroupId: groupId, wallets: {} }
+                    : p
+                )).concat(
+                  dbPatients.some((p) => String(p.id) === String(memberPatient.id))
+                    ? []
+                    : [{ ...memberPatient, sessionGroupId: groupId, wallets: {} }],
+                ),
+              );
+              applySessionDataToSelectedSlot({
+                patientId: selectedSlot?.patientId || group?.titularPatientId,
+                sessionGroup: enriched || {
+                  ...group,
+                  id: groupId,
+                  members: nextMembers,
+                },
+              });
+              broadcastLiveDataUpdated(activeClinic);
+              await fetchAllData({ silent: true });
             }}
             onRemoveGroupMember={async ({ groupId, memberId }) => {
               await removeSessionGroupMember(activeSupabase, memberId);
-              await fetchAllData();
+              setDbPatients((prev) => prev.map((p) => (
+                String(p.id) === String(memberId)
+                  ? { ...p, sessionGroupId: null }
+                  : p
+              )));
+              const group = dbSessionGroups.find((g) => g.id === groupId);
+              if (group) {
+                const enriched = enrichGroupForDisplay(group, dbPatients.map((p) => (
+                  String(p.id) === String(memberId) ? { ...p, sessionGroupId: null } : p
+                )));
+                applySessionDataToSelectedSlot({
+                  patientId: selectedSlot?.patientId || group.titularPatientId,
+                  sessionGroup: enriched,
+                });
+              }
+              broadcastLiveDataUpdated(activeClinic);
+              await fetchAllData({ silent: true });
             }}
             onGroupPurchase={async ({ groupId, wallets, adeudo, transaction, adjustOnly }) => {
               const group = dbSessionGroups.find((g) => g.id === groupId);
@@ -8726,7 +8822,14 @@ export default function AppLayout() {
                 ? dbPatients.find((p) => String(p.id) === String(patientDbId))
                 : resolvePatientForAppointment(selectedSlot, dbPatients);
               const oldPatientName = existingPatient?.patient || selectedSlot.patient;
-              const repairedWallets = repairLegacyWalletKeys(ud.wallets, ud.packageHistory).wallets;
+              const inSharedGroup = Boolean(
+                existingPatient?.sessionGroupId
+                || selectedSlot?.sessionGroupId
+                || selectedSlot?.sessionGroup?.id,
+              );
+              const repairedWallets = inSharedGroup
+                ? {}
+                : repairLegacyWalletKeys(ud.wallets, ud.packageHistory).wallets;
               if (patientDbId) {
                 const saved = await updatePatientRecord(activeSupabase, patientDbId, {
                   name: ud.patient,
@@ -8739,9 +8842,12 @@ export default function AppLayout() {
                   prefers_sms: ud.prefers_sms === true,
                   prefers_sms_reminder: ud.prefers_sms_reminder !== false,
                   wallets: repairedWallets,
-                  packageHistory: ud.packageHistory,
+                  // Shared-group balance lives on session_groups — do not clobber from chart form.
+                  packageHistory: inSharedGroup
+                    ? (existingPatient?.packageHistory || [])
+                    : ud.packageHistory,
                   historicoSesiones: ud.historicoSesiones,
-                  adeudo: ud.adeudo ?? 0,
+                  adeudo: inSharedGroup ? 0 : (ud.adeudo ?? 0),
                 });
                 if (saved.error) {
                   return alert(a('saveClientError', saved.error.message));
@@ -8761,9 +8867,11 @@ export default function AppLayout() {
                       prefers_sms: ud.prefers_sms === true,
                       prefers_sms_reminder: ud.prefers_sms_reminder !== false,
                       wallets: repairedWallets,
-                      packageHistory: ud.packageHistory,
+                      packageHistory: inSharedGroup
+                        ? (existingPatient?.packageHistory || p.packageHistory || [])
+                        : ud.packageHistory,
                       historicoSesiones: ud.historicoSesiones,
-                      adeudo: ud.adeudo ?? 0,
+                      adeudo: inSharedGroup ? 0 : (ud.adeudo ?? 0),
                     }
                     : p
                 )));
