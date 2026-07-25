@@ -3192,9 +3192,13 @@ export default function AppLayout() {
 
   const filteredPatients = dbPatients.filter(p => {
     const term = normalizeStr(searchQuery);
+    const termDigits = String(searchQuery || '').replace(/\D/g, '');
     const pName = normalizeStr(p.patient);
-    const pPhone = normalizeStr(p.phone);
-    return pName.includes(term) || pPhone.includes(term);
+    const pPhoneDigits = String(p.phone || '').replace(/\D/g, '');
+    if (!term && !termDigits) return true;
+    if (term && pName.includes(term)) return true;
+    if (termDigits && pPhoneDigits.includes(termDigits)) return true;
+    return false;
   });
 
   const openSaleReceiptModal = (tx, patientName, patientPhone = '') => {

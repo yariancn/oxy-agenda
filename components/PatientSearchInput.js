@@ -10,9 +10,14 @@ function normalizeStr(str) {
     .trim();
 }
 
+function digitsOnly(str) {
+  return String(str || '').replace(/\D/g, '');
+}
+
 /**
  * Directory search for booking. Prefer real patient charts; optionally enrich with
  * unique names seen on appointments so orphan agenda names still autocomplete.
+ * No hard cap on results — scroll the dropdown to see everyone who matches.
  */
 export default function PatientSearchInput({
   patients = [],
@@ -26,7 +31,6 @@ export default function PatientSearchInput({
   selectedLabel = 'Paciente seleccionado',
   pickHint = 'Clic en la lista para confirmar',
   blockedBadge = 'Paciente bloqueado',
-  maxResults = 40,
 }) {
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
@@ -78,15 +82,18 @@ export default function PatientSearchInput({
   }, [patients, appointmentHints]);
 
   const term = normalizeStr(query);
+  const termDigits = digitsOnly(query);
   const exactMatch = searchPool.find((p) => normalizeStr(p.patient) === normalizeStr(query) && !String(p.id).startsWith('hint:'));
   const confirmed = exactMatch && String(exactMatch.id) === String(pickedId);
 
   const filtered = searchPool
     .filter((p) => {
-      if (!term || term.length < 2) return false;
+      if (!term && !termDigits) return false;
       const name = normalizeStr(p.patient);
-      const phone = normalizeStr(p.phone);
-      return name.includes(term) || phone.includes(term);
+      const phoneDigits = digitsOnly(p.phone);
+      if (term && name.includes(term)) return true;
+      if (termDigits && phoneDigits.includes(termDigits)) return true;
+      return false;
     })
     .sort((a, b) => {
       // Prefer real charts over appointment hints; then names that start with the term.
@@ -97,8 +104,7 @@ export default function PatientSearchInput({
       const bStarts = normalizeStr(b.patient).startsWith(term) ? 0 : 1;
       if (aStarts !== bStarts) return aStarts - bStarts;
       return String(a.patient || '').localeCompare(String(b.patient || ''), undefined, { sensitivity: 'base' });
-    })
-    .slice(0, maxResults);
+    });
 
   const handlePick = (p) => {
     setQuery(p.patient);
@@ -117,6 +123,8 @@ export default function PatientSearchInput({
     confirmed && !exactMatch?.is_blocked ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : '',
     exactMatch && !confirmed ? 'border-amber-400 bg-amber-50' : '',
   ].filter(Boolean).join(' ');
+
+  const showDropdown = open && (term || termDigits) && filtered.length > 0;
 
   return (
     <div ref={wrapRef} className="relative">
@@ -146,8 +154,8 @@ export default function PatientSearchInput({
       ) : exactMatch && query.trim() ? (
         <p className="mt-1.5 text-[10px] font-black uppercase text-amber-700">{pickHint}</p>
       ) : null}
-      {open && term.length >= 2 && filtered.length > 0 && (
-        <ul className="absolute z-[10000] w-full mt-1 max-h-52 overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-xl">
+      {showDropdown && (
+        <ul className="absolute z-[10000] w-full mt-1 max-h-72 overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-xl">
           {filtered.map((p) => (
             <li key={String(p.id)}>
               <button
@@ -168,6 +176,11 @@ export default function PatientSearchInput({
             </li>
           ))}
         </ul>
+      )}
+      {open && (term || termDigits) && filtered.length === 0 && (
+        <p className="mt-1.5 text-[10px] font-bold text-slate-500 uppercase">
+          Sin coincidencias · prueba otro nombre o teléfono
+        </p>
       )}
     </div>
   );

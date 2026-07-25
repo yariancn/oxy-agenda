@@ -7,9 +7,16 @@ export default function GFEManager({ patients, onUpdatePatient }) {
   const t = L.modals.gfe;
   const [filter, setFilter] = useState('');
 
-  const filteredPatients = patients.filter((p) =>
-    p.patient.toLowerCase().includes(filter.toLowerCase()),
-  );
+  const filteredPatients = patients.filter((p) => {
+    const name = String(p.patient || '').toLowerCase();
+    const phone = String(p.phone || '').replace(/\D/g, '');
+    const q = filter.toLowerCase().trim();
+    const qDigits = filter.replace(/\D/g, '');
+    if (!q && !qDigits) return true;
+    if (q && name.includes(q)) return true;
+    if (qDigits && phone.includes(qDigits)) return true;
+    return false;
+  });
 
   return (
     <div className="flex flex-col h-full bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
