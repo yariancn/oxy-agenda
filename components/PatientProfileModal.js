@@ -114,21 +114,38 @@ export default function PatientProfileModal({
     if (p.sessionGroupId) return false;
     return canJoinSessionGroup(p, { id: '__new__', adeudo: 0 }).ok;
   });
+  const eligibleAddMembers = (allPatients || []).filter((p) => {
+    if (!p?.id || String(p.id) === String(formData.id)) return false;
+    if (p.sessionGroupId) return false;
+    return true;
+  });
   const memberSearchKey = String(memberSearch || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
-  const filteredCreateMembers = memberSearchKey
-    ? eligibleCreateMembers.filter((p) => {
-      const name = String(p.patient || '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase();
-      const phone = String(p.phone || '').replace(/\D/g, '');
-      return name.includes(memberSearchKey) || phone.includes(memberSearchKey.replace(/\D/g, ''));
-    })
-    : eligibleCreateMembers;
+  const memberSearchDigits = String(memberSearch || '').replace(/\D/g, '');
+
+  const matchesMemberSearch = (p) => {
+    if (!memberSearchKey && !memberSearchDigits) return false;
+    const name = String(p.patient || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    const phone = String(p.phone || '').replace(/\D/g, '');
+    if (memberSearchKey && name.includes(memberSearchKey)) return true;
+    if (memberSearchDigits && phone.includes(memberSearchDigits)) return true;
+    return false;
+  };
+
+  // Search-first: do not dump A–Z directory. Type any letter (incl. Z) to find that one patient.
+  const filteredCreateMembers = (memberSearchKey || memberSearchDigits)
+    ? eligibleCreateMembers.filter(matchesMemberSearch)
+    : [];
+  const filteredAddMembers = (memberSearchKey || memberSearchDigits)
+    ? eligibleAddMembers.filter(matchesMemberSearch)
+    : [];
+  const selectedCreatePatients = eligibleCreateMembers.filter((p) => membersToCreate.includes(p.id));
 
   const toggleCreateMember = (patientId) => {
     setMembersToCreate((prev) => (
@@ -510,16 +527,37 @@ export default function PatientProfileModal({
                     className="w-full p-2.5 rounded-lg border border-violet-200 text-xs font-bold uppercase"
                   />
                   <label className="text-[9px] font-black uppercase text-violet-800 block pt-1">{t.sharedWalletPickMembers}</label>
+                  <p className="text-[9px] font-bold text-violet-700/90 normal-case leading-snug mb-1">
+                    {t.sharedWalletSearchFirstHint}
+                  </p>
                   <input
                     type="search"
                     value={memberSearch}
                     onChange={(e) => setMemberSearch(e.target.value)}
                     placeholder={t.sharedWalletSearchMembers}
                     className="w-full p-2 rounded-lg border border-violet-200 text-[10px] font-bold uppercase mb-1"
+                    autoComplete="off"
                   />
+                  {selectedCreatePatients.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-1">
+                      {selectedCreatePatients.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => toggleCreateMember(p.id)}
+                          className="text-[9px] font-black uppercase bg-violet-700 text-white px-2 py-1 rounded-md"
+                          title={t.sharedWalletRemoveMember}
+                        >
+                          {p.patient} ×
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="max-h-52 overflow-y-auto space-y-1 border border-violet-100 rounded-lg p-2 bg-violet-50/40">
                     {eligibleCreateMembers.length === 0 ? (
                       <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoEligibleMembers}</p>
+                    ) : !(memberSearchKey || memberSearchDigits) ? (
+                      <p className="text-[9px] font-bold text-slate-500 normal-case leading-snug">{t.sharedWalletTypeToFind}</p>
                     ) : filteredCreateMembers.length === 0 ? (
                       <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoSearchMatches}</p>
                     ) : (
@@ -530,15 +568,17 @@ export default function PatientProfileModal({
                             checked={membersToCreate.includes(p.id)}
                             onChange={() => toggleCreateMember(p.id)}
                           />
-                          <span className="truncate">{p.patient}</span>
+                          <span className="truncate">{p.patient}{p.phone ? ` · ${p.phone}` : ''}</span>
                         </label>
                       ))
                     )}
                   </div>
-                  <p className="text-[8px] font-bold text-violet-700/80 uppercase">
-                    {t.sharedWalletEligibleCount(filteredCreateMembers.length, eligibleCreateMembers.length)}
-                    {membersToCreate.length > 0 ? ` · ${t.sharedWalletSelectedCount(membersToCreate.length)}` : ''}
-                  </p>
+                  {(memberSearchKey || memberSearchDigits) && filteredCreateMembers.length > 0 && (
+                    <p className="text-[8px] font-bold text-violet-700/80 uppercase">
+                      {t.sharedWalletMatchCount(filteredCreateMembers.length)}
+                      {membersToCreate.length > 0 ? ` · ${t.sharedWalletSelectedCount(membersToCreate.length)}` : ''}
+                    </p>
+                  )}
                   <button
                     type="button"
                     disabled={sharedBusy || !formData.id}
@@ -628,48 +668,71 @@ export default function PatientProfileModal({
                       {(sessionGroup.members || []).filter((m) => String(m.id) !== String(formData.id)).length === 0 && (
                         <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoMembersYet}</p>
                       )}
-                      <div className="flex gap-2 pt-2">
-                        <select
-                          value={memberToAdd}
-                          onChange={(e) => setMemberToAdd(e.target.value)}
-                          className="flex-1 p-2 rounded-lg border text-[10px] font-bold uppercase"
-                        >
-                          <option value="">{t.sharedWalletSelectMember}</option>
-                          {(allPatients || [])
-                            .filter((p) => p.id !== formData.id && !p.sessionGroupId)
-                            .map((p) => (
-                              <option key={p.id} value={p.id}>{p.patient}</option>
-                            ))}
-                        </select>
-                        <button
-                          type="button"
-                          disabled={sharedBusy || !memberToAdd}
-                          onClick={async () => {
-                            const candidate = allPatients.find((p) => String(p.id) === String(memberToAdd));
-                            const check = canJoinSessionGroup(candidate, sessionGroup);
-                            if (!check.ok) {
-                              const msg = check.reason === 'member_debt' || check.reason === 'group_debt'
-                                ? t.sharedWalletBlockedDebt
-                                : check.reason === 'other_group'
-                                  ? t.sharedWalletBlockedOtherGroup
-                                  : check.reason === 'member_has_wallet'
-                                    ? t.sharedWalletBlockedMemberWallet
-                                    : check.reason;
-                              return alert(msg);
-                            }
-                            setSharedBusy(true);
-                            try {
-                              await onAddGroupMember?.({ groupId: sessionGroup.id, memberPatient: candidate });
-                              setMemberToAdd('');
-                            } finally {
-                              setSharedBusy(false);
-                            }
-                          }}
-                          className="bg-violet-700 text-white text-[9px] font-black uppercase px-3 rounded-lg disabled:opacity-50"
-                        >
-                          {t.sharedWalletAddMember}
-                        </button>
+                      <p className="text-[9px] font-bold text-violet-700/90 normal-case leading-snug pt-2">
+                        {t.sharedWalletSearchFirstHint}
+                      </p>
+                      <input
+                        type="search"
+                        value={memberSearch}
+                        onChange={(e) => {
+                          setMemberSearch(e.target.value);
+                          setMemberToAdd('');
+                        }}
+                        placeholder={t.sharedWalletSearchMembers}
+                        className="w-full p-2 rounded-lg border text-[10px] font-bold uppercase"
+                        autoComplete="off"
+                      />
+                      <div className="max-h-40 overflow-y-auto space-y-1 border border-violet-100 rounded-lg p-2 bg-violet-50/40">
+                        {!(memberSearchKey || memberSearchDigits) ? (
+                          <p className="text-[9px] font-bold text-slate-500 normal-case leading-snug">{t.sharedWalletTypeToFind}</p>
+                        ) : filteredAddMembers.length === 0 ? (
+                          <p className="text-[9px] font-bold text-slate-500 uppercase">{t.sharedWalletNoSearchMatches}</p>
+                        ) : (
+                          filteredAddMembers.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => setMemberToAdd(String(p.id))}
+                              className={`w-full text-left text-[10px] font-bold uppercase px-2 py-1.5 rounded ${
+                                String(memberToAdd) === String(p.id)
+                                  ? 'bg-violet-700 text-white'
+                                  : 'bg-white text-violet-900 hover:bg-violet-100'
+                              }`}
+                            >
+                              {p.patient}{p.phone ? ` · ${p.phone}` : ''}
+                            </button>
+                          ))
+                        )}
                       </div>
+                      <button
+                        type="button"
+                        disabled={sharedBusy || !memberToAdd}
+                        onClick={async () => {
+                          const candidate = allPatients.find((p) => String(p.id) === String(memberToAdd));
+                          const check = canJoinSessionGroup(candidate, sessionGroup);
+                          if (!check.ok) {
+                            const msg = check.reason === 'member_debt' || check.reason === 'group_debt'
+                              ? t.sharedWalletBlockedDebt
+                              : check.reason === 'other_group'
+                                ? t.sharedWalletBlockedOtherGroup
+                                : check.reason === 'member_has_wallet'
+                                  ? t.sharedWalletBlockedMemberWallet
+                                  : check.reason;
+                            return alert(msg);
+                          }
+                          setSharedBusy(true);
+                          try {
+                            await onAddGroupMember?.({ groupId: sessionGroup.id, memberPatient: candidate });
+                            setMemberToAdd('');
+                            setMemberSearch('');
+                          } finally {
+                            setSharedBusy(false);
+                          }
+                        }}
+                        className="w-full bg-violet-700 text-white text-[9px] font-black uppercase py-2.5 rounded-lg disabled:opacity-50"
+                      >
+                        {t.sharedWalletAddMember}
+                      </button>
                     </>
                   )}
                 </div>
