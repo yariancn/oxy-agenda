@@ -2907,13 +2907,27 @@ export default function AppLayout() {
 
   const handleSendConfirmationNow = async () => {
     if (!selectedSlot?.id || confirmationSending) return;
+    const status = selectedSlot.confirmation_status || CONFIRMATION_STATUS.NONE;
+    const isResend = status !== CONFIRMATION_STATUS.NONE;
+    if (isResend) {
+      const ok = window.confirm(
+        locale === 'en'
+          ? 'Resend the YES/NO confirmation SMS for this first visit?'
+          : '¿Reenviar el SMS de confirmación SI/NO de esta primera cita?',
+      );
+      if (!ok) return;
+    }
     setConfirmationSending(true);
     try {
       const res = await fetch('/api/staff/send-confirmation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ appointmentId: selectedSlot.id, clinic: activeClinic }),
+        body: JSON.stringify({
+          appointmentId: selectedSlot.id,
+          clinic: activeClinic,
+          resend: isResend,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
@@ -2925,18 +2939,44 @@ export default function AppLayout() {
         ...prev,
         confirmation_status: CONFIRMATION_STATUS.PENDING,
         confirmation_sent_at: sentAt,
+        confirmation_replied_at: null,
+        confirmation_reply: null,
       } : prev));
       setDbAppointments((prev) => prev.map((row) => (
         row.id === selectedSlot.id
-          ? { ...row, confirmation_status: CONFIRMATION_STATUS.PENDING, confirmation_sent_at: sentAt }
+          ? {
+            ...row,
+            confirmation_status: CONFIRMATION_STATUS.PENDING,
+            confirmation_sent_at: sentAt,
+            confirmation_replied_at: null,
+            confirmation_reply: null,
+          }
           : row
       )));
       broadcastLiveDataUpdated(activeClinic);
+      alert(locale === 'en'
+        ? (isResend ? 'Confirmation SMS resent.' : 'Confirmation SMS sent.')
+        : (isResend ? 'SMS de confirmación reenviado.' : 'SMS de confirmación enviado.'));
     } catch (err) {
       alert(err?.message || (locale === 'en' ? 'Could not send confirmation SMS.' : 'No se pudo enviar la confirmación SMS.'));
     } finally {
       setConfirmationSending(false);
     }
+  };
+
+  const handleResendFirstVisitMessage = async () => {
+    if (!selectedSlot?.id) return;
+    const ok = window.confirm(
+      locale === 'en'
+        ? 'Send the FIRST VISIT message (email/SMS template with first-session notes) for this appointment?'
+        : '¿Enviar el mensaje de PRIMERA CITA (plantilla email/SMS con indicaciones de primera sesión) para esta cita?',
+    );
+    if (!ok) return;
+    await notifyPatientFromSlot(selectedSlot, {
+      showSuccess: true,
+      notifyType: 'first',
+      forceNotify: true,
+    });
   };
 
   const handleSendStaffSms = async () => {
@@ -2999,9 +3039,12 @@ export default function AppLayout() {
       notifyReason,
       isNewPatient: slot.is_new_patient,
       patientName: slot.patient,
+      patientId: slot.patientId || slot.patient_id || null,
       equipment: slot.equipment,
       appointments: dbAppointments,
       excludeAppointmentId: slot.id,
+      fullDate: slot.full_date || slot.fullDate,
+      time: slot.time,
       normalize: normalizeStr,
     });
 
@@ -7649,7 +7692,9 @@ export default function AppLayout() {
                       >
                         {confirmationSending
                           ? (locale === 'en' ? 'Sending…' : 'Enviando…')
-                          : (locale === 'en' ? 'Send confirmation SMS now' : 'Enviar confirmación SMS ahora')}
+                          : selectedSlotConfirmationInfo.isResend
+                            ? (locale === 'en' ? 'Resend confirmation SMS (YES/NO)' : 'Reenviar SMS confirmación (SI/NO)')
+                            : (locale === 'en' ? 'Send confirmation SMS now' : 'Enviar confirmación SMS ahora')}
                       </button>
                     ) : null}
                   </div>
@@ -8020,6 +8065,21 @@ export default function AppLayout() {
               >
                 {L.p.appt.sendInstructions}
               </button>
+
+              <button
+                type="button"
+                onClick={handleResendFirstVisitMessage}
+                className="w-full bg-amber-50 text-amber-900 border border-amber-300 py-3 rounded-2xl font-black uppercase text-[10px] hover:bg-amber-100 transition mt-2"
+              >
+                {locale === 'en'
+                  ? '⭐ Resend first-visit message (email/SMS)'
+                  : '⭐ Reenviar mensaje de primera cita (email/SMS)'}
+              </button>
+              <p className="text-[8px] font-bold text-amber-800/90 normal-case leading-snug mt-1 px-1">
+                {locale === 'en'
+                  ? 'Forces the first-visit template with session notes for this patient appointment.'
+                  : 'Fuerza la plantilla de primera cita con indicaciones para esta cita del paciente.'}
+              </p>
 
               <div className="mt-3 p-3 rounded-2xl border border-violet-200 bg-violet-50 space-y-2">
                 <p className="text-[10px] font-black uppercase text-violet-900">

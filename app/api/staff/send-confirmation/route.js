@@ -14,6 +14,8 @@ const ERROR_MESSAGES = {
   invalid_phone: 'Invalid phone number.',
   invalid_datetime: 'Invalid appointment date or time.',
   sms_failed: 'SMS could not be sent.',
+  already_sent: 'Confirmation was already sent. Use resend if needed.',
+  already_replied: 'Patient already replied YES/NO — cannot resend confirmation.',
 };
 
 export async function POST(request) {
@@ -39,12 +41,14 @@ export async function POST(request) {
       return NextResponse.json({ error: 'appointmentId required' }, { status: 400 });
     }
 
+    const resend = body.resend === true;
     const supabase = getSupabaseAdmin(clinicName);
     const result = await sendConfirmationSmsForAppointment({
       supabase,
       appointmentId,
       clinicName,
       force: true,
+      resend,
     });
 
     if (!result.ok) {
@@ -62,6 +66,7 @@ export async function POST(request) {
       ok: true,
       sentAt: result.sentAt,
       appointmentId: result.appointmentId,
+      resent: result.resent === true,
     });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
