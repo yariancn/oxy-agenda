@@ -4283,6 +4283,32 @@ export default function AppLayout() {
         || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(slot.patient));
       if (existingP?.is_blocked) return alert(staffAlert(locale, 'patientBlockedShort'));
 
+      // One chart only: if the typed name matches an existing patient, staff MUST pick
+      // from the search list (patientId). Freehand typing caused fake “two databases”
+      // (appointment snapshot vs chart) — e.g. Luz María / Ignacio Gómez.
+      const creatingNew = !slot.id;
+      const nameMatchesChart = dbPatients.find(
+        (x) => normalizeStr(x.patient) === normalizeStr(slot.patient),
+      );
+      if (creatingNew && nameMatchesChart && !slot.patientId) {
+        setAppointmentSaveFeedback({
+          phase: 'error',
+          title: locale === 'en' ? 'Select the client' : 'Selecciona el paciente',
+          detail: staffAlert(locale, 'mustPickPatientFromList'),
+          closeForm: false,
+        });
+        return;
+      }
+      if (creatingNew && slot.patientId && !existingP) {
+        setAppointmentSaveFeedback({
+          phase: 'error',
+          title: locale === 'en' ? 'Client not found' : 'Paciente no encontrado',
+          detail: staffAlert(locale, 'patientNotFound'),
+          closeForm: false,
+        });
+        return;
+      }
+
       const sessionTimes = resolveSessionTimes(slot);
       const useRecurrence = repeatBooking.enabled && !slot.id;
       const occurrenceDates = useRecurrence
@@ -4328,6 +4354,14 @@ export default function AppLayout() {
       let canonicalEmail = resolvedContact.email;
       let ensuredPatientId = slot.patientId || null;
       let ensuredMeta = { isNew: false, forceCreated: false, linkedExisting: false };
+
+      // Chart is the single source of truth when a patient was picked from search.
+      if (existingP && slot.patientId && String(existingP.id) === String(slot.patientId)) {
+        canonicalPatient = existingP.patient;
+        canonicalPhone = existingP.phone || canonicalPhone;
+        canonicalEmail = existingP.email || canonicalEmail;
+        ensuredPatientId = existingP.id;
+      }
 
       const upsertLocalPatientFromEnsure = (ensured, extras = {}) => {
         if (!ensured?.id) return;
@@ -8051,19 +8085,20 @@ export default function AppLayout() {
                     const hint = !exact
                       ? patientAppointmentHints.find((h) => normalizeStr(h.patient) === normalizeStr(pName))
                       : null;
+                    // Typing alone never locks a chart — patientId cleared until list pick.
                     const star = resolveNewPatientStar({
                       patientName: pName,
-                      patientId: exact?.id || hint?.patient_id || null,
+                      patientId: null,
                       phone: exact ? exact.phone : (hint?.phone || ''),
                       appointments: dbAppointments,
-                      historicoSesiones: exact?.historicoSesiones || 0,
+                      historicoSesiones: 0,
                       justCreated: !exact,
                       normalize: normalizeStr,
                     });
                     setSelectedSlot((prev) => ({
                       ...(prev || createEmptyAppointmentDraft()),
                       patient: pName,
-                      patientId: exact?.id || null,
+                      patientId: null,
                       phone: exact ? exact.phone : (hint?.phone || prev?.phone || ''),
                       email: exact ? exact.email : (hint?.email || prev?.email || ''),
                       protocol: exact ? exact.protocol : (prev?.protocol || ''),
@@ -8105,6 +8140,13 @@ export default function AppLayout() {
                   }}
                 />
               </div>
+              {selectedSlot?.patient?.trim()
+                && !selectedSlot?.patientId
+                && dbPatients.some((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient)) ? (
+                <p className="text-[10px] font-black uppercase text-amber-800 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
+                  {L.p.appt.mustPickFromList || L.p.appt.pickPatientHint}
+                </p>
+              ) : null}
               {newAppointmentPatientBlocked ? (
                   <div className="rounded-xl border-2 border-red-400 bg-red-50 px-3 py-2.5">
                     <p className="text-[10px] font-black uppercase text-red-800">
