@@ -149,6 +149,7 @@ import {
 } from '../lib/sessionGroup';
 import { buildSessionSummary, getServicePrice } from '../lib/sessionSummary';
 import { countPackageChargedSessions } from '../lib/patientAppointmentHistory';
+import { resolveNewPatientStar, withResolvedNewPatientStars } from '../lib/patientFirstVisit';
 import {
   buildNotifyContent,
   formatBookingNotifyFeedback,
@@ -1485,6 +1486,15 @@ export default function AppLayout() {
       if (!prev || prev.id !== fresh.id) return prev;
       const canonicalPatient = patInfo?.patient || fresh.patient;
       const dirty = slotNotesDirtyRef.current;
+      const resolvedStar = resolveNewPatientStar({
+        patientName: canonicalPatient,
+        patientId: patInfo?.id || fresh.patient_id || fresh.patientId || null,
+        phone: patInfo?.phone || fresh.phone || '',
+        appointments: dbAppointments,
+        excludeAppointmentId: fresh.id,
+        historicoSesiones: patInfo?.historicoSesiones || 0,
+        normalize: normalizeStr,
+      });
       return {
         ...prev,
         ...fresh,
@@ -1502,6 +1512,7 @@ export default function AppLayout() {
         packageHistory: prev.packageHistory,
         sessionGroup: prev.sessionGroup,
         groupMembers: prev.groupMembers,
+        is_new_patient: resolvedStar,
       };
     });
   }, [dbAppointments, dbPatients, selectedSlot?.id]);
@@ -1818,7 +1829,11 @@ export default function AppLayout() {
     : dynamicColumns;
 
   const calendarAppointments = useMemo(
-    () => dbAppointments.map((app) => withCanonicalPatientName(app, dbPatients)),
+    () => withResolvedNewPatientStars(
+      dbAppointments.map((app) => withCanonicalPatientName(app, dbPatients)),
+      dbPatients,
+      normalizeStr,
+    ),
     [dbAppointments, dbPatients],
   );
 
@@ -2871,6 +2886,15 @@ export default function AppLayout() {
       prefers_sms_reminder: patInfo?.prefers_sms_reminder !== false,
       attendant: resolveDefaultAttendant(app.attendant),
       ...appointmentFlagsFromApp(app),
+      is_new_patient: resolveNewPatientStar({
+        patientName: patInfo?.patient || app.patient,
+        patientId: patInfo?.id || app.patient_id || app.patientId || null,
+        phone: contact.phone || app.phone || '',
+        appointments: dbAppointments,
+        excludeAppointmentId: app.id,
+        historicoSesiones: nextHistorico,
+        normalize: normalizeStr,
+      }),
     }, patInfo));
   };
 
@@ -4302,8 +4326,8 @@ export default function AppLayout() {
       const resolvedContact = resolveSlotContact(slot);
       let canonicalPhone = resolvedContact.phone;
       let canonicalEmail = resolvedContact.email;
-      let isNewForAppointment = !!(slot.is_new_patient || newPatientForSlot);
       let ensuredPatientId = slot.patientId || null;
+      let ensuredMeta = { isNew: false, forceCreated: false, linkedExisting: false };
 
       const upsertLocalPatientFromEnsure = (ensured, extras = {}) => {
         if (!ensured?.id) return;
@@ -4401,6 +4425,11 @@ export default function AppLayout() {
         canonicalPhone = ensured.phone;
         canonicalEmail = ensured.email;
         ensuredPatientId = ensured.id || ensuredPatientId;
+        ensuredMeta = {
+          isNew: !!ensured.isNew,
+          forceCreated: !!ensured.forceCreated,
+          linkedExisting: !!ensured.linkedExisting,
+        };
         upsertLocalPatientFromEnsure(ensured, existingByPhone && !forceCreate ? {
           wallets: existingByPhone.wallets,
           packageHistory: existingByPhone.packageHistory,
@@ -4410,7 +4439,6 @@ export default function AppLayout() {
           is_blocked: existingByPhone.is_blocked,
           notes: existingByPhone.notes,
         } : {});
-        if (ensured.isNew || ensured.forceCreated) isNewForAppointment = true;
       } else if (newPatientForSlot && !slot.id) {
         setAppointmentSaveFeedback({
           phase: 'error',
@@ -4437,6 +4465,27 @@ export default function AppLayout() {
         if (contactResult.patient) canonicalPatient = contactResult.patient;
         if (slot.patientId) ensuredPatientId = slot.patientId;
       }
+
+      const linkedPatient = (ensuredPatientId
+        ? dbPatients.find((p) => String(p.id) === String(ensuredPatientId))
+        : null)
+        || dbPatients.find((p) => normalizeStr(p.patient) === normalizeStr(canonicalPatient))
+        || null;
+
+      // ⭐ from real history — never leave the star on returning patients (e.g. Luz María
+      // linked by phone while typed name didn't exact-match), and always star true first visits
+      // even if an empty chart already exists (e.g. Ignacio Gómez).
+      const isNewForAppointment = resolveNewPatientStar({
+        patientName: canonicalPatient,
+        patientId: ensuredPatientId || linkedPatient?.id || null,
+        phone: canonicalPhone,
+        appointments: dbAppointments,
+        excludeAppointmentId: slot.id || null,
+        historicoSesiones: linkedPatient?.historicoSesiones || 0,
+        manualFlag: slot.is_new_patient,
+        justCreated: !!(ensuredMeta.isNew || ensuredMeta.forceCreated || newPatientForSlot),
+        normalize: normalizeStr,
+      });
 
       const basePayload = {
         patient: canonicalPatient,
@@ -5396,7 +5445,14 @@ export default function AppLayout() {
                              protocol: p.protocol, 
                              email: p.email,
                              patientNotes: p.notes,
-                             is_new_patient: false,
+                             is_new_patient: resolveNewPatientStar({
+                               patientName: p.patient,
+                               patientId: p.id,
+                               phone: p.phone,
+                               appointments: dbAppointments,
+                               historicoSesiones: p.historicoSesiones || 0,
+                               normalize: normalizeStr,
+                             }),
                              patientId: p.id,
                            }); 
                          }} className={`flex-1 text-white text-[9px] font-black uppercase py-2 rounded transition shadow-sm ${p.is_blocked ? 'bg-slate-400 cursor-not-allowed opacity-70' : 'bg-blue-600 hover:bg-blue-700'}`}>📅 {L.schedule}</button>
@@ -7995,6 +8051,15 @@ export default function AppLayout() {
                     const hint = !exact
                       ? patientAppointmentHints.find((h) => normalizeStr(h.patient) === normalizeStr(pName))
                       : null;
+                    const star = resolveNewPatientStar({
+                      patientName: pName,
+                      patientId: exact?.id || hint?.patient_id || null,
+                      phone: exact ? exact.phone : (hint?.phone || ''),
+                      appointments: dbAppointments,
+                      historicoSesiones: exact?.historicoSesiones || 0,
+                      justCreated: !exact,
+                      normalize: normalizeStr,
+                    });
                     setSelectedSlot((prev) => ({
                       ...(prev || createEmptyAppointmentDraft()),
                       patient: pName,
@@ -8007,9 +8072,19 @@ export default function AppLayout() {
                       prefers_sms: exact ? exact.prefers_sms === true : prev?.prefers_sms === true,
                       prefers_sms_reminder: exact ? exact.prefers_sms_reminder !== false : prev?.prefers_sms_reminder !== false,
                       is_blocked: exact ? !!exact.is_blocked : false,
+                      is_new_patient: star,
                     }));
                   }}
                   onSelectPatient={(p) => {
+                    const star = resolveNewPatientStar({
+                      patientName: p.patient,
+                      patientId: p.id || null,
+                      phone: p.phone || '',
+                      appointments: dbAppointments,
+                      historicoSesiones: p.historicoSesiones || 0,
+                      justCreated: false,
+                      normalize: normalizeStr,
+                    });
                     setSelectedSlot((prev) => ({
                       ...(prev || createEmptyAppointmentDraft()),
                       patient: p.patient,
@@ -8022,6 +8097,7 @@ export default function AppLayout() {
                       prefers_sms: p.prefers_sms === true,
                       prefers_sms_reminder: p.prefers_sms_reminder !== false,
                       is_blocked: !!p.is_blocked,
+                      is_new_patient: star,
                     }));
                     if (p.is_blocked) {
                       alert(staffAlert(locale, 'patientBlocked'));
