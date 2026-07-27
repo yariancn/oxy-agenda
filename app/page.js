@@ -487,9 +487,12 @@ export default function AppLayout() {
     const firstSession = isFirstSession ?? isFirstSessionAppointment({
       isNewPatient: slot.is_new_patient,
       patientName: slot.patient,
+      patientId: slot.patientId || slot.patient_id || null,
       equipment: slot.equipment,
       appointments: dbAppointments,
       excludeAppointmentId: slot.id,
+      fullDate: slot.full_date || slot.fullDate,
+      time: slot.time,
       normalize: normalizeStr,
     });
     try {
@@ -1492,6 +1495,8 @@ export default function AppLayout() {
         phone: patInfo?.phone || fresh.phone || '',
         appointments: dbAppointments,
         excludeAppointmentId: fresh.id,
+        fullDate: fresh.full_date || fresh.fullDate,
+        time: fresh.time,
         historicoSesiones: patInfo?.historicoSesiones || 0,
         normalize: normalizeStr,
       });
@@ -2892,6 +2897,8 @@ export default function AppLayout() {
         phone: contact.phone || app.phone || '',
         appointments: dbAppointments,
         excludeAppointmentId: app.id,
+        fullDate: app.full_date || app.fullDate,
+        time: app.time,
         historicoSesiones: nextHistorico,
         normalize: normalizeStr,
       }),
@@ -4515,6 +4522,8 @@ export default function AppLayout() {
         phone: canonicalPhone,
         appointments: dbAppointments,
         excludeAppointmentId: slot.id || null,
+        fullDate: apptDate,
+        time: slot.time,
         historicoSesiones: linkedPatient?.historicoSesiones || 0,
         manualFlag: slot.is_new_patient,
         justCreated: !!(ensuredMeta.isNew || ensuredMeta.forceCreated || newPatientForSlot),
@@ -4626,9 +4635,12 @@ export default function AppLayout() {
           is_new_patient: isNewForAppointment,
         }, { source: 'staff', isFirstSession: isFirstSessionAppointment({
           isNewPatient: isNewForAppointment,
-          patientName: slot.patient,
+          patientName: canonicalPatient,
+          patientId: ensuredPatientId || null,
           appointments: dbAppointments,
           excludeAppointmentId: firstCreated.id,
+          fullDate: firstCreated.full_date || apptDate,
+          time: slot.time,
           normalize: normalizeStr,
         }) });
         notifySummary = formatBookingNotifyFeedback({
