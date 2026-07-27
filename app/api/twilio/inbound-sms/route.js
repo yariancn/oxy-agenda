@@ -7,7 +7,9 @@ import {
   parseConfirmationReply,
 } from '../../../../lib/appointmentConfirmation.js';
 import { CANCEL_REQUEST_STATUS } from '../../../../lib/appointmentManage.js';
-import { dispatchStaffCancelRequestAlert } from '../../../../lib/staffBookingAlert.js';
+import {
+  dispatchStaffConfirmationReplyAlert,
+} from '../../../../lib/staffBookingAlert.js';
 import { bumpAgendaLiveRev } from '../../../../lib/agendaLiveRev.js';
 import { localeForClinic } from '../../../../lib/i18n.js';
 import { insertAuditLog, publicCancelAuditLabels } from '../../../../lib/auditLog.js';
@@ -34,8 +36,9 @@ export async function POST(request) {
     const supabase = getSupabaseAdmin(CLINIC_SHENANDOAH);
     const timezone = getClinicTimezone(CLINIC_SHENANDOAH);
     const now = new Date();
+    // Look ahead enough for first visits booked several days out (e.g. next Friday).
     const fromIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const toIso = new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const toIso = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
     const { data: appointments, error } = await supabase
       .from('appointments')
@@ -86,6 +89,34 @@ export async function POST(request) {
 
     if (updateErr) throw updateErr;
 
+    // Refresh staff calendar so "Waiting for YES/NO" flips to Confirmed/Declined live.
+    await bumpAgendaLiveRev(supabase, CLINIC_SHENANDOAH).catch(() => null);
+
+    const [{ data: companyConfig }, { data: staffRoster }] = await Promise.all([
+      selectCompanyConfigForClinic(supabase, CLINIC_SHENANDOAH),
+      supabase
+        .from('users_staff')
+        .select('name, email, phone, notify_on_booking, is_active')
+        .eq('is_active', true),
+    ]);
+
+    const locale = localeForClinic(CLINIC_SHENANDOAH);
+
+    // Always SMS/email staff with the patient's reply (YES or NO).
+    await dispatchStaffConfirmationReplyAlert({
+      companyConfig: companyConfig || {},
+      staffRoster: staffRoster || [],
+      clinicName: CLINIC_SHENANDOAH,
+      clinicDisplayName: companyConfig?.name,
+      patientName: match.patient,
+      date: match.full_date,
+      time: match.time,
+      equipment: match.equipment,
+      locale,
+      reply,
+      replyText: body,
+    }).catch(() => null);
+
     if (reply === 'confirmed') {
       await insertAuditLog(supabase, {
         appointmentId: match.id,
@@ -97,30 +128,7 @@ export async function POST(request) {
       return twiml(`Thanks ${match.patient || ''}! Your appointment at ${match.time} is confirmed.`);
     }
 
-    await bumpAgendaLiveRev(supabase, CLINIC_SHENANDOAH).catch(() => null);
-
-    const [{ data: companyConfig }, { data: staffRoster }] = await Promise.all([
-      selectCompanyConfigForClinic(supabase, CLINIC_SHENANDOAH),
-      supabase
-        .from('users_staff')
-        .select('name, email, phone, notify_on_booking, is_active')
-        .eq('is_active', true),
-    ]);
-
-    await dispatchStaffCancelRequestAlert({
-      companyConfig: companyConfig || {},
-      staffRoster: staffRoster || [],
-      clinicName: CLINIC_SHENANDOAH,
-      clinicDisplayName: companyConfig?.name,
-      patientName: match.patient,
-      date: match.full_date,
-      time: match.time,
-      equipment: match.equipment,
-      locale: localeForClinic(CLINIC_SHENANDOAH),
-      source: 'sms_no',
-    }).catch(() => null);
-
-    const cancelAudit = publicCancelAuditLabels(localeForClinic(CLINIC_SHENANDOAH), 'sms_no');
+    const cancelAudit = publicCancelAuditLabels(locale, 'sms_no');
     await insertAuditLog(supabase, {
       appointmentId: match.id,
       patientName: match.patient,
