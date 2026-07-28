@@ -13,7 +13,12 @@ export async function POST(request) {
     if (!email && !phone) {
       return NextResponse.json({ ok: false, error: 'email_or_phone_required' }, { status: 400 });
     }
-    const result = await markFunnelLeadBooked({ email, phone });
+    const result = await markFunnelLeadBooked({
+      email,
+      phone,
+      name: String(body.name || '').trim(),
+      source: String(body.source || 'oxy-agenda-booking').trim(),
+    });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });

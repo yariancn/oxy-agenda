@@ -60,6 +60,8 @@ export async function POST(request) {
       await markFunnelLeadBooked({
         email: patientEmail,
         phone: patientPhone,
+        name: String(patientName || '').trim(),
+        source: 'oxy-agenda-staff',
       }).catch(() => null);
     }
 

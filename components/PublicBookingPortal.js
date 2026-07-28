@@ -415,6 +415,8 @@ export default function PublicBookingPortal({
           body: JSON.stringify({
             email: (formData.email || result.patient?.email || '').trim(),
             phone: result.patient?.phone || formData.phone || '',
+            name: (formData.name || result.patient?.displayName || '').trim(),
+            source: 'oxy-agenda-booking',
           }),
         });
       } catch {
