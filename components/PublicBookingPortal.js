@@ -28,7 +28,7 @@ import {
 import { notifyStaffNewBooking } from '../lib/staffBookingAlert';
 import { getLegalLinks } from '../lib/legalLinks';
 import { formatClinicPhone } from '../lib/clinicText';
-import { useLiveSyncPoll } from '../lib/useLiveSyncPoll';
+import { useAgendaLiveSync } from '../lib/useAgendaLiveSync';
 import AppointmentSavingOverlay from './AppointmentSavingOverlay';
 
 export default function PublicBookingPortal({
@@ -218,7 +218,7 @@ export default function PublicBookingPortal({
     loadPortalData();
   }, [loadPortalData]);
 
-  useLiveSyncPoll({
+  useAgendaLiveSync({
     enabled: step < 4,
     clinic: clinicName,
     endpoint: '/api/public/live-sync',

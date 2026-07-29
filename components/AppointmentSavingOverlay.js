@@ -20,9 +20,22 @@ export default function AppointmentSavingOverlay({
 
   useEffect(() => {
     if (!open) return undefined;
+    // Body lock is owned by the parent (useModalViewportLock) when used from staff agenda.
+    // Keep a lightweight overflow lock for standalone uses of this overlay.
     const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
+    if (!document.body.style.position || document.body.style.position === '') {
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      document.body.style.overflow = prev;
+      const active = document.activeElement;
+      if (active && typeof active.blur === 'function' && active !== document.body) {
+        active.blur();
+      }
+      requestAnimationFrame(() => {
+        window.scrollTo(window.scrollX, window.scrollY);
+      });
+    };
   }, [open]);
 
   if (!open) return null;

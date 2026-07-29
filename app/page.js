@@ -179,7 +179,8 @@ import {
   STAFF_ALERT_FIELDS,
 } from '../lib/staffBookingAlert';
 import { broadcastLiveDataUpdated } from '../lib/liveSyncBroadcast';
-import { useLiveSyncPoll } from '../lib/useLiveSyncPoll';
+import { useAgendaLiveSync } from '../lib/useAgendaLiveSync';
+import { useModalViewportLock } from '../lib/useModalViewportLock';
 import { liveSyncDateRange } from '../lib/liveSyncToken';
 import {
   CONFIRMATION_STATUS,
@@ -264,6 +265,7 @@ export default function AppLayout() {
   const [staffSmsSending, setStaffSmsSending] = useState(false);
   const [draggedApp, setDraggedApp] = useState(null);
   const [moveConfirmation, setMoveConfirmation] = useState(null);
+  const [pastMoveAuth, setPastMoveAuth] = useState(null);
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [showAudit, setShowAudit] = useState(false);
   const [auditLogs, setAuditLogs] = useState([]);
@@ -832,16 +834,18 @@ export default function AppLayout() {
     return { duration, buffer: Math.max(0, buffer) };
   };
 
-  const applyExtendedSession = (slot, enabled) => {
+  const applyExtendedSession = (slot, enabled, { preserveTime = false } = {}) => {
     const base = { ...(slot || {}) };
     if (enabled) {
       return {
         ...base,
         extended_session: true,
+        is_extended_block: true,
         sessionPreset: SESSION_PRESETS.extended.id,
         duration: 90,
         buffer: 90,
-        time: '',
+        // New bookings need a fresh slot pick; reschedule keeps the chosen time.
+        time: preserveTime ? (base.time || '') : '',
       };
     }
     const srv = getServiceForSlot(base);
@@ -850,10 +854,11 @@ export default function AppLayout() {
     return {
       ...base,
       extended_session: false,
+      is_extended_block: false,
       sessionPreset: getPresetFromTimes(duration, buffer).id,
       duration,
       buffer,
-      time: '',
+      time: preserveTime ? (base.time || '') : '',
     };
   };
 
@@ -1462,14 +1467,15 @@ export default function AppLayout() {
     broadcastLiveDataUpdated(activeClinic);
   }, [activeClinic, syncCalendarLive]);
 
-  useLiveSyncPoll({
+  useAgendaLiveSync({
     enabled: Boolean(currentUser),
     clinic: activeClinic,
     endpoint: '/api/staff/live-sync',
-    visibleIntervalMs: 3000,
-    hiddenIntervalMs: 12000,
     onChange: syncCalendarLive,
   });
+
+  // iPhone: keep booking sheet inside the viewport and reset after keyboard/zoom.
+  useModalViewportLock(Boolean(showNewAppointment || appointmentSaveFeedback));
 
   useEffect(() => {
     const id = window.setInterval(() => setLiveSyncTick((n) => n + 1), 5000);
@@ -2875,7 +2881,7 @@ export default function AppLayout() {
       ...app,
       status: 'booked',
       patient: patInfo?.patient || app.patient,
-      patientId: patInfo?.id,
+      patientId: patInfo?.id || app.patient_id || app.patientId || null,
       patientNotes: sanitizePatientNotesForDisplay(patInfo?.notes),
       phone: contact.phone,
       email: contact.email,
@@ -3380,49 +3386,51 @@ export default function AppLayout() {
   const tryRequestMove = (app, newTime, newEquipment, newDay, newFullDate, options = {}) => {
     // La cita original SIEMPRE proviene de la base de datos; `app` puede venir
     // del panel de reprogramación con la hora ya editada en pantalla.
-    const original = (app?.id ? dbAppointments.find((x) => x.id === app.id) : null) || app;
+    // IMPORTANT: compare ids as strings — UUID/number mismatch made `original`
+    // fall back to the edited panel state and falsely trip "already at that time".
+    const original = (app?.id
+      ? dbAppointments.find((x) => String(x.id) === String(app.id))
+      : null) || app;
     const originalDate = original?.full_date || original?.fullDate;
 
     const outsideNormalHours = options.outsideNormalHours ?? !!app?.outside_normal_hours;
     const extendedSession = options.extendedSession ?? isExtendedSession(app);
 
+    const prevTimes = resolveSessionTimes(original);
+    const nextTimes = resolveSessionTimes({
+      ...original,
+      extended_session: extendedSession,
+      is_extended_block: extendedSession,
+    });
+
     const unchanged =
       originalDate === newFullDate &&
       getMinutes(original?.time) === getMinutes(newTime) &&
       original?.equipment === newEquipment &&
-      !!original?.outside_normal_hours === !!outsideNormalHours;
+      !!original?.outside_normal_hours === !!outsideNormalHours &&
+      Number(prevTimes.duration) === Number(nextTimes.duration) &&
+      Number(prevTimes.buffer) === Number(nextTimes.buffer);
     if (unchanged) {
       alert(a('alreadyAtTime'));
       return false;
     }
 
-    let pastOverride = false;
-    if (isPastTime(newFullDate, newTime)) {
-      const code = window.prompt(a('pastMoveCodePrompt'));
-      if (code == null) return false;
-      if (String(code).trim() !== '0000') {
-        alert(a('pastMoveCodeWrong'));
-        return false;
-      }
-      pastOverride = true;
-    }
-
-    const pInfo = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(original.patient));
+    const pInfo = resolvePatientForAppointment(original, dbPatients)
+      || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(original.patient));
     if (pInfo && pInfo.is_blocked) {
       alert(a('patientBlockedMove'));
       return false;
     }
 
-    const times = resolveSessionTimes({ ...original, extended_session: extendedSession, is_extended_block: extendedSession });
-    const dur = times.duration;
-    const buf = times.buffer;
+    const dur = nextTimes.duration;
+    const buf = nextTimes.buffer;
 
     if (checkOverlap(newEquipment, newFullDate, newTime, dur, buf, original.id)) {
       alert(a('overlapLong'));
       return false;
     }
 
-    setMoveConfirmation({
+    const draft = {
       app: original,
       newTime,
       newEquipment,
@@ -3430,9 +3438,29 @@ export default function AppLayout() {
       newFullDate,
       outsideNormalHours,
       extendedSession,
-      pastOverride,
-    });
+      pastOverride: false,
+    };
+
+    // iPad/Safari often blocks window.prompt — use an in-app modal instead.
+    if (isPastTime(newFullDate, newTime)) {
+      setPastMoveAuth({ draft, code: '' });
+      return false;
+    }
+
+    setMoveConfirmation(draft);
     return true;
+  };
+
+  const confirmPastMoveAuth = () => {
+    if (!pastMoveAuth?.draft) return;
+    if (String(pastMoveAuth.code || '').trim() !== '0000') {
+      alert(a('pastMoveCodeWrong'));
+      return;
+    }
+    const draft = { ...pastMoveAuth.draft, pastOverride: true };
+    setPastMoveAuth(null);
+    setIsRescheduling(false);
+    setMoveConfirmation(draft);
   };
 
   const handleDrop = (e, newTime, newEquipment, newDay, newFullDate, outsideHours = false) => {
@@ -7894,7 +7922,7 @@ export default function AppLayout() {
                         labels={L.p.appt}
                         blockMins={(Number(selectedSlot.duration) || 60) + (Number(selectedSlot.buffer) || 0)}
                         onOutsideHoursChange={(checked) => setSelectedSlot(applyOutsideHours(selectedSlot, checked))}
-                        onExtendedChange={(checked) => setSelectedSlot(applyExtendedSession(selectedSlot, checked))}
+                        onExtendedChange={(checked) => setSelectedSlot(applyExtendedSession(selectedSlot, checked, { preserveTime: true }))}
                       />
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="min-w-0">
@@ -8129,14 +8157,21 @@ export default function AppLayout() {
       
       {/* CREAR NUEVA CITA FORMULARIO */}
       {showNewAppointment && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" style={{ zIndex: 9999 }}>
-          <div className="bg-white rounded-t-2xl sm:rounded-3xl max-w-md w-full max-h-[92dvh] sm:max-h-[85vh] flex flex-col shadow-2xl border overflow-hidden text-slate-900">
+        <div className="modal-overlay fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-stretch sm:items-center justify-center p-0 sm:p-4 overflow-hidden" style={{ zIndex: 9999 }}>
+          <div className="modal-sheet bg-white w-full max-w-md h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[85vh] flex flex-col shadow-2xl border overflow-hidden text-slate-900 rounded-none sm:rounded-3xl">
             <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-b shrink-0 flex justify-between items-center gap-2">
                <div className="min-w-0">
                  <h3 className="text-base sm:text-xl font-black uppercase text-emerald-600 truncate">{selectedSlot?.status === 'booked' ? 'Editar Cita' : 'Registrar Cita'}</h3>
                  <p className="text-[8px] font-bold uppercase text-slate-400 mt-0.5">v{buildSha}</p>
                </div>
-               <button onClick={() => {setShowNewAppointment(false); setSelectedSlot(null);}} className="text-slate-400 hover:text-slate-800 text-2xl font-black transition">&times;</button>
+               <button
+                 type="button"
+                 onClick={() => {setShowNewAppointment(false); setSelectedSlot(null);}}
+                 className="appt-detail-close text-slate-400 hover:text-slate-800 text-2xl font-black transition shrink-0"
+                 aria-label={locale === 'en' ? 'Close' : 'Cerrar'}
+               >
+                 &times;
+               </button>
             </div>
 
             <div className="shrink-0 px-4 sm:px-8 py-3 border-b bg-white space-y-2">
@@ -8151,7 +8186,7 @@ export default function AppLayout() {
                   selectedLabel={L.p.appt.patientSelected}
                   pickHint={L.p.appt.pickPatientHint}
                   blockedBadge={locale === 'en' ? 'Patient blocked' : 'Paciente bloqueado'}
-                  className="w-full p-3 border border-slate-300 rounded-xl font-bold uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white mt-1"
+                  className="ios-text-input w-full p-3 border border-slate-300 rounded-xl font-bold uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white mt-1"
                   onQueryChange={(pName) => {
                     const exact = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(pName));
                     const hint = !exact
@@ -8262,11 +8297,11 @@ export default function AppLayout() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <label className="text-[9px] font-black uppercase text-slate-500">{L.p.appt.phone}</label>
-                      <input type="tel" value={selectedSlot?.phone || ''} onChange={e => setSelectedSlot({...selectedSlot, phone: e.target.value})} className="w-full p-2 border border-slate-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white mt-0.5" />
+                      <input type="tel" value={selectedSlot?.phone || ''} onChange={e => setSelectedSlot({...selectedSlot, phone: e.target.value})} className="ios-text-input w-full p-2 border border-slate-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-0.5" />
                     </div>
                     <div>
                       <label className="text-[9px] font-black uppercase text-slate-500">{L.p.appt.email}</label>
-                      <input type="email" value={selectedSlot?.email || ''} onChange={e => setSelectedSlot({...selectedSlot, email: e.target.value})} placeholder="correo@ejemplo.com" className="w-full p-2 border border-slate-200 rounded-lg font-bold text-xs outline-none text-slate-900 bg-white mt-0.5" />
+                      <input type="email" value={selectedSlot?.email || ''} onChange={e => setSelectedSlot({...selectedSlot, email: e.target.value})} placeholder="correo@ejemplo.com" className="ios-text-input w-full p-2 border border-slate-200 rounded-lg font-bold outline-none text-slate-900 bg-white mt-0.5" />
                     </div>
                   </div>
                   <p className="text-[8px] font-bold text-indigo-700 uppercase">{L.p.appt.notifyPrefsInProfile}</p>
@@ -8278,7 +8313,7 @@ export default function AppLayout() {
                   <select
                     value={dbPromoters.some((p) => normalizePromoCode(p.code) === normalizePromoCode(selectedSlot?.promoter_code)) ? normalizePromoCode(selectedSlot?.promoter_code) : ''}
                     onChange={(e) => setSelectedSlot({ ...selectedSlot, promoter_code: e.target.value })}
-                    className="w-full p-2 border border-violet-200 rounded-lg text-xs font-bold bg-white text-violet-900"
+                    className="ios-text-input w-full p-2 border border-violet-200 rounded-lg font-bold bg-white text-violet-900"
                   >
                     <option value="">{L.p.appt.promoterSelect}</option>
                     {dbPromoters.filter((p) => p.is_active !== false).map((p) => (
@@ -8290,7 +8325,7 @@ export default function AppLayout() {
                     value={selectedSlot?.promoter_code || ''}
                     onChange={(e) => setSelectedSlot({ ...selectedSlot, promoter_code: normalizePromoCode(e.target.value) })}
                     placeholder={L.p.appt.promoterCodeManual}
-                    className="w-full p-2 border border-violet-200 rounded-lg text-xs font-bold uppercase bg-white text-violet-900"
+                    className="ios-text-input w-full p-2 border border-violet-200 rounded-lg font-bold uppercase bg-white text-violet-900"
                   />
                   {selectedPromoterContext && (
                     <div className="rounded-lg border border-violet-300 bg-white p-2">
@@ -8319,7 +8354,7 @@ export default function AppLayout() {
                     value={selectedSlot.patientNotes || ''} 
                     onChange={e => setSelectedSlot({...selectedSlot, patientNotes: e.target.value})} 
                     placeholder="Ej. Paciente claustrofóbico, diabético..."
-                    className="w-full p-2 mt-2 border border-amber-200 rounded-lg text-xs outline-none bg-white font-bold text-amber-900"
+                    className="ios-text-input w-full p-2 mt-2 border border-amber-200 rounded-lg outline-none bg-white font-bold text-amber-900"
                     rows="2"
                   />
                   <p className="text-[8px] text-amber-600 mt-1 font-bold uppercase">Si editas este cuadro, se guardará permanentemente en su perfil.</p>
@@ -8377,7 +8412,7 @@ export default function AppLayout() {
                     value={selectedSlot?.notes || ''} 
                     onChange={e => setSelectedSlot({...selectedSlot, notes: e.target.value})} 
                     placeholder="Ej. Subir presión despacio, dolor de oído reciente..."
-                    className="w-full p-2.5 sm:p-3 border rounded-xl font-bold text-sm outline-none focus:border-emerald-500 mt-1 bg-blue-50 text-blue-900 border-blue-200"
+                    className="ios-text-input w-full p-2.5 sm:p-3 border rounded-xl font-bold outline-none focus:border-emerald-500 mt-1 bg-blue-50 text-blue-900 border-blue-200"
                     rows="2"
                 />
               </div>
@@ -8392,7 +8427,7 @@ export default function AppLayout() {
                       fullDate: e.target.value, 
                       day: getDayNameFromDate(locale, d)
                     }); 
-                  }} className="w-full min-w-0 max-w-full p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm box-border" />
+                  }} className="ios-text-input w-full min-w-0 max-w-full p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white box-border" />
                   <p className="mt-1 text-[10px] font-black uppercase text-emerald-800">
                     {formatAppointmentDateWithWeekday(selectedSlot?.fullDate || currentFullDate)}
                   </p>
@@ -8404,7 +8439,7 @@ export default function AppLayout() {
                       ...(prev || createEmptyAppointmentDraft()),
                       time: e.target.value,
                     }));
-                  }} className="w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white text-sm">
+                  }} className="ios-text-input w-full min-w-0 p-2.5 sm:p-3 border rounded-xl font-bold outline-none text-slate-900 bg-white">
                     <option value="">Hora...</option>
                     {appointmentTimeOptions.map(t => <option key={t} value={t}>{t}</option>)}
                     {appointmentTimeOptions.length === 0 && <option value="" disabled>Sin horario para este equipo</option>}
@@ -8795,6 +8830,48 @@ export default function AppLayout() {
                       : (locale === 'en' ? 'Apply block' : 'Aplicar Bloqueo')}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pastMoveAuth && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[10000]">
+          <div className="bg-white rounded-t-2xl sm:rounded-3xl max-w-md w-full p-4 sm:p-8 shadow-2xl text-slate-900 max-h-[92dvh] overflow-y-auto">
+            <h3 className="text-lg sm:text-xl font-black mb-3 uppercase text-center">{a('pastMoveCodeTitle')}</h3>
+            <p className="text-sm font-bold text-slate-500 mb-4 text-center whitespace-pre-line">
+              {a('pastMoveCodePrompt')}
+            </p>
+            <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">{a('pastMoveCodeLabel')}</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              maxLength={8}
+              value={pastMoveAuth.code || ''}
+              onChange={(e) => setPastMoveAuth((prev) => (prev ? { ...prev, code: e.target.value } : prev))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') confirmPastMoveAuth();
+              }}
+              className="w-full p-3 border border-orange-200 bg-orange-50 rounded-xl font-black tracking-[0.35em] text-center outline-none text-slate-900 mb-6"
+              placeholder="0000"
+            />
+            <div className="flex flex-col sm:flex-row gap-2 sm:space-x-3 sm:gap-0">
+              <button
+                type="button"
+                onClick={() => setPastMoveAuth(null)}
+                className="w-full sm:flex-1 bg-slate-100 font-black py-3 sm:py-4 rounded-2xl uppercase text-xs hover:bg-slate-200"
+              >
+                {locale === 'en' ? 'Cancel' : 'Cancelar'}
+              </button>
+              <button
+                type="button"
+                onClick={confirmPastMoveAuth}
+                className="w-full sm:flex-1 bg-orange-600 text-white font-black py-3 sm:py-4 rounded-2xl uppercase text-xs shadow-lg hover:bg-orange-700"
+              >
+                {a('pastMoveCodeConfirm')}
+              </button>
             </div>
           </div>
         </div>
@@ -9246,11 +9323,73 @@ export default function AppLayout() {
 
               const eq = selectedSlot.equipment;
               const servicePrice = selectedSlot.servicePrice || getServicePrice(dbServices, eq);
-              const pat = (selectedSlot.patientId
-                ? dbPatients.find((x) => String(x.id) === String(selectedSlot.patientId))
-                : null)
+
+              const mapPatientRow = (p) => {
+                if (!p) return null;
+                if (p.patient != null && p.wallets !== undefined) return p;
+                const packageHistory = p.package_history || p.packageHistory || [];
+                return {
+                  id: p.id,
+                  patient: String(p.Name || p.name || p.Nombre || p.patient || 'Sin Nombre'),
+                  phone: String(p.Phone || p.phone || ''),
+                  email: String(p.Email || p.email || ''),
+                  protocol: String(p.protocol || ''),
+                  notes: sanitizePatientNotesForDisplay(p.notes || p.Notes || ''),
+                  is_blocked: p.is_blocked || false,
+                  prefers_email: p.prefers_email !== false,
+                  prefers_sms: p.prefers_sms === true,
+                  prefers_sms_reminder: p.prefers_sms_reminder !== false,
+                  wallets: p.wallets || {},
+                  packageHistory,
+                  historicoSesiones: p.historicoSesiones ?? p.historico_sesiones ?? 0,
+                  adeudo: Number(p.adeudo) || 0,
+                  sessionGroupId: p.sessionGroupId || p.session_group_id || null,
+                };
+              };
+
+              let pat = mapPatientRow(
+                (selectedSlot.patientId
+                  ? dbPatients.find((x) => String(x.id) === String(selectedSlot.patientId))
+                  : null)
                 || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient))
-                || resolvePatientForAppointment(selectedSlot, dbPatients);
+                || resolvePatientForAppointment(selectedSlot, dbPatients),
+              );
+
+              // Tablet / stale memory: resolve from DB when the chart is not in local state.
+              if (!pat?.id && activeSupabase) {
+                const pid = selectedSlot.patientId || selectedSlot.patient_id || null;
+                if (pid) {
+                  const byId = await activeSupabase.from('patients').select('*').eq('id', pid).maybeSingle();
+                  if (byId.error) throw byId.error;
+                  pat = mapPatientRow(byId.data);
+                }
+                if (!pat?.id) {
+                  const last10 = digitsOnly(selectedSlot.phone).slice(-10);
+                  if (last10.length === 10) {
+                    for (const col of ['Phone', 'phone']) {
+                      const res = await activeSupabase.from('patients').select('*').ilike(col, `%${last10}`);
+                      if (res.error) {
+                        if (/column|schema cache/i.test(res.error.message || '')) continue;
+                        throw res.error;
+                      }
+                      const match = (res.data || []).find((row) => digitsOnly(row.Phone || row.phone).slice(-10) === last10);
+                      if (match) {
+                        pat = mapPatientRow(match);
+                        break;
+                      }
+                    }
+                  }
+                }
+                if (pat?.id) {
+                  setDbPatients((prev) => (
+                    prev.some((x) => String(x.id) === String(pat.id))
+                      ? prev
+                      : [...prev, pat]
+                  ));
+                  setSelectedSlot((prev) => (prev ? { ...prev, patientId: pat.id, patient: pat.patient || prev.patient } : prev));
+                }
+              }
+
               if (!pat?.id) {
                 throw new Error(locale === 'en'
                   ? 'Patient record not found (missing ID). Open the chart and save the profile first.'
