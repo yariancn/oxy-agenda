@@ -890,9 +890,17 @@ export default function AppLayout() {
   };
 
   const isPastTime = (dateStr, timeStr) => {
+    if (!dateStr || !clinicNow.dateStr) return false;
     if (dateStr < clinicNow.dateStr) return true;
     if (dateStr === clinicNow.dateStr && getMinutes(timeStr) < clinicNow.mins) return true;
     return false;
+  };
+
+  /** Seal/sign allowed for today and past calendar days; blocked for future days. */
+  const isFutureAppointmentDay = (app) => {
+    const d = app?.full_date || app?.fullDate;
+    if (!d || !clinicNow.dateStr) return false;
+    return d > clinicNow.dateStr;
   };
 
   const checkOverlap = (equipment, targetDate, targetTimeStr, dur, buffer, ignoreId) => {
@@ -1489,7 +1497,7 @@ export default function AppLayout() {
   });
 
   // iPhone: keep booking sheet inside the viewport and reset after keyboard/zoom.
-  useModalViewportLock(Boolean(showNewAppointment || appointmentSaveFeedback));
+  useModalViewportLock(Boolean(showNewAppointment || appointmentSaveFeedback || pastMoveAuth || moveConfirmation));
 
   useEffect(() => {
     const id = window.setInterval(() => setLiveSyncTick((n) => n + 1), 5000);
@@ -3467,7 +3475,8 @@ export default function AppLayout() {
 
   const confirmPastMoveAuth = () => {
     if (!pastMoveAuth?.draft) return;
-    if (String(pastMoveAuth.code || '').trim() !== '0000') {
+    const code = String(pastMoveAuth.code || '').replace(/\D/g, '');
+    if (code !== '0000') {
       alert(a('pastMoveCodeWrong'));
       return;
     }
@@ -4256,10 +4265,6 @@ export default function AppLayout() {
             <div
               key={`off-${timeStr}`}
               onClick={() => {
-                if (isPastTime(fullDate, timeStr) && !(isRescheduling && selectedSlot?.id)) {
-                  alert(a('pastScheduleAppt'));
-                  return;
-                }
                 if (isRescheduling && selectedSlot?.id) {
                   setSelectedSlot({
                     ...selectedSlot,
@@ -4276,6 +4281,15 @@ export default function AppLayout() {
                   });
                   setCurrentDate(new Date(fullDate + 'T12:00:00'));
                   setViewMode('Día');
+                  // One click = request move (past opens 0000 auth modal).
+                  tryRequestMove(selectedSlot, timeStr, equipment, day, fullDate, {
+                    outsideNormalHours: true,
+                    extendedSession: isExtendedSession(selectedSlot),
+                  });
+                  return;
+                }
+                if (isPastTime(fullDate, timeStr)) {
+                  alert(a('pastScheduleAppt'));
                   return;
                 }
                 openNewAppointment({
@@ -4302,10 +4316,6 @@ export default function AppLayout() {
           <div
             key={time}
             onClick={() => {
-              if (isPastTime(fullDate, time) && !(isRescheduling && selectedSlot?.id)) {
-                alert(a('pastScheduleAppt'));
-                return;
-              }
               if (isRescheduling && selectedSlot?.id) {
                 setSelectedSlot({
                   ...selectedSlot,
@@ -4321,6 +4331,14 @@ export default function AppLayout() {
                 });
                 setCurrentDate(new Date(fullDate + 'T12:00:00'));
                 setViewMode('Día');
+                tryRequestMove(selectedSlot, time, equipment, day, fullDate, {
+                  outsideNormalHours: !!selectedSlot.outside_normal_hours,
+                  extendedSession: isExtendedSession(selectedSlot),
+                });
+                return;
+              }
+              if (isPastTime(fullDate, time)) {
+                alert(a('pastScheduleAppt'));
                 return;
               }
               openNewAppointment({
@@ -5193,14 +5211,14 @@ export default function AppLayout() {
                       : 'text-slate-400 bg-slate-50 border-slate-200'
                   }`}
                   title={locale === 'en'
-                    ? 'Ping every 3s; calendar reloads only when data changes'
-                    : 'Ping cada 3 s; la agenda solo se recarga si hay cambios'}
+                    ? 'Updates instantly via Realtime; ○ Sync is normal when idle'
+                    : 'Se actualiza al instante con Realtime; ○ Sync es normal si no hay cambios'}
                 >
                   {liveSyncAt && Date.now() - liveSyncAt < 20000 ? '● Live' : '○ Sync'}
                 </span>
                 <span
                   className="text-[8px] font-black uppercase shrink-0 px-1.5 py-0.5 rounded border text-slate-400 bg-slate-50 border-slate-200"
-                  title={locale === 'en' ? `App build ${buildSha}` : `Versión de la app ${buildSha}`}
+                  title={locale === 'en' ? `App build ${buildSha} (changes only after deploy)` : `Versión de la app ${buildSha} (cambia solo al publicar)`}
                 >
                   v{buildSha}
                 </span>
@@ -7573,7 +7591,11 @@ export default function AppLayout() {
           {!isRescheduling && (
             <div className="fixed inset-0 bg-slate-900/40 z-[9998]" onClick={closeAppointmentPanel} />
           )}
-          <div className={`appt-detail-panel fixed inset-0 sm:inset-y-0 sm:left-auto sm:right-0 h-[100dvh] max-h-[100dvh] w-full sm:max-w-md bg-white shadow-2xl flex flex-col overflow-hidden sm:border-l border-slate-200 text-slate-900 ${isRescheduling ? 'z-[9999]' : 'z-[9999]'}`}>
+          <div className={`appt-detail-panel fixed bg-white shadow-2xl flex flex-col overflow-hidden text-slate-900 border-slate-200 z-[9999] ${
+            isRescheduling
+              ? 'inset-x-0 bottom-0 top-[38dvh] sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:h-[100dvh] sm:max-h-[100dvh] sm:w-full sm:max-w-md sm:border-l rounded-t-2xl sm:rounded-none'
+              : 'inset-0 sm:inset-y-0 sm:left-auto sm:right-0 h-[100dvh] max-h-[100dvh] w-full sm:max-w-md sm:border-l'
+          }`}>
             <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-4 border-b flex justify-between items-center shrink-0 gap-3">
               <div className="min-w-0 flex-1">
                 <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight truncate">
@@ -7977,6 +7999,7 @@ export default function AppLayout() {
                         </div>
                       </div>
                       <p className="text-[8px] font-bold text-blue-600 uppercase">Consulta el calendario a la izquierda antes de confirmar</p>
+                      <p className="text-[8px] font-bold text-orange-700 uppercase">{a('pastMoveClickHint')}</p>
                     </div>
                     <div className="col-span-1 sm:col-span-2 flex flex-col sm:flex-row gap-2 sm:gap-3">
                       <button onClick={() => setIsRescheduling(false)} className="flex-1 bg-white border border-slate-300 font-black py-3 rounded-xl uppercase text-[10px] hover:bg-slate-50 transition">Cancelar</button>
@@ -8092,8 +8115,13 @@ export default function AppLayout() {
                    <div className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center text-center border border-slate-200">
                      {locale === 'en' ? 'Attendance seal for completed visits only' : 'Bitácora solo para visitas atendidas'}
                    </div>
+                ) : isFutureAppointmentDay(selectedSlot) ? (
+                   <div className="flex-1 bg-amber-50 text-amber-900 py-4 px-3 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center text-center border border-amber-300" title={a('bitacoraFutureDay')}>
+                     {L.p.appt.bitacoraFutureLocked}
+                   </div>
                 ) : (
                    <button onClick={() => {
+                      if (isFutureAppointmentDay(selectedSlot)) return alert(a('bitacoraFutureDay'));
                       if(!selectedSlot.attendant || selectedSlot.attendant === 'Por Asignar') return alert(a('selectAttendant'));
                       setShowBitacora(true);
                    }} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] shadow-lg hover:bg-blue-700 transition">{L.p.appt.bitacoraOpen}</button>
@@ -8911,7 +8939,7 @@ export default function AppLayout() {
       )}
 
       {pastMoveAuth && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[10000]">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[100000]">
           <div className="bg-white rounded-t-2xl sm:rounded-3xl max-w-md w-full p-4 sm:p-8 shadow-2xl text-slate-900 max-h-[92dvh] overflow-y-auto">
             <h3 className="text-lg sm:text-xl font-black mb-3 uppercase text-center">{a('pastMoveCodeTitle')}</h3>
             <p className="text-sm font-bold text-slate-500 mb-4 text-center whitespace-pre-line">
@@ -8929,7 +8957,7 @@ export default function AppLayout() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') confirmPastMoveAuth();
               }}
-              className="w-full p-3 border border-orange-200 bg-orange-50 rounded-xl font-black tracking-[0.35em] text-center outline-none text-slate-900 mb-6"
+              className="w-full p-3 border border-orange-200 bg-orange-50 rounded-xl font-black tracking-[0.35em] text-center outline-none text-slate-900 mb-6 text-base"
               placeholder="0000"
             />
             <div className="flex flex-col sm:flex-row gap-2 sm:space-x-3 sm:gap-0">
@@ -8953,7 +8981,7 @@ export default function AppLayout() {
       )}
 
       {moveConfirmation && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[10000]">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[100000]">
           <div className="bg-white rounded-t-2xl sm:rounded-3xl max-w-md w-full p-4 sm:p-8 shadow-2xl text-slate-900 max-h-[92dvh] overflow-y-auto">
             <h3 className="text-lg sm:text-xl font-black mb-4 uppercase text-center">⚠️ Confirmar Reprogramación</h3>
             <p className="text-sm font-bold text-slate-500 mb-4 text-center">
@@ -9408,6 +9436,9 @@ export default function AppLayout() {
                 throw new Error(locale === 'en'
                   ? 'Missing appointment ID. Close and open the visit again.'
                   : 'Falta el ID de la cita. Cierra y vuelve a abrir la visita.');
+              }
+              if (isFutureAppointmentDay(selectedSlot)) {
+                throw new Error(a('bitacoraFutureDay'));
               }
 
               const eq = selectedSlot.equipment;
