@@ -27,11 +27,12 @@ import {
   CLINIC_SELECTOR_ORDER,
 } from '../lib/clinicRegistry';
 import {
-  chooseDuplicatePhoneAction,
   ensurePatient,
   digitsOnly,
+  findLocalPatientConflicts,
   resolvePatientForAppointment,
   resolveDisplayContact,
+  resolveStaffPatientCreate,
   updatePatientContact,
   updatePatientRecord,
 } from '../lib/ensurePatient';
@@ -935,36 +936,21 @@ export default function AppLayout() {
 
   // --- MOTOR INTELIGENTE AUTO-ADAPTABLE (TX / GDL) ---
   const savePatientToDB = async (db, pData) => {
-    const last10 = digitsOnly(pData.phone).slice(-10);
-    const existingByPhone = last10.length === 10
-      ? dbPatients.find((p) => digitsOnly(p.phone).slice(-10) === last10)
-      : null;
-
-    let forceCreate = false;
-    let namePolicy = 'prefer_incoming';
-    let nameForSave = pData.name;
-
-    if (existingByPhone) {
-      const action = chooseDuplicatePhoneAction({
-        existingName: existingByPhone.patient,
-        typedName: pData.name,
-        locale,
-      });
-      if (action === 'abort') {
-        return { error: { message: 'CANCELADO' }, cancelled: true };
-      }
-      if (action === 'use_existing') {
-        forceCreate = false;
-        namePolicy = 'keep_existing';
-        nameForSave = existingByPhone.patient;
-      } else {
-        forceCreate = true;
-        namePolicy = 'prefer_incoming';
-      }
+    const resolved = await resolveStaffPatientCreate({
+      supabase: db,
+      patients: dbPatients,
+      name: pData.name,
+      phone: pData.phone,
+      email: pData.email,
+      locale,
+    });
+    if (resolved.action === 'abort') {
+      if (resolved.error) return { error: resolved.error };
+      return { error: { message: 'CANCELADO' }, cancelled: true };
     }
 
     const result = await ensurePatient(db, {
-      name: nameForSave,
+      name: resolved.nameForSave || pData.name,
       phone: pData.phone,
       email: pData.email,
       protocol: pData.protocol,
@@ -972,14 +958,13 @@ export default function AppLayout() {
       prefers_email: pData.prefers_email,
       prefers_sms: pData.prefers_sms,
       prefers_sms_reminder: pData.prefers_sms_reminder,
-      namePolicy,
-      forceCreate,
+      namePolicy: resolved.namePolicy || 'prefer_incoming',
+      forceCreate: !!resolved.forceCreate,
     });
     if (result.error) {
-      const duplicateInMemory = dbPatients.some(
-        (p) => digitsOnly(p.phone).slice(-10) === last10 && last10.length === 10
-      );
-      if (duplicateInMemory && !forceCreate) return { error: { message: 'CLON_DETECTADO' } };
+      if (result.error.code === 'SHARED_CONTACT' || result.error.message === 'SHARED_CONTACT') {
+        return { error: { message: 'CLON_DETECTADO' } };
+      }
       return { error: result.error };
     }
     return {
@@ -1065,11 +1050,21 @@ export default function AppLayout() {
   };
 
   // --- SINCRONIZACIÓN CON PAGINACIÓN INTELIGENTE ---
+  const fullLoadInFlightRef = useRef(false);
+
   const fetchAllData = async ({ silent = false, liveOnly = false } = {}) => {
     if (!currentUser) {
       setDbStatus('sin_sesion');
       return;
     }
+
+    // Never let a silent live refresh cancel / starve the initial clinic load.
+    if (liveOnly && fullLoadInFlightRef.current) {
+      return;
+    }
+
+    const isFullLoad = !silent && !liveOnly;
+    if (isFullLoad) fullLoadInFlightRef.current = true;
 
     const fetchGen = ++fetchGenRef.current;
     const clinicDb = createStaffDb(activeClinic);
@@ -1081,6 +1076,12 @@ export default function AppLayout() {
         throw new Error(`${label}: ${message}`);
       }
       return result;
+    };
+
+    const releaseFullLoad = () => {
+      if (isFullLoad && fetchGen === fetchGenRef.current) {
+        fullLoadInFlightRef.current = false;
+      }
     };
 
     try {
@@ -1202,7 +1203,8 @@ export default function AppLayout() {
             notify_sms_reminder: resC.data.notify_sms_reminder || prev.notify_sms_reminder || defaultNotifySettings(clinicLocale).notify_sms_reminder,
           }));
         }
-        if (dbStatus === 'error') {
+        // Recover if a live refresh finished while the UI was still stuck on "loading".
+        if (dbStatus === 'error' || dbStatus === 'cargando') {
           setDbStatus('listo');
           setDbErrorMessage('');
         }
@@ -1239,7 +1241,10 @@ export default function AppLayout() {
         fetchPromotersWithFallback(),
       ]);
 
-      if (fetchGen !== fetchGenRef.current) return;
+      if (fetchGen !== fetchGenRef.current) {
+        releaseFullLoad();
+        return;
+      }
 
       assertDbResult('services', resS);
       assertDbResult('users_staff', resU);
@@ -1411,7 +1416,10 @@ export default function AppLayout() {
         setDbCompanyConfig(defaultCfg);
       }
 
-      if (fetchGen !== fetchGenRef.current) return;
+      if (fetchGen !== fetchGenRef.current) {
+        releaseFullLoad();
+        return;
+      }
 
       let appointmentsReady = appointmentsData || [];
       if (currentUserLevel <= 2 && safeServices.length && appointmentsReady.length) {
@@ -1434,8 +1442,10 @@ export default function AppLayout() {
       setDbAppointments(appointmentsReady);
       setDbStatus('listo');
       setDbErrorMessage('');
+      releaseFullLoad();
       if (!silent) pendingScrollToNowRef.current = true;
-      broadcastLiveDataUpdated(activeClinic);
+      // Do NOT broadcast here — loading this tab is not a data change, and same-tab
+      // BroadcastChannel + live sync was aborting in-flight loads (stuck "LOADING").
 
       if (clinicDb && safePatients.length && appointmentsReady.length) {
         repairStaleAppointmentNames(clinicDb, appointmentsReady, safePatients)
@@ -1447,11 +1457,15 @@ export default function AppLayout() {
           .catch(() => {});
       }
     } catch (err) {
-      if (fetchGen !== fetchGenRef.current) return;
+      if (fetchGen !== fetchGenRef.current) {
+        releaseFullLoad();
+        return;
+      }
       console.error(err);
       const raw = err?.message || String(err);
       setDbErrorMessage(raw);
       setDbStatus('error');
+      releaseFullLoad();
     }
   };
 
@@ -1468,7 +1482,7 @@ export default function AppLayout() {
   }, [activeClinic, syncCalendarLive]);
 
   useAgendaLiveSync({
-    enabled: Boolean(currentUser),
+    enabled: Boolean(currentUser) && dbStatus === 'listo',
     clinic: activeClinic,
     endpoint: '/api/staff/live-sync',
     onChange: syncCalendarLive,
@@ -1617,7 +1631,7 @@ export default function AppLayout() {
         if (!cancelled && res.ok) {
           window.sessionStorage?.setItem(key, '1');
           // Reload directory so newly created charts (e.g. Claudia) appear immediately.
-          await fetchAllData();
+          await fetchAllData({ silent: true });
         }
       } catch {
         /* ignore — can re-run on next session */
@@ -4475,40 +4489,41 @@ export default function AppLayout() {
       const phoneDigits = digitsOnly(canonicalPhone).slice(-10);
       let namePolicy = 'keep_existing';
       let forceCreate = false;
+      let existingByPhone = null;
       if (phoneDigits.length === 10) {
-        const existingByPhone = dbPatients.find(
-          (p) => digitsOnly(p.phone).slice(-10) === phoneDigits,
-        );
-        const alreadySelected = existingByPhone
-          && slot.patientId
-          && String(slot.patientId) === String(existingByPhone.id);
+        const alreadySelectedId = slot.patientId || null;
+        const resolved = await resolveStaffPatientCreate({
+          supabase: activeSupabase,
+          patients: dbPatients,
+          name: canonicalPatient,
+          phone: canonicalPhone,
+          email: canonicalEmail,
+          locale,
+          excludeId: alreadySelectedId,
+        });
 
-        if (existingByPhone && !alreadySelected) {
-          const action = chooseDuplicatePhoneAction({
-            existingName: existingByPhone.patient,
-            typedName: canonicalPatient,
-            locale,
+        if (resolved.action === 'abort') {
+          setAppointmentSaveFeedback({
+            phase: 'idle',
+            title: '',
+            detail: '',
+            closeForm: false,
           });
-          if (action === 'abort') {
-            setAppointmentSaveFeedback({
-              phase: 'idle',
-              title: '',
-              detail: '',
-              closeForm: false,
-            });
-            return;
-          }
-          if (action === 'use_existing') {
-            forceCreate = false;
-            namePolicy = 'keep_existing';
-            canonicalPatient = existingByPhone.patient;
-          } else {
-            forceCreate = true;
-            namePolicy = 'prefer_incoming';
-          }
-        } else if (alreadySelected) {
-          namePolicy = 'keep_existing';
+          return;
         }
+
+        if (alreadySelectedId && !(resolved.existing && String(resolved.existing.id) !== String(alreadySelectedId))) {
+          // Updating the chart already linked to this appointment.
+          namePolicy = 'keep_existing';
+          forceCreate = false;
+        } else {
+          forceCreate = !!resolved.forceCreate;
+          namePolicy = resolved.namePolicy || 'keep_existing';
+          if (resolved.nameForSave) canonicalPatient = resolved.nameForSave;
+        }
+        existingByPhone = resolved.existing
+          ? dbPatients.find((p) => String(p.id) === String(resolved.existing.id)) || null
+          : dbPatients.find((p) => digitsOnly(p.phone).slice(-10) === phoneDigits) || null;
 
         const ensured = await ensurePatient(activeSupabase, {
           name: canonicalPatient,
@@ -4526,9 +4541,11 @@ export default function AppLayout() {
           setAppointmentSaveFeedback({
             phase: 'error',
             title: locale === 'en' ? 'Could not save' : 'No se pudo guardar',
-            detail: /unauthorized/i.test(ensured.error.message)
-              ? L.dbErrorUnauthorized
-              : staffAlert(locale, 'patientFileError', ensured.error.message),
+            detail: ensured.error.message === 'SHARED_CONTACT' || ensured.error.code === 'SHARED_CONTACT'
+              ? staffAlert(locale, 'cloneDetected')
+              : /unauthorized/i.test(ensured.error.message)
+                ? L.dbErrorUnauthorized
+                : staffAlert(locale, 'patientFileError', ensured.error.message),
             closeForm: false,
           });
           return;
@@ -8267,23 +8284,44 @@ export default function AppLayout() {
                   </div>
                 ) : null}
               {(() => {
-                const last10 = digitsOnly(selectedSlot?.phone).slice(-10);
-                if (last10.length !== 10) return null;
-                const existing = dbPatients.find((p) => digitsOnly(p.phone).slice(-10) === last10);
-                if (!existing) return null;
-                if (normalizeStr(existing.patient) === normalizeStr(selectedSlot?.patient)) return null;
-                return (
-                  <div className="rounded-xl border-2 border-amber-400 bg-amber-50 px-3 py-2.5">
+                const conflicts = findLocalPatientConflicts(dbPatients, {
+                  name: selectedSlot?.patient,
+                  phone: selectedSlot?.phone,
+                  email: selectedSlot?.email,
+                  excludeId: selectedSlot?.patientId || null,
+                });
+                if (!conflicts.length) return null;
+                const exact = conflicts.find((c) => c.exact);
+                if (exact) {
+                  return (
+                    <div className="rounded-xl border-2 border-red-400 bg-red-50 px-3 py-2.5">
+                      <p className="text-[10px] font-black uppercase text-red-900">
+                        {locale === 'en' ? 'Patient already exists' : 'Paciente ya existe'}
+                      </p>
+                      <p className="text-[9px] font-bold text-red-800 mt-1 normal-case leading-snug">
+                        {locale === 'en'
+                          ? `«${exact.patient}» already has this name with the same phone/email. Use that chart — do not create a duplicate.`
+                          : `«${exact.patient}» ya está con ese nombre y el mismo teléfono/correo. Usa ese expediente; no crees un duplicado.`}
+                      </p>
+                    </div>
+                  );
+                }
+                return conflicts.map((existing) => (
+                  <div key={String(existing.id)} className="rounded-xl border-2 border-amber-400 bg-amber-50 px-3 py-2.5">
                     <p className="text-[10px] font-black uppercase text-amber-950">
-                      {locale === 'en' ? 'Phone already registered' : 'Teléfono ya registrado'}
+                      {existing.emailMatch && !existing.phoneMatch
+                        ? (locale === 'en' ? 'Email already registered' : 'Correo ya registrado')
+                        : existing.phoneMatch && !existing.emailMatch
+                          ? (locale === 'en' ? 'Phone already registered' : 'Teléfono ya registrado')
+                          : (locale === 'en' ? 'Contact already registered' : 'Contacto ya registrado')}
                     </p>
                     <p className="text-[9px] font-bold text-amber-900 mt-1 normal-case leading-snug">
                       {locale === 'en'
-                        ? `«${existing.patient}» already has this number. On save you’ll choose: use that patient, or register another with the same phone.`
-                        : `Ya tenemos a «${existing.patient}» con este número. Al guardar podrás: usar ese paciente, o dar de alta a otro con el mismo teléfono.`}
+                        ? `«${existing.patient}» already uses this contact. On save you’ll choose: use that patient, or register another with a different name.`
+                        : `Ya tenemos a «${existing.patient}» con este contacto. Al guardar podrás: usar ese paciente, o dar de alta a otro con nombre distinto.`}
                     </p>
                   </div>
-                );
+                ));
               })()}
               {!selectedSlot?.patient?.trim() && (
                 <p className="text-[10px] font-bold uppercase text-slate-500">{L.p.appt.pickPatientHint}</p>
@@ -8549,6 +8587,43 @@ export default function AppLayout() {
                 <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Correo (Opcional)</label>
                 <input type="email" placeholder="correo@ejemplo.com" value={newPatientData.email} onChange={e => setNewPatientData({...newPatientData, email: e.target.value})} className="w-full p-3 border rounded-xl font-bold text-sm outline-none focus:border-emerald-500 text-slate-900 bg-white" />
               </div>
+              {(() => {
+                const conflicts = findLocalPatientConflicts(dbPatients, {
+                  name: newPatientData.name,
+                  phone: newPatientData.phone,
+                  email: newPatientData.email,
+                });
+                if (!conflicts.length) return null;
+                const exact = conflicts.find((c) => c.exact);
+                if (exact) {
+                  return (
+                    <div className="rounded-xl border-2 border-red-400 bg-red-50 px-3 py-2.5">
+                      <p className="text-[10px] font-black uppercase text-red-900">
+                        {locale === 'en' ? 'Patient already exists' : 'Paciente ya existe'}
+                      </p>
+                      <p className="text-[9px] font-bold text-red-800 mt-1 normal-case leading-snug">
+                        {locale === 'en'
+                          ? `«${exact.patient}» is already on file with this name and contact. Do not create a duplicate.`
+                          : `«${exact.patient}» ya está dado de alta con ese nombre y contacto. No crees un duplicado.`}
+                      </p>
+                    </div>
+                  );
+                }
+                return conflicts.map((c) => (
+                  <div key={String(c.id)} className="rounded-xl border-2 border-amber-400 bg-amber-50 px-3 py-2.5">
+                    <p className="text-[10px] font-black uppercase text-amber-950">
+                      {c.emailMatch && !c.phoneMatch
+                        ? (locale === 'en' ? 'Email already registered' : 'Correo ya registrado')
+                        : (locale === 'en' ? 'Phone already registered' : 'Teléfono ya registrado')}
+                    </p>
+                    <p className="text-[9px] font-bold text-amber-900 mt-1 normal-case leading-snug">
+                      {locale === 'en'
+                        ? `«${c.patient}» already uses this contact. On save you’ll choose to use that chart or create another with a different name.`
+                        : `Ya tenemos a «${c.patient}» con este contacto. Al guardar eliges usar ese expediente o crear otro con nombre distinto.`}
+                    </p>
+                  </div>
+                ));
+              })()}
               <div>
                 <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Protocolo Inicial</label>
                 <select value={newPatientData.protocol} onChange={e => setNewPatientData({...newPatientData, protocol: e.target.value})} className="w-full p-3 border rounded-xl font-bold text-sm uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white">
@@ -9266,8 +9341,20 @@ export default function AppLayout() {
                   }
                 }
               } else if (digitsOnly(ud.phone).slice(-10).length === 10) {
-                const ensured = await ensurePatient(activeSupabase, {
+                const resolved = await resolveStaffPatientCreate({
+                  supabase: activeSupabase,
+                  patients: dbPatients,
                   name: ud.patient,
+                  phone: ud.phone,
+                  email: ud.email || '',
+                  locale,
+                });
+                if (resolved.action === 'abort') {
+                  if (resolved.reason === 'exact_duplicate') return;
+                  return;
+                }
+                const ensured = await ensurePatient(activeSupabase, {
+                  name: resolved.nameForSave || ud.patient,
                   phone: ud.phone,
                   email: ud.email || '',
                   protocol: ud.protocol,
@@ -9275,9 +9362,11 @@ export default function AppLayout() {
                   prefers_email: ud.prefers_email !== false,
                   prefers_sms: ud.prefers_sms === true,
                   prefers_sms_reminder: ud.prefers_sms_reminder !== false,
+                  namePolicy: resolved.namePolicy || 'prefer_incoming',
+                  forceCreate: !!resolved.forceCreate,
                 });
                 if (ensured.error) {
-                  return alert(a('saveClientError', ensured.error.message));
+                  return alert(a('saveClientError', ensured.error.message === 'SHARED_CONTACT' ? a('cloneDetected') : ensured.error.message));
                 }
               }
 
