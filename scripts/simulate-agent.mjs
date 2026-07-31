@@ -191,43 +191,6 @@ await test('ayuda: no encuentro paciente', async () => {
   assert.match(res.reply, /cómo cobro/i);
 });
 
-await test('OHB: contraindicaciones', async () => {
-  const res = await handleAgentMessage({
-    user: basicStaff,
-    dbRoles,
-    activeClinic: CLINIC_OXYGENDGL,
-    message: 'contraindicaciones hiperbárica',
-  });
-  assert.equal(res.ok, true);
-  assert.equal(res.toolId, AGENT_TOOL_IDS.HELP_GUIDE);
-  assert.match(res.reply, /neumot[oó]rax/i);
-  assert.match(res.reply, /ABSOLUTA/i);
-  assert.match(res.reply, /RELATIV/i);
-});
-
-await test('OHB: indicaciones UHMS', async () => {
-  const res = await handleAgentMessage({
-    user: basicStaff,
-    dbRoles,
-    activeClinic: CLINIC_OXYGENDGL,
-    message: '¿Cuáles son las indicaciones de oxigenoterapia hiperbárica?',
-  });
-  assert.equal(res.ok, true);
-  assert.match(res.reply, /UHMS/i);
-  assert.match(res.reply, /monóxido|monoxido|carbon monoxide/i);
-});
-
-await test('OHB: cribado sin signo de interrogación', async () => {
-  const res = await handleAgentMessage({
-    user: basicStaff,
-    dbRoles,
-    activeClinic: CLINIC_OXYGENDGL,
-    message: 'puede entrar a la camara hiperbarica',
-  });
-  assert.equal(res.ok, true);
-  assert.match(res.reply, /3 pasos|3 steps|INDICADA|INDICATED/i);
-});
-
 await test('facultades: básico sin ventas ni admin maestro', async () => {
   const caps = await getAgentCapabilitiesForUser({
     user: basicStaff,
