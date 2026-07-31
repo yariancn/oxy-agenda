@@ -23,8 +23,8 @@ export default function StaffAgentChat({
     send: labels.send || (locale === 'en' ? 'Send' : 'Enviar'),
     close: labels.close || (locale === 'en' ? 'Close' : 'Cerrar'),
     welcome: labels.welcome || (locale === 'en'
-      ? 'Hi. Ask app how-tos or a quick HBOT screen: "HBOT contraindications", "UHMS indications", "today\'s schedule", "find patient Garcia".'
-      : 'Hola. Pregunta cómo usar la agenda o cribado OHB: «contraindicaciones hiperbárica», «indicaciones UHMS», «agenda de hoy», «buscar paciente García».'),
+      ? 'I answer fixed guides (not free-form AI). For HBOT try: "HBOT contraindications", "UHMS indications", "can they enter the hyperbaric chamber". Also: "today\'s schedule", "find patient Garcia".'
+      : 'Respondo guías fijas (no soy una IA libre). Para OHB prueba: «contraindicaciones hiperbárica», «indicaciones UHMS», «¿puede entrar a la cámara hiperbárica?». También: «agenda de hoy», «buscar paciente García».'),
     thinking: labels.thinking || (locale === 'en' ? 'Thinking…' : 'Pensando…'),
     error: labels.error || (locale === 'en' ? 'Could not reach assistant.' : 'No pude contactar al asistente.'),
   };
