@@ -23,8 +23,8 @@ export default function StaffAgentChat({
     send: labels.send || (locale === 'en' ? 'Send' : 'Enviar'),
     close: labels.close || (locale === 'en' ? 'Close' : 'Cerrar'),
     welcome: labels.welcome || (locale === 'en'
-      ? 'Hi. Write naturally — typos and accents are OK. Try: "today\'s schedule", "find patient Garcia", "sales report".'
-      : 'Hola. Pregunta cómo hacer algo («¿cómo cobro a un cliente?») o pídeme acciones: "agenda de hoy", "buscar paciente García".'),
+      ? 'Hi. Ask app how-tos or a quick HBOT screen: "HBOT contraindications", "UHMS indications", "today\'s schedule", "find patient Garcia".'
+      : 'Hola. Pregunta cómo usar la agenda o cribado OHB: «contraindicaciones hiperbárica», «indicaciones UHMS», «agenda de hoy», «buscar paciente García».'),
     thinking: labels.thinking || (locale === 'en' ? 'Thinking…' : 'Pensando…'),
     error: labels.error || (locale === 'en' ? 'Could not reach assistant.' : 'No pude contactar al asistente.'),
   };
