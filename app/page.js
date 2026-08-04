@@ -48,7 +48,8 @@ import PatientProfileModal from '../components/PatientProfileModal';
 import PatientSessionHistory from '../components/PatientSessionHistory';
 import AppointmentSavingOverlay from '../components/AppointmentSavingOverlay';
 import StaffSaveToast from '../components/StaffSaveToast';
-import ScreenshotAppointmentModal from '../components/ScreenshotAppointmentModal';
+import VoiceAppointmentModal from '../components/VoiceAppointmentModal';
+import { findCalendarDropSlot } from '../lib/calendarTouchDrag';
 import StaffAgentChat from '../components/StaffAgentChat';
 import RepeatDatesCalendar from '../components/RepeatDatesCalendar';
 import GFEManager from '../components/GFEManager';
@@ -250,7 +251,9 @@ export default function AppLayout() {
   const [showBitacora, setShowBitacora] = useState(false);
   const [showPatientProfile, setShowPatientProfile] = useState(false);
   const [showNewAppointment, setShowNewAppointment] = useState(false);
-  const [showScreenshotIntake, setShowScreenshotIntake] = useState(false);
+  const [showVoiceIntake, setShowVoiceIntake] = useState(false);
+  const [touchDragGhost, setTouchDragGhost] = useState(null);
+  const touchDragAppRef = useRef(null);
   const [showAgentChat, setShowAgentChat] = useState(false);
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
   const [appointmentSaveFeedback, setAppointmentSaveFeedback] = useState(null);
@@ -2516,37 +2519,23 @@ export default function AppLayout() {
     };
   };
 
-  const screenshotIntakeLabels = useMemo(() => ({
-    title: L.p.appt.screenshotTitle,
-    subtitle: L.p.appt.screenshotSubtitle,
-    pickImage: L.p.appt.screenshotPick,
-    pickImageHint: L.p.appt.screenshotPickHint,
-    analyze: L.p.appt.screenshotAnalyze,
-    analyzing: L.p.appt.screenshotAnalyzing,
-    recognizedTitle: L.p.appt.screenshotRecognized,
-    confirmHint: L.p.appt.screenshotConfirmHint,
-    confirmSchedule: L.p.appt.screenshotConfirm,
-    back: L.p.appt.screenshotBack,
-    cancel: L.p.common.cancel,
-    notConfigured: L.p.appt.screenshotNotConfigured,
-    processingHint: L.p.appt.screenshotProcessingHint,
-    analyzeError: L.p.appt.screenshotAnalyzeError,
-    scheduleError: L.p.appt.screenshotScheduleError,
-    missingFields: L.p.appt.screenshotMissingFields,
-    invalidImage: L.p.appt.screenshotInvalidImage,
-    imageTooLarge: L.p.appt.screenshotTooLarge,
-    readError: L.p.appt.screenshotReadError,
-    confidenceLabel: L.p.appt.screenshotConfidence,
-    confidenceHigh: L.p.appt.screenshotConfidenceHigh,
-    confidenceMedium: L.p.appt.screenshotConfidenceMedium,
-    confidenceLow: L.p.appt.screenshotConfidenceLow,
+  const voiceIntakeLabels = useMemo(() => ({
+    title: locale === 'en' ? 'Book by voice' : 'Agendar por voz',
+    subtitle: locale === 'en'
+      ? 'Minimize and open WhatsApp in Split View. Keep OXY visible so the mic stays on.'
+      : 'Minimiza y abre WhatsApp en Split View. Mantén OXY visible para que el micrófono siga activo.',
     patient: L.p.appt.patientName,
     date: L.p.appt.date,
     time: L.p.appt.time,
     phone: L.p.appt.phone,
     equipment: L.p.appt.equipment,
     notes: L.p.appt.noteToday,
-  }), [L]);
+    email: 'Email',
+    confirmHint: L.p.appt.screenshotConfirmHint,
+    confirmSchedule: L.p.appt.screenshotConfirm,
+    back: L.p.appt.screenshotBack,
+    scheduleError: L.p.appt.screenshotScheduleError,
+  }), [L, locale]);
 
   const screenshotDefaultEquipment = useMemo(
     () => defaultEquipmentForClinic(activeClinic, dbServices),
@@ -3385,6 +3374,38 @@ export default function AppLayout() {
   const handleDragOver = (e) => { 
     e.preventDefault(); 
     e.dataTransfer.dropEffect = "move"; 
+  };
+
+  const handleTouchDragStart = (app, point) => {
+    if (!app?.id) return;
+    if (['Finalizado', 'Devuelto', 'Cancelado'].includes(app.check_in_status)) return;
+    touchDragAppRef.current = app;
+    setDraggedApp(app);
+    document.body.classList.add('oxy-touch-dragging');
+    setTouchDragGhost({
+      x: point.clientX,
+      y: point.clientY,
+      label: app.patient || '…',
+    });
+  };
+
+  const handleTouchDragMove = (point) => {
+    if (!touchDragAppRef.current) return;
+    setTouchDragGhost((prev) => (prev ? { ...prev, x: point.clientX, y: point.clientY } : prev));
+  };
+
+  const handleTouchDragEnd = (point) => {
+    const app = touchDragAppRef.current;
+    touchDragAppRef.current = null;
+    document.body.classList.remove('oxy-touch-dragging');
+    setTouchDragGhost(null);
+    setDraggedApp(null);
+    if (!app) return;
+    const slot = findCalendarDropSlot(point.clientX, point.clientY);
+    if (!slot) return;
+    tryRequestMove(app, slot.time, slot.equipment, slot.day, slot.fullDate, {
+      outsideNormalHours: slot.outsideHours,
+    });
   };
   
   const closeAppointmentPanel = () => {
@@ -4306,6 +4327,12 @@ export default function AppLayout() {
               }}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, timeStr, equipment, day, fullDate, true)}
+              data-drop-slot="1"
+              data-time={timeStr}
+              data-equipment={equipment}
+              data-day={day}
+              data-full-date={fullDate}
+              data-outside="1"
               className="absolute left-0 right-0 bg-slate-200/60 hover:bg-amber-100/80 active:bg-amber-200/90 cursor-pointer border-t border-slate-200/80 box-border z-[1] transition-all hover:ring-1 hover:ring-inset hover:ring-amber-400/40"
               style={{ top: `${timeToPixels(timeStr)}px`, height: `${intervalMins * PIXELS_PER_MINUTE}px` }}
               title={`${L.clickToBook} · ${L.p.legendOutsideHours}`}
@@ -4354,6 +4381,12 @@ export default function AppLayout() {
             }}
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, time, equipment, day, fullDate)}
+            data-drop-slot="1"
+            data-time={time}
+            data-equipment={equipment}
+            data-day={day}
+            data-full-date={fullDate}
+            data-outside="0"
             className="absolute left-0 right-0 hover:bg-white/50 hover:shadow-[inset_0_0_0_1px_rgba(148,163,184,0.28)] active:bg-slate-50/80 cursor-pointer transition-all box-border z-[1]"
             style={{ top: `${timeToPixels(time)}px`, height: `${blockMins * PIXELS_PER_MINUTE}px` }}
             title={`${L.clickToBook} · ${blockMins} min`}
@@ -5057,10 +5090,10 @@ export default function AppLayout() {
           </button>
           <button
             type="button"
-            onClick={() => setShowScreenshotIntake(true)}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-2.5 rounded-xl flex items-center justify-center gap-2 shadow transition uppercase text-[10px]"
+            onClick={() => setShowVoiceIntake(true)}
+            className="w-full bg-violet-600 hover:bg-violet-500 text-white font-black py-2.5 rounded-xl flex items-center justify-center gap-2 shadow transition uppercase text-[10px]"
           >
-            {L.p.appt.screenshotFromCapture.replace(/^📷\s*/, '📷 ')}
+            🎤 {locale === 'en' ? 'Book by voice' : 'Agendar por voz'}
           </button>
         </div>
 
@@ -5144,11 +5177,11 @@ export default function AppLayout() {
             <button onClick={() => openNewAppointment()} className="shrink-0 h-8 w-8 bg-emerald-600 rounded-lg text-white font-black text-lg leading-none shadow" aria-label={L.ariaNewAppt}>+</button>
             <button
               type="button"
-              onClick={() => setShowScreenshotIntake(true)}
-              className="shrink-0 h-8 w-8 bg-indigo-600 rounded-lg text-white text-base leading-none shadow"
-              aria-label={L.ariaScreenshotCapture}
+              onClick={() => setShowVoiceIntake(true)}
+              className="shrink-0 h-8 w-8 bg-violet-600 rounded-lg text-white text-base leading-none shadow"
+              aria-label={locale === 'en' ? 'Book by voice' : 'Agendar por voz'}
             >
-              📷
+              🎤
             </button>
             <button onClick={handleLogout} className="shrink-0 text-[9px] font-black text-red-400 uppercase px-1">{L.logout}</button>
           </div>
@@ -5413,6 +5446,11 @@ export default function AppLayout() {
                                 onSelect={() => openAppointmentDetails(app)}
                                 draggable={!isMobileViewport && (selectedSlot?.id !== app.id || !isRescheduling)}
                                 onDragStart={(e) => handleDragStart(e, app)}
+                                touchDragEnabled={selectedSlot?.id !== app.id || !isRescheduling}
+                                onTouchDragStart={handleTouchDragStart}
+                                onTouchDragMove={handleTouchDragMove}
+                                onTouchDragEnd={handleTouchDragEnd}
+                                isTouchDragging={Boolean(touchDragGhost && String(draggedApp?.id) === String(app.id))}
                               />
                             ))}
                           </div>
@@ -5528,6 +5566,11 @@ export default function AppLayout() {
                                     onSelect={() => openAppointmentDetails(app)}
                                     draggable={!isMobileViewport && (selectedSlot?.id !== app.id || !isRescheduling)}
                                     onDragStart={(e) => handleDragStart(e, app)}
+                                    touchDragEnabled={selectedSlot?.id !== app.id || !isRescheduling}
+                                    onTouchDragStart={handleTouchDragStart}
+                                    onTouchDragMove={handleTouchDragMove}
+                                    onTouchDragEnd={handleTouchDragEnd}
+                                    isTouchDragging={Boolean(touchDragGhost && String(draggedApp?.id) === String(app.id))}
                                   />
                                 ))}
                               </div>
@@ -9634,12 +9677,12 @@ export default function AppLayout() {
 
       <StaffSaveToast message={saveToast} />
 
-      {showScreenshotIntake && (
-        <ScreenshotAppointmentModal
-          open={showScreenshotIntake}
-          onClose={() => setShowScreenshotIntake(false)}
+      {showVoiceIntake && (
+        <VoiceAppointmentModal
+          open={showVoiceIntake}
+          onClose={() => setShowVoiceIntake(false)}
           locale={locale}
-          labels={screenshotIntakeLabels}
+          labels={voiceIntakeLabels}
           activeClinic={activeClinic}
           services={dbServices}
           defaultEquipment={screenshotDefaultEquipment}
@@ -9651,9 +9694,22 @@ export default function AppLayout() {
               throw new Error(staffAlert(locale, 'missingAppointmentFields', missing));
             }
             await handleSaveNewAppointment(draft);
-            setShowScreenshotIntake(false);
+            setShowVoiceIntake(false);
           }}
         />
+      )}
+
+      {touchDragGhost && (
+        <div
+          className="fixed z-[130000] pointer-events-none px-2 py-1.5 rounded-lg bg-blue-700 text-white text-[10px] font-black uppercase shadow-2xl max-w-[180px] truncate border border-blue-300"
+          style={{
+            left: touchDragGhost.x,
+            top: touchDragGhost.y,
+            transform: 'translate(-50%, -120%)',
+          }}
+        >
+          {touchDragGhost.label}
+        </div>
       )}
 
       <StaffAgentChat
@@ -9713,13 +9769,13 @@ export default function AppLayout() {
                 type="button"
                 onClick={() => {
                   setMobileMoreOpen(false);
-                  setShowScreenshotIntake(true);
+                  setShowVoiceIntake(true);
                 }}
-                className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-w-0 px-1 ${showScreenshotIntake ? 'text-indigo-400' : 'text-slate-500'}`}
-                aria-label={L.ariaScreenshotCapture}
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-w-0 px-1 ${showVoiceIntake ? 'text-violet-400' : 'text-slate-500'}`}
+                aria-label={locale === 'en' ? 'Book by voice' : 'Agendar por voz'}
               >
-                <span className="text-base leading-none">📷</span>
-                <span className="text-[8px] font-black uppercase truncate max-w-full">{L.mobileTabs.Captura}</span>
+                <span className="text-base leading-none">🎤</span>
+                <span className="text-[8px] font-black uppercase truncate max-w-full">{locale === 'en' ? 'Voice' : 'Voz'}</span>
               </button>
               {mobileAdminTabs.length > 0 && (
                 <button

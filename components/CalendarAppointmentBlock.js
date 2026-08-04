@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef } from 'react';
 import {
   buildAppointmentAriaLabel,
   isCompactColumn,
@@ -92,6 +93,9 @@ function PatientName({ name, isNew, className = '' }) {
   );
 }
 
+const LONG_PRESS_MS = 320;
+const MOVE_CANCEL_PX = 12;
+
 export default function CalendarAppointmentBlock({
   app,
   colWidth,
@@ -106,6 +110,11 @@ export default function CalendarAppointmentBlock({
   onSelect,
   onDragStart,
   draggable,
+  touchDragEnabled = false,
+  onTouchDragStart,
+  onTouchDragMove,
+  onTouchDragEnd,
+  isTouchDragging = false,
 }) {
   const duration = Number(app.duration) || 60;
   const buffer = Number(app.buffer) || 0;
@@ -127,17 +136,119 @@ export default function CalendarAppointmentBlock({
     ? `${app.time} - ${calculateEndTime(app.time, blockMins)}`
     : app.time;
 
+  const pressTimerRef = useRef(null);
+  const startPosRef = useRef(null);
+  const activePointerRef = useRef(null);
+  const dragArmedRef = useRef(false);
+  const suppressClickRef = useRef(false);
+
+  const clearPressTimer = () => {
+    if (pressTimerRef.current) {
+      clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+  };
+
+  const handlePointerDown = (e) => {
+    if (!touchDragEnabled) return;
+    // Mouse / trackpad keep HTML5 drag when enabled.
+    if (e.pointerType === 'mouse' && draggable) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+    clearPressTimer();
+    dragArmedRef.current = false;
+    suppressClickRef.current = false;
+    activePointerRef.current = e.pointerId;
+    startPosRef.current = { x: e.clientX, y: e.clientY };
+
+    pressTimerRef.current = setTimeout(() => {
+      dragArmedRef.current = true;
+      suppressClickRef.current = true;
+      try {
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      onTouchDragStart?.(app, { clientX: e.clientX, clientY: e.clientY });
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        try { navigator.vibrate(12); } catch { /* ignore */ }
+      }
+    }, LONG_PRESS_MS);
+  };
+
+  const handlePointerMove = (e) => {
+    if (!touchDragEnabled) return;
+    if (activePointerRef.current != null && e.pointerId !== activePointerRef.current) return;
+
+    if (!dragArmedRef.current) {
+      const start = startPosRef.current;
+      if (start) {
+        const dx = Math.abs(e.clientX - start.x);
+        const dy = Math.abs(e.clientY - start.y);
+        if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) clearPressTimer();
+      }
+      return;
+    }
+
+    e.preventDefault();
+    onTouchDragMove?.({ clientX: e.clientX, clientY: e.clientY });
+  };
+
+  const endPointer = (e) => {
+    if (!touchDragEnabled) return;
+    if (activePointerRef.current != null && e.pointerId !== activePointerRef.current) return;
+    clearPressTimer();
+    const wasDragging = dragArmedRef.current;
+    dragArmedRef.current = false;
+    activePointerRef.current = null;
+    startPosRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture?.(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    if (wasDragging) {
+      e.preventDefault();
+      onTouchDragEnd?.({ clientX: e.clientX, clientY: e.clientY });
+    }
+  };
+
+  const handleClick = (e) => {
+    if (suppressClickRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      suppressClickRef.current = false;
+      return;
+    }
+    onSelect?.();
+  };
+
   return (
     <div
       role="button"
       tabIndex={0}
       aria-label={ariaLabel}
-      title={ariaLabel}
-      onClick={onSelect}
+      title={touchDragEnabled
+        ? `${ariaLabel} — ${locale === 'en' ? 'Long-press to drag' : 'Mantén pulsado para mover'}`
+        : ariaLabel}
+      onClick={handleClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect?.();
+        }
+      }}
       draggable={draggable}
       onDragStart={onDragStart}
-      className={`absolute ${paddingClass} p-0.5 sm:p-0.5 ${roundedClass} border border-l-[3px] shadow-sm cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-[1.02] hover:ring-1 hover:ring-black/10 hover:z-30 ${colorClasses} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1 z-30' : ''} ${draggable ? '' : 'touch-pan-y'}`}
-      style={{ top: `${topPx}px`, height: `${heightPx}px`, zIndex: 10 }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endPointer}
+      onPointerCancel={endPointer}
+      onContextMenu={(e) => {
+        if (touchDragEnabled) e.preventDefault();
+      }}
+      className={`calendar-appt-block absolute ${paddingClass} p-0.5 sm:p-0.5 ${roundedClass} border border-l-[3px] shadow-sm cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-[1.02] hover:ring-1 hover:ring-black/10 hover:z-30 ${colorClasses} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1 z-30' : ''} ${isTouchDragging ? 'is-touch-dragging opacity-40' : ''} ${touchDragEnabled ? 'touch-manipulation' : 'touch-pan-y'}`}
+      style={{ top: `${topPx}px`, height: `${heightPx}px`, zIndex: isTouchDragging ? 40 : 10 }}
     >
       {ultra ? (
         <div className="flex flex-col items-center justify-start h-full py-0.5 gap-0.5 text-center min-w-0 w-full">

@@ -126,6 +126,26 @@ body {
   }
 }
 
+.calendar-appt-block {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.calendar-appt-block.is-touch-dragging {
+  touch-action: none;
+}
+
+body.oxy-touch-dragging {
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+
+body.oxy-touch-dragging .calendar-h-scroll {
+  touch-action: none;
+}
+
 .appt-detail-close {
   min-width: 2.75rem;
   min-height: 2.75rem;
