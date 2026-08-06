@@ -1,10 +1,15 @@
-"use client";
+'use client';
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useStaffLocale } from './StaffLocaleContext';
 import { buildSessionSummary, formatSessionSummaryLines } from '../lib/sessionSummary';
+import {
+  clearPendingBitacoraSeal,
+  loadPendingBitacoraSeal,
+  savePendingBitacoraSeal,
+} from '../lib/pendingBitacoraSeal';
 
-export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, onSeal }) {
-  const { L } = useStaffLocale();
+export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, onSeal, clinic = '' }) {
+  const { L, locale } = useStaffLocale();
   const t = L.modals.bitacora;
 
   const canvasRef = useRef(null);
@@ -14,6 +19,7 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
   const [isAgreed, setIsAgreed] = useState(true);
   const [skipCharge, setSkipCharge] = useState(false);
   const [vitals, setVitals] = useState({ pa: '', temp: '', hr: '' });
+  const [restoreNotice, setRestoreNotice] = useState('');
 
   const summaryLines = useMemo(() => {
     const built = sessionSummary || buildSessionSummary({
@@ -36,19 +42,55 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
       ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
       : 'bg-amber-50 border-amber-300 text-amber-900';
 
+  const paintSignatureDataUrl = (dataUrl) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !dataUrl) return;
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    img.onload = () => {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      ctx.setTransform(2, 0, 0, 2, 0, 0);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#0f172a';
+      setHasSignature(true);
+    };
+    img.src = dataUrl;
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas) {
-      canvas.width = canvas.offsetWidth * 2;
-      canvas.height = canvas.offsetHeight * 2;
+      canvas.width = Math.max(2, Math.floor(canvas.offsetWidth * 2));
+      canvas.height = Math.max(2, Math.floor(canvas.offsetHeight * 2));
       const ctx = canvas.getContext('2d');
-      ctx.scale(2, 2);
+      ctx.setTransform(2, 0, 0, 2, 0, 0);
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.lineWidth = 3;
       ctx.strokeStyle = '#0f172a';
     }
-  }, []);
+
+    const pending = loadPendingBitacoraSeal({
+      appointmentId: selectedSlot?.id,
+      clinic,
+    });
+    if (pending?.signature) {
+      // Wait a tick so canvas has layout size.
+      requestAnimationFrame(() => paintSignatureDataUrl(pending.signature));
+      if (pending.vitals) setVitals({ pa: '', temp: '', hr: '', ...pending.vitals });
+      if (pending.skipCharge != null) setSkipCharge(!!pending.skipCharge);
+      setRestoreNotice(
+        locale === 'en'
+          ? 'Saved signature recovered after a session error. Tap Seal again.'
+          : 'Firma recuperada tras un error de sesión. Pulsa Sellar de nuevo.',
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSlot?.id, clinic]);
 
   const getCoordinates = (e) => {
     const canvas = canvasRef.current;
@@ -90,17 +132,37 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
     const canvas = canvasRef.current;
     canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
     setHasSignature(false);
+    clearPendingBitacoraSeal(selectedSlot?.id);
+    setRestoreNotice('');
   };
 
   const handleSeal = async () => {
     if (isSealing) return;
     if (!isAgreed) return alert(t.needAgreement);
     if (!hasSignature) return alert(t.needSignature);
+    const signature = canvasRef.current.toDataURL('image/png');
+    savePendingBitacoraSeal({
+      appointmentId: selectedSlot?.id,
+      clinic,
+      signature,
+      vitals,
+      skipCharge,
+      attendant: selectedSlot?.attendant || '',
+      patient: selectedSlot?.patient || '',
+    });
     setIsSealing(true);
     try {
-      await onSeal(canvasRef.current.toDataURL('image/png'), vitals, summaryLines, { skipCharge });
+      await onSeal(signature, vitals, summaryLines, { skipCharge });
+      clearPendingBitacoraSeal(selectedSlot?.id);
+      setRestoreNotice('');
     } catch (err) {
-      alert(t.sealError?.(err?.message || err) || String(err?.message || err));
+      const expired = err?.sessionExpired || /unauthorized|sesión|session/i.test(String(err?.message || ''));
+      const msg = expired
+        ? (locale === 'en'
+          ? 'Session expired. Your signature was kept on this device — sign in with your PIN, open this visit again, and tap Seal (signature restores automatically).'
+          : 'Sesión expirada. La firma quedó guardada en este dispositivo — entra con tu NIP, abre de nuevo esta visita y pulsa Sellar (la firma se restaura sola).')
+        : (t.sealError?.(err?.message || err) || String(err?.message || err));
+      alert(msg);
     } finally {
       setIsSealing(false);
     }
@@ -117,6 +179,11 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
         </div>
 
         <div className="p-4 sm:p-8 space-y-4 sm:space-y-6 overflow-y-auto flex-1 min-h-0">
+          {restoreNotice ? (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-950 uppercase">
+              {restoreNotice}
+            </div>
+          ) : null}
           <div className="flex flex-col md:flex-row justify-between bg-slate-50 p-4 rounded-xl border border-slate-200 gap-4">
             <div>
               <p className="text-xs text-slate-500 font-bold uppercase">{t.patient}</p>

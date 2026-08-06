@@ -181,6 +181,10 @@ import {
   STAFF_ALERT_FIELDS,
 } from '../lib/staffBookingAlert';
 import { broadcastLiveDataUpdated } from '../lib/liveSyncBroadcast';
+import {
+  clearPendingBitacoraSeal,
+  loadPendingBitacoraSeal,
+} from '../lib/pendingBitacoraSeal';
 import { useAgendaLiveSync } from '../lib/useAgendaLiveSync';
 import { useModalViewportLock } from '../lib/useModalViewportLock';
 import { liveSyncDateRange } from '../lib/liveSyncToken';
@@ -1498,6 +1502,47 @@ export default function AppLayout() {
     endpoint: '/api/staff/live-sync',
     onChange: syncCalendarLive,
   });
+
+  // Renew staff cookie while the agenda stays open (sliding 24h). Tablets often
+  // sit on Realtime-only traffic which previously did not refresh the session.
+  useEffect(() => {
+    if (!currentUser) return undefined;
+    const tick = () => {
+      if (document.visibilityState === 'hidden') return;
+      refreshStaffSessionForSave();
+    };
+    tick();
+    const id = window.setInterval(tick, 30 * 60 * 1000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [currentUser, activeClinic]);
+
+  // After re-login, reopen the visit that still has a pending signature (once).
+  const pendingSealRestoredRef = useRef(false);
+  useEffect(() => {
+    if (!currentUser) {
+      pendingSealRestoredRef.current = false;
+      return;
+    }
+    if (dbStatus !== 'listo' || pendingSealRestoredRef.current || showBitacora) return;
+    const pending = loadPendingBitacoraSeal({ clinic: activeClinic });
+    if (!pending?.appointmentId) return;
+    const app = dbAppointments.find((a) => String(a.id) === String(pending.appointmentId));
+    if (!app) return;
+    if (app.check_in_status === 'Finalizado') {
+      clearPendingBitacoraSeal(pending.appointmentId);
+      return;
+    }
+    pendingSealRestoredRef.current = true;
+    openAppointmentDetails(app);
+    setShowBitacora(true);
+  }, [currentUser, dbStatus, activeClinic, dbAppointments, showBitacora]);
 
   // iPhone: keep booking sheet inside the viewport and reset after keyboard/zoom.
   useModalViewportLock(Boolean(showNewAppointment || appointmentSaveFeedback || pastMoveAuth || moveConfirmation));
@@ -9471,7 +9516,8 @@ export default function AppLayout() {
       {showBitacora && selectedSlot && (
         <div className="relative z-50" style={{ zIndex: 9999 }}>
           <BitacoraModal 
-            selectedSlot={selectedSlot} 
+            selectedSlot={selectedSlot}
+            clinic={activeClinic}
             onClose={() => setShowBitacora(false)} 
             onSeal={async (sd, vt, summaryLines, sealOpts = {}) => {
               const appointmentId = selectedSlot?.id;
@@ -9482,6 +9528,14 @@ export default function AppLayout() {
               }
               if (isFutureAppointmentDay(selectedSlot)) {
                 throw new Error(a('bitacoraFutureDay'));
+              }
+
+              const sessionFresh = await refreshStaffSessionForSave();
+              if (!sessionFresh) {
+                throw Object.assign(
+                  new Error(L.dbErrorUnauthorized),
+                  { sessionExpired: true },
+                );
               }
 
               const eq = selectedSlot.equipment;
@@ -9602,7 +9656,12 @@ export default function AppLayout() {
                       .neq('check_in_status', 'Finalizado')
                       .select('id, notes');
                   }
-                  if (sealRes.error) throw sealRes.error;
+                  if (sealRes.error) {
+                    throw Object.assign(new Error(sealRes.error.message || 'Unauthorized'), {
+                      sessionExpired: !!sealRes.error.sessionExpired
+                        || /unauthorized/i.test(sealRes.error.message || ''),
+                    });
+                  }
                   if (!sealRes.data?.length) {
                     throw new Error(locale === 'en'
                       ? 'This visit is already sealed.'
@@ -9659,6 +9718,14 @@ export default function AppLayout() {
                   await notifyCalendarChanged();
                   return { detail: sealPatientName };
                 },
+              }).then((result) => {
+                if (result?.error) {
+                  setAppointmentSaveFeedback(null);
+                  throw Object.assign(new Error(result.error), {
+                    sessionExpired: /unauthorized|sesión|session/i.test(String(result.error)),
+                  });
+                }
+                return result;
               });
             }} 
           />
