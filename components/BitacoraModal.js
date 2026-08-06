@@ -78,16 +78,19 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
       appointmentId: selectedSlot?.id,
       clinic,
     });
-    if (pending?.signature) {
-      // Wait a tick so canvas has layout size.
-      requestAnimationFrame(() => paintSignatureDataUrl(pending.signature));
-      if (pending.vitals) setVitals({ pa: '', temp: '', hr: '', ...pending.vitals });
-      if (pending.skipCharge != null) setSkipCharge(!!pending.skipCharge);
-      setRestoreNotice(
-        locale === 'en'
-          ? 'Saved signature recovered after a session error. Tap Seal again.'
-          : 'Firma recuperada tras un error de sesión. Pulsa Sellar de nuevo.',
-      );
+    if (pending?.signature && String(pending.signature).length < 1_500_000) {
+      try {
+        requestAnimationFrame(() => paintSignatureDataUrl(pending.signature));
+        if (pending.vitals) setVitals({ pa: '', temp: '', hr: '', ...pending.vitals });
+        if (pending.skipCharge != null) setSkipCharge(!!pending.skipCharge);
+        setRestoreNotice(
+          locale === 'en'
+            ? 'Saved signature recovered after a session error. Tap Seal again.'
+            : 'Firma recuperada tras un error de sesión. Pulsa Sellar de nuevo.',
+        );
+      } catch {
+        clearPendingBitacoraSeal(selectedSlot?.id);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSlot?.id, clinic]);

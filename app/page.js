@@ -181,10 +181,6 @@ import {
   STAFF_ALERT_FIELDS,
 } from '../lib/staffBookingAlert';
 import { broadcastLiveDataUpdated } from '../lib/liveSyncBroadcast';
-import {
-  clearPendingBitacoraSeal,
-  loadPendingBitacoraSeal,
-} from '../lib/pendingBitacoraSeal';
 import { useAgendaLiveSync } from '../lib/useAgendaLiveSync';
 import { useModalViewportLock } from '../lib/useModalViewportLock';
 import { liveSyncDateRange } from '../lib/liveSyncToken';
@@ -1503,15 +1499,14 @@ export default function AppLayout() {
     onChange: syncCalendarLive,
   });
 
-  // Renew staff cookie while the agenda stays open (sliding 24h). Tablets often
-  // sit on Realtime-only traffic which previously did not refresh the session.
+  // Renew staff cookie while the agenda stays open (sliding TTL).
+  // Do NOT call immediately on mount — that races the login bootstrap.
   useEffect(() => {
     if (!currentUser) return undefined;
     const tick = () => {
       if (document.visibilityState === 'hidden') return;
       refreshStaffSessionForSave();
     };
-    tick();
     const id = window.setInterval(tick, 30 * 60 * 1000);
     const onVis = () => {
       if (document.visibilityState === 'visible') tick();
@@ -1522,27 +1517,6 @@ export default function AppLayout() {
       document.removeEventListener('visibilitychange', onVis);
     };
   }, [currentUser, activeClinic]);
-
-  // After re-login, reopen the visit that still has a pending signature (once).
-  const pendingSealRestoredRef = useRef(false);
-  useEffect(() => {
-    if (!currentUser) {
-      pendingSealRestoredRef.current = false;
-      return;
-    }
-    if (dbStatus !== 'listo' || pendingSealRestoredRef.current || showBitacora) return;
-    const pending = loadPendingBitacoraSeal({ clinic: activeClinic });
-    if (!pending?.appointmentId) return;
-    const app = dbAppointments.find((a) => String(a.id) === String(pending.appointmentId));
-    if (!app) return;
-    if (app.check_in_status === 'Finalizado') {
-      clearPendingBitacoraSeal(pending.appointmentId);
-      return;
-    }
-    pendingSealRestoredRef.current = true;
-    openAppointmentDetails(app);
-    setShowBitacora(true);
-  }, [currentUser, dbStatus, activeClinic, dbAppointments, showBitacora]);
 
   // iPhone: keep booking sheet inside the viewport and reset after keyboard/zoom.
   useModalViewportLock(Boolean(showNewAppointment || appointmentSaveFeedback || pastMoveAuth || moveConfirmation));
@@ -1609,10 +1583,17 @@ export default function AppLayout() {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = window.setTimeout(() => {
+      try { controller?.abort(); } catch { /* ignore */ }
+    }, 10000);
 
     (async () => {
       try {
-        const meRes = await fetch('/api/auth/me', { credentials: 'include' });
+        const meRes = await fetch('/api/auth/me', {
+          credentials: 'include',
+          signal: controller?.signal,
+        });
         const meData = await meRes.json().catch(() => ({}));
         if (cancelled) return;
 
@@ -1623,7 +1604,10 @@ export default function AppLayout() {
           return;
         }
 
-        const tdRes = await fetch('/api/auth/trusted-device', { credentials: 'include' });
+        const tdRes = await fetch('/api/auth/trusted-device', {
+          credentials: 'include',
+          signal: controller?.signal,
+        });
         const tdData = await tdRes.json().catch(() => ({}));
         if (cancelled) return;
 
@@ -1635,6 +1619,7 @@ export default function AppLayout() {
             const autoRes = await fetch('/api/auth/auto-login', {
               method: 'POST',
               credentials: 'include',
+              signal: controller?.signal,
             });
             const autoData = await autoRes.json().catch(() => ({}));
             if (cancelled) return;
@@ -1649,14 +1634,17 @@ export default function AppLayout() {
           setLoginModeTrusted(false);
         }
       } catch {
-        /* ignore */
+        /* timeout / network — show PIN login */
       } finally {
+        window.clearTimeout(timeoutId);
         if (!cancelled) setAuthBootstrapping(false);
       }
     })();
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeoutId);
+      try { controller?.abort(); } catch { /* ignore */ }
     };
   }, []);
 

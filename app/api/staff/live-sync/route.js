@@ -26,7 +26,11 @@ export async function GET(request) {
       clinic: clinicName,
       ...snapshot,
     });
-    return attachStaffSessionCookie(response, user);
+    try {
+      return attachStaffSessionCookie(response, user);
+    } catch {
+      return response;
+    }
   } catch (error) {
     const status = /Unauthorized|access denied/i.test(error.message) ? 401 : 500;
     return NextResponse.json({ error: error.message }, { status });
