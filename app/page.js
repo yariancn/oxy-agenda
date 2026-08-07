@@ -130,8 +130,11 @@ import { resolveNextTicketNumber } from '../lib/ticketNumber';
 import { formatSaleAuditDetail, formatSaleCancelAuditDetail } from '../lib/saleAudit';
 import {
   appendAppointmentChargeVia,
+  clearSettledSealCharge,
   consumeSessionFromWallet,
   hasPaidSessionBalance,
+  hasSettledSealCharge,
+  markSettledSealCharge,
   parseAppointmentChargeVia,
   persistWalletAfterConsume,
   reconcilePatientWalletState,
@@ -181,6 +184,7 @@ import {
   STAFF_ALERT_FIELDS,
 } from '../lib/staffBookingAlert';
 import { broadcastLiveDataUpdated } from '../lib/liveSyncBroadcast';
+import { clearPendingBitacoraSeal } from '../lib/pendingBitacoraSeal';
 import { useAgendaLiveSync } from '../lib/useAgendaLiveSync';
 import { useModalViewportLock } from '../lib/useModalViewportLock';
 import { liveSyncDateRange } from '../lib/liveSyncToken';
@@ -270,6 +274,7 @@ export default function AppLayout() {
   const [draggedApp, setDraggedApp] = useState(null);
   const [moveConfirmation, setMoveConfirmation] = useState(null);
   const [pastMoveAuth, setPastMoveAuth] = useState(null);
+  const [unsealAuth, setUnsealAuth] = useState(null);
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [showAudit, setShowAudit] = useState(false);
   const [auditLogs, setAuditLogs] = useState([]);
@@ -3538,6 +3543,76 @@ export default function AppLayout() {
     setPastMoveAuth(null);
     setIsRescheduling(false);
     setMoveConfirmation(draft);
+  };
+
+  /**
+   * Reopens a sealed visit so the patient can sign again (bad signature).
+   * The wallet/debt charge stays untouched; the visit is marked so the next seal does not charge twice.
+   */
+  const confirmUnsealBitacora = async () => {
+    const app = unsealAuth?.app;
+    if (!app?.id || !activeSupabase || unsealAuth.busy) return;
+    const pin = String(unsealAuth.pin || '').trim();
+    if (!pin) return;
+    setUnsealAuth((prev) => (prev ? { ...prev, busy: true, error: '' } : prev));
+
+    try {
+      const res = await fetch('/api/auth/verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ pin }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) {
+        let message = a('unsealPinWrong');
+        if (data?.error === 'locked') message = a('unsealLocked', data.lockedMinutes || 1);
+        else if (res.status === 401 && data?.error === 'unauthorized') message = a('unsealSessionExpired');
+        setUnsealAuth((prev) => (prev ? { ...prev, busy: false, pin: '', error: message } : prev));
+        return;
+      }
+
+      const authorizedBy = data.name || currentUser?.name || 'staff';
+      const currentNotes = String(app.notes || '');
+      const chargedVia = parseAppointmentChargeVia(currentNotes);
+      let nextNotes = chargedVia ? markSettledSealCharge(currentNotes) : currentNotes.trim();
+      const unsealNote = `[SELLO RETIRADO ${new Date().toLocaleString()}] ${authorizedBy}`;
+      nextNotes = nextNotes ? `${nextNotes}\n${unsealNote}` : unsealNote;
+
+      const basePayload = { check_in_status: 'En Sesión', notes: nextNotes };
+      let updateRes = await activeSupabase
+        .from('appointments')
+        .update({ ...basePayload, signature: null })
+        .eq('id', app.id)
+        .eq('check_in_status', 'Finalizado')
+        .select('id');
+
+      if (updateRes.error && /signature|column|schema cache/i.test(updateRes.error.message || '')) {
+        updateRes = await activeSupabase
+          .from('appointments')
+          .update(basePayload)
+          .eq('id', app.id)
+          .eq('check_in_status', 'Finalizado')
+          .select('id');
+      }
+      if (updateRes.error) throw new Error(updateRes.error.message);
+      if (!updateRes.data?.length) throw new Error(a('unsealError'));
+
+      clearPendingBitacoraSeal(app.id);
+      await logAudit(app.id, app.patient, a('unsealAuditAction'), a('unsealAuditDetail', authorizedBy));
+      await notifyCalendarChanged();
+      setSelectedSlot((prev) => (
+        prev && prev.id === app.id
+          ? { ...prev, check_in_status: 'En Sesión', notes: nextNotes, signature: null }
+          : prev
+      ));
+      setUnsealAuth(null);
+      await fetchAllData({ silent: true, liveOnly: true });
+      alert(a('unsealOk'));
+    } catch (e) {
+      const message = /unauthorized/i.test(e.message || '') ? a('unsealSessionExpired') : (e.message || a('unsealError'));
+      setUnsealAuth((prev) => (prev ? { ...prev, busy: false, error: message } : prev));
+    }
   };
 
   const handleDrop = (e, newTime, newEquipment, newDay, newFullDate, outsideHours = false) => {
@@ -8186,7 +8261,16 @@ export default function AppLayout() {
               <div className="flex gap-3 flex-wrap">
                 <button onClick={() => setShowPatientProfile(true)} className="flex-1 bg-slate-100 text-slate-700 py-4 rounded-2xl font-black uppercase text-[10px] hover:bg-slate-200 transition">{L.p.appt.openChart}</button>
                 {selectedSlot.check_in_status === 'Finalizado' ? (
-                   <div className="flex-1 bg-emerald-100 text-emerald-800 py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center text-center border border-emerald-300">{L.p.appt.bitacoraSealed}</div>
+                   <div className="flex-1 flex flex-col gap-2">
+                     <div className="bg-emerald-100 text-emerald-800 py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center text-center border border-emerald-300">{L.p.appt.bitacoraSealed}</div>
+                     <button
+                       type="button"
+                       onClick={() => setUnsealAuth({ app: selectedSlot, pin: '', error: '', busy: false })}
+                       className="bg-white text-orange-700 border border-orange-300 py-3 rounded-2xl font-black uppercase text-[10px] hover:bg-orange-50 transition"
+                     >
+                       {L.p.appt.bitacoraUnseal}
+                     </button>
+                   </div>
                 ) : ['No Asistió', 'Falta Justificada', 'Cancelado', 'Devuelto'].includes(selectedSlot.check_in_status) ? (
                    <div className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center text-center border border-slate-200">
                      {locale === 'en' ? 'Attendance seal for completed visits only' : 'Bitácora solo para visitas atendidas'}
@@ -9056,6 +9140,56 @@ export default function AppLayout() {
         </div>
       )}
 
+      {unsealAuth && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[100000]">
+          <div className="bg-white rounded-t-2xl sm:rounded-3xl max-w-md w-full p-4 sm:p-8 shadow-2xl text-slate-900 max-h-[92dvh] overflow-y-auto">
+            <h3 className="text-lg sm:text-xl font-black mb-3 uppercase text-center">{a('unsealTitle')}</h3>
+            <p className="text-sm font-bold text-slate-500 mb-4 text-center whitespace-pre-line">
+              {a('unsealPrompt')}
+            </p>
+            <p className="text-xs font-black uppercase text-slate-700 text-center mb-4">
+              {unsealAuth.app?.patient} · {unsealAuth.app?.time}
+            </p>
+            <label className="block text-[10px] font-black uppercase text-slate-400 mb-1">{a('unsealPinLabel')}</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              maxLength={10}
+              value={unsealAuth.pin || ''}
+              onChange={(e) => setUnsealAuth((prev) => (prev ? { ...prev, pin: e.target.value, error: '' } : prev))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') confirmUnsealBitacora();
+              }}
+              className="w-full p-3 border border-orange-200 bg-orange-50 rounded-xl font-black tracking-[0.35em] text-center outline-none text-slate-900 text-base"
+              placeholder="••••"
+            />
+            {unsealAuth.error && (
+              <p className="mt-3 text-xs font-bold text-red-600 text-center">{unsealAuth.error}</p>
+            )}
+            <div className="flex flex-col sm:flex-row gap-2 sm:space-x-3 sm:gap-0 mt-6">
+              <button
+                type="button"
+                onClick={() => setUnsealAuth(null)}
+                disabled={unsealAuth.busy}
+                className="w-full sm:flex-1 bg-slate-100 font-black py-3 sm:py-4 rounded-2xl uppercase text-xs hover:bg-slate-200 disabled:opacity-50"
+              >
+                {locale === 'en' ? 'Cancel' : 'Cancelar'}
+              </button>
+              <button
+                type="button"
+                onClick={confirmUnsealBitacora}
+                disabled={unsealAuth.busy || !String(unsealAuth.pin || '').trim()}
+                className="w-full sm:flex-1 bg-orange-600 text-white font-black py-3 sm:py-4 rounded-2xl uppercase text-xs shadow-lg hover:bg-orange-700 disabled:opacity-50"
+              >
+                {unsealAuth.busy ? L.p.common.pleaseWait : a('unsealConfirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {moveConfirmation && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-[100000]">
           <div className="bg-white rounded-t-2xl sm:rounded-3xl max-w-md w-full p-4 sm:p-8 shadow-2xl text-slate-900 max-h-[92dvh] overflow-y-auto">
@@ -9656,25 +9790,33 @@ export default function AppLayout() {
                       : 'Esta cita ya está sellada.');
                   }
 
+                  // A visit that was unsealed to fix a bad signature keeps its original charge.
+                  const sealedNotes = sealRes.data[0]?.notes || selectedSlot.notes || '';
+                  const alreadyCharged = hasSettledSealCharge(sealedNotes);
+
                   // Default: deduct paid session or record red adeudo. skipCharge = courtesy (no debt).
                   const { deducted, nextAdeudo, consumed, skippedAssessment, skippedCharge, chargedVia } = await processSessionDeduction(
                     pat,
                     eq,
                     servicePrice,
-                    { skipCharge },
+                    { skipCharge: skipCharge || alreadyCharged },
                   );
 
                   if (!skippedAssessment && !skippedCharge && chargedVia) {
-                    const nextNotes = appendAppointmentChargeVia(
-                      sealRes.data[0]?.notes || selectedSlot.notes || '',
-                      chargedVia,
-                    );
+                    const nextNotes = appendAppointmentChargeVia(sealedNotes, chargedVia);
                     await activeSupabase.from('appointments').update({ notes: nextNotes }).eq('id', appointmentId);
+                  } else if (alreadyCharged) {
+                    await activeSupabase
+                      .from('appointments')
+                      .update({ notes: clearSettledSealCharge(sealedNotes) || null })
+                      .eq('id', appointmentId);
                   }
 
                   let auditStr = a('bitacoraSealedAuditDetail', attendantName);
                   if (summaryLines?.headline) auditStr += ` ${summaryLines.headline}.`;
-                  if (skippedAssessment) {
+                  if (alreadyCharged) {
+                    auditStr += ` ${a('resealNoChargeAudit')}`;
+                  } else if (skippedAssessment) {
                     auditStr += locale === 'en'
                       ? ' Assessment: no wallet or debt movement.'
                       : ' Valoración: sin movimiento de cartera ni adeudo.';
