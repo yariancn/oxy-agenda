@@ -24,6 +24,7 @@ function pickSmsIntros(config = {}, locale = 'es') {
     booking: config.notify_sms_booking || defaults.booking,
     reschedule: config.notify_sms_reschedule || defaults.reschedule,
     cancel: config.notify_sms_cancel || defaults.cancel,
+    reminder: config.notify_sms_reminder || defaults.reminder,
   };
 }
 
@@ -37,6 +38,8 @@ function pickEmailTemplates(config = {}) {
     notify_body_reschedule: config.notify_body_reschedule,
     notify_subject_cancel: config.notify_subject_cancel,
     notify_body_cancel: config.notify_body_cancel,
+    notify_subject_reminder: config.notify_subject_reminder,
+    notify_body_reminder: config.notify_body_reminder,
     notify_extra_info: config.notify_extra_info,
   };
 }
@@ -132,8 +135,8 @@ export async function POST(request) {
     const types = body.onlyPosReceipt === true
       ? []
       : (Array.isArray(body.patientTypes) && body.patientTypes.length
-        ? body.patientTypes.filter((t) => ['first', 'booking', 'reschedule', 'cancel'].includes(t))
-        : ['first', 'booking', 'reschedule', 'cancel']);
+        ? body.patientTypes.filter((t) => ['first', 'booking', 'reschedule', 'cancel', 'reminder'].includes(t))
+        : ['first', 'booking', 'reschedule', 'cancel', 'reminder']);
     const results = [];
 
     for (const notifyType of types) {
@@ -144,14 +147,14 @@ export async function POST(request) {
         instructions: includeInstructions ? instructions : '',
       });
 
-      const entry = { notifyType, email: null, sms: null };
+      const entry = { notifyType, subject: content.subject, smsPreview: content.smsBody, email: null, sms: null };
 
       if (email) {
         entry.email = await sendEmail({
           clinicName,
           locale,
           to: email,
-          subject: `[PRUEBA ${notifyType.toUpperCase()}] ${content.subject}`,
+          subject: `[SAMPLE ${notifyType.toUpperCase()}] ${content.subject}`,
           html: content.emailHtml,
         });
       }
@@ -161,7 +164,7 @@ export async function POST(request) {
           clinicName,
           locale,
           phone,
-          smsBody: `[PRUEBA] ${content.smsBody}`,
+          smsBody: `[SAMPLE ${notifyType.toUpperCase()}] ${content.smsBody}`,
           notifyType,
           whatsappBodyParams: content.whatsappBodyParams,
         });
@@ -170,8 +173,31 @@ export async function POST(request) {
       results.push(entry);
     }
 
+    let confirmationSms = null;
+    if (body.includeConfirmationSms !== false && phone && isShenandoah(clinicName)) {
+      const { buildConfirmationSms } = await import('../../../../lib/appointmentConfirmation.js');
+      const confBody = buildConfirmationSms({
+        patientName,
+        time: sampleTime,
+        clinicDisplayName: cfg.name || 'OxyHyperbaric',
+        hoursBefore: 6,
+        noReplyHours: Number(cfg.confirmation_no_reply_hours) || 1,
+        customBody: cfg.confirmation_sms_body,
+        locale: 'en',
+        clinicPhone: cfg.phone || '7135913379',
+      });
+      const confSend = await sendSms({
+        clinicName,
+        locale: 'en',
+        phone,
+        smsBody: `[SAMPLE CONFIRM] ${confBody}`,
+        notifyType: 'booking',
+      });
+      confirmationSms = { preview: confBody, ...confSend };
+    }
+
     let staff = null;
-    if (body.includeStaff !== false && body.onlyPosReceipt !== true) {
+    if (body.includeStaff === true && body.onlyPosReceipt !== true) {
       const staffCfg = {
         ...cfg,
         notify_staff_on_booking: true,
@@ -195,7 +221,7 @@ export async function POST(request) {
     }
 
     let posReceipt = null;
-    if (body.includePosReceipt !== false && phone) {
+    if (body.includePosReceipt === true && phone) {
       const smsBody = buildPosTicketSmsText({
         receipt: {
           patient: patientName,
@@ -235,6 +261,7 @@ export async function POST(request) {
       phone: phone || null,
       email: email || null,
       results,
+      confirmationSms,
       staff,
       posReceipt,
     });
