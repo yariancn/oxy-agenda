@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-const POLL_MS = 60 * 1000;
+const POLL_MS = 15 * 60 * 1000; // 15 min — deploy checks must not burn cellular
 const CLIENT_BUILD = String(process.env.NEXT_PUBLIC_BUILD_SHA || 'dev').trim();
 
 function normalizeSha(value) {
@@ -14,6 +14,7 @@ function normalizeSha(value) {
 /**
  * Compare the JS bundle build SHA vs /api/health/build.
  * If the open tab is stale (common with tablets / PWA), show a banner to reload.
+ * Checks on mount, when the tab becomes visible, and every 15 minutes while visible.
  */
 export default function DeployRefreshWatcher() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -21,8 +22,10 @@ export default function DeployRefreshWatcher() {
 
   useEffect(() => {
     let cancelled = false;
+    let intervalId = null;
 
     const check = async () => {
+      if (document.visibilityState === 'hidden') return;
       try {
         const res = await fetch(`/api/health/build?t=${Date.now()}`, {
           cache: 'no-store',
@@ -42,20 +45,29 @@ export default function DeployRefreshWatcher() {
       }
     };
 
+    const startInterval = () => {
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(check, POLL_MS);
+    };
+
     check();
-    const intervalId = setInterval(check, POLL_MS);
+    startInterval();
 
     const onVisible = () => {
-      if (document.visibilityState === 'visible') check();
+      if (document.visibilityState === 'visible') {
+        check();
+        startInterval();
+      } else if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
     };
     document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('focus', check);
 
     return () => {
       cancelled = true;
-      clearInterval(intervalId);
+      if (intervalId) clearInterval(intervalId);
       document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', check);
     };
   }, []);
 

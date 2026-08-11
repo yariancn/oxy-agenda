@@ -44,6 +44,7 @@ import {
   staffStrings,
 } from '../lib/i18n';
 import BitacoraModal from '../components/BitacoraModal';
+import LiveSyncBadge from '../components/LiveSyncBadge';
 import PatientProfileModal from '../components/PatientProfileModal';
 import PatientSessionHistory from '../components/PatientSessionHistory';
 import AppointmentSavingOverlay from '../components/AppointmentSavingOverlay';
@@ -235,7 +236,6 @@ export default function AppLayout() {
   const [zoomManual, setZoomManual] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [liveSyncAt, setLiveSyncAt] = useState(null);
-  const [, setLiveSyncTick] = useState(0);
   const [weekFilterHintDismissed, setWeekFilterHintDismissed] = useState(false);
   const [showCalendarLegend, setShowCalendarLegend] = useState(false);
   const [showSymbolLegend, setShowSymbolLegend] = useState(false);
@@ -741,7 +741,7 @@ export default function AppLayout() {
             autoCloseMs: 1800,
           };
         }
-        await fetchAllData({ silent: true });
+        await fetchAllData({ silent: true, liveOnly: true });
         return { detail: L.p.admin.configSaved };
       },
     });
@@ -1342,13 +1342,28 @@ export default function AppLayout() {
 
       setDbPatients(safePatients.sort((a, b) => a.patient.localeCompare(b.patient)));
 
-      const walletRepairs = safePatients.filter((p) => p._walletRepairPending);
+      // Wallet auto-writes once per session — not on every full reload.
+      const walletRepairKey = `oxy_wallet_repair_${clinicId}`;
+      let allowWalletRepair = true;
+      try {
+        allowWalletRepair = !window.sessionStorage?.getItem(walletRepairKey);
+      } catch {
+        /* ignore */
+      }
+      const walletRepairs = allowWalletRepair
+        ? safePatients.filter((p) => p._walletRepairPending)
+        : [];
       if (walletRepairs.length && clinicDb) {
         await Promise.all(walletRepairs.map((p) => clinicDb.from('patients').update({
           wallets: p.wallets,
           adeudo: p.adeudo,
           historico_sesiones: p.historicoSesiones,
         }).eq('id', p.id)));
+        try {
+          window.sessionStorage?.setItem(walletRepairKey, '1');
+        } catch {
+          /* ignore */
+        }
       }
 
       try {
@@ -1356,7 +1371,9 @@ export default function AppLayout() {
         if (!resGroups.error) {
           const safeGroups = (resGroups.data || []).map(normalizeGroup);
           setDbSessionGroups(safeGroups);
-          const groupRepairs = safeGroups.filter((g) => g._walletRepairPending);
+          const groupRepairs = allowWalletRepair
+            ? safeGroups.filter((g) => g._walletRepairPending)
+            : [];
           if (groupRepairs.length && clinicDb) {
             await Promise.all(groupRepairs.map((g) => clinicDb.from('session_groups').update({
               wallets: g.wallets,
@@ -1473,7 +1490,14 @@ export default function AppLayout() {
       }
 
       let appointmentsReady = appointmentsData || [];
-      if (currentUserLevel <= 2 && safeServices.length && appointmentsReady.length) {
+      const equipmentRepairKey = `oxy_eq_repair_${clinicId}`;
+      let allowEquipmentRepair = true;
+      try {
+        allowEquipmentRepair = !window.sessionStorage?.getItem(equipmentRepairKey);
+      } catch {
+        /* ignore */
+      }
+      if (allowEquipmentRepair && currentUserLevel <= 2 && safeServices.length && appointmentsReady.length) {
         try {
           const repairs = await autoRepairOrphanEquipmentNames(clinicDb, safeServices, appointmentsReady);
           if (repairs.length > 0) {
@@ -1484,6 +1508,11 @@ export default function AppLayout() {
               'REPARAR EQUIPOS',
               repairs.map((r) => `«${r.from}» → «${r.to}»`).join('; '),
             );
+          }
+          try {
+            window.sessionStorage?.setItem(equipmentRepairKey, '1');
+          } catch {
+            /* ignore */
           }
         } catch (repairErr) {
           console.warn('Auto-repair equipment names failed', repairErr);
@@ -1498,7 +1527,19 @@ export default function AppLayout() {
       // Do NOT broadcast here — loading this tab is not a data change, and same-tab
       // BroadcastChannel + live sync was aborting in-flight loads (stuck "LOADING").
 
-      if (clinicDb && safePatients.length && appointmentsReady.length) {
+      const nameRepairKey = `oxy_name_repair_${clinicId}`;
+      let allowNameRepair = true;
+      try {
+        allowNameRepair = !window.sessionStorage?.getItem(nameRepairKey);
+      } catch {
+        /* ignore */
+      }
+      if (allowNameRepair && clinicDb && safePatients.length && appointmentsReady.length) {
+        try {
+          window.sessionStorage?.setItem(nameRepairKey, '1');
+        } catch {
+          /* ignore */
+        }
         repairStaleAppointmentNames(clinicDb, appointmentsReady, safePatients)
           .then((repaired) => {
             if (repaired > 0 && fetchGen === fetchGenRef.current) {
@@ -1558,31 +1599,18 @@ export default function AppLayout() {
   });
 
   // Renew staff cookie while the agenda stays open (sliding TTL).
-  // Do NOT call immediately on mount — that races the login bootstrap.
+  // Live-sync pings also renew the cookie; no extra refresh on every tab focus.
   useEffect(() => {
     if (!currentUser) return undefined;
-    const tick = () => {
+    const id = window.setInterval(() => {
       if (document.visibilityState === 'hidden') return;
       refreshStaffSessionForSave();
-    };
-    const id = window.setInterval(tick, 30 * 60 * 1000);
-    const onVis = () => {
-      if (document.visibilityState === 'visible') tick();
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      window.clearInterval(id);
-      document.removeEventListener('visibilitychange', onVis);
-    };
+    }, 30 * 60 * 1000);
+    return () => window.clearInterval(id);
   }, [currentUser, activeClinic]);
 
   // iPhone: keep booking sheet inside the viewport and reset after keyboard/zoom.
   useModalViewportLock(Boolean(showNewAppointment || appointmentSaveFeedback || pastMoveAuth || moveConfirmation));
-
-  useEffect(() => {
-    const id = window.setInterval(() => setLiveSyncTick((n) => n + 1), 5000);
-    return () => window.clearInterval(id);
-  }, []);
 
   useEffect(() => {
     slotNotesDirtyRef.current = false;
@@ -1710,20 +1738,22 @@ export default function AppLayout() {
     if (currentUser) fetchAllData();
   }, [activeClinic, currentUser]);
 
-  // One-time SMS opt-in migrate + repair patients missing from directory but present on agenda.
+  // Occasional directory repair (orphans on agenda without a patient chart).
+  // SMS opt-in migration is done server-side / already applied — do not re-run on every login.
   useEffect(() => {
     if (!currentUser) return;
-    const key = 'oxy_patient_dir_repair_v2';
-    if (typeof window !== 'undefined' && window.sessionStorage?.getItem(key)) return;
+    const key = 'oxy_patient_dir_repair_v3';
+    try {
+      const raw = typeof window !== 'undefined' ? window.localStorage?.getItem(key) : null;
+      const lastAt = raw ? Number(raw) : 0;
+      // At most once every 7 days per device — not every session.
+      if (lastAt && Date.now() - lastAt < 7 * 24 * 60 * 60 * 1000) return;
+    } catch {
+      /* private mode */
+    }
     let cancelled = false;
     (async () => {
       try {
-        await fetch('/api/staff/migrate-sms-optin', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ all: true }),
-        });
         const res = await fetch('/api/staff/repair-orphan-patients', {
           method: 'POST',
           credentials: 'include',
@@ -1732,14 +1762,17 @@ export default function AppLayout() {
         });
         const data = await res.json().catch(() => ({}));
         if (cancelled) return;
-        window.sessionStorage?.setItem(key, '1');
+        try {
+          window.localStorage?.setItem(key, String(Date.now()));
+        } catch {
+          /* ignore */
+        }
         const created = (data?.results || []).reduce((sum, row) => sum + (Number(row?.created) || 0), 0);
-        // Only re-download the patient directory if repair actually created charts.
         if (res.ok && created > 0) {
           await fetchAllDataRef.current({ silent: true, patientsOnly: true });
         }
       } catch {
-        /* ignore — can re-run on next session */
+        /* ignore — can re-run later */
       }
     })();
     return () => { cancelled = true; };
@@ -3663,7 +3696,6 @@ export default function AppLayout() {
           : prev
       ));
       setUnsealAuth(null);
-      await fetchAllData({ silent: true, liveOnly: true });
       alert(a('unsealOk'));
     } catch (e) {
       const message = /unauthorized/i.test(e.message || '') ? a('unsealSessionExpired') : (e.message || a('unsealError'));
@@ -5423,18 +5455,12 @@ export default function AppLayout() {
                 <span className="lg:hidden text-[9px] font-bold text-slate-500 shrink-0" title={`${L.agendaSummaryToday}: ${agendaSummary.today} · ${L.agendaSummaryView}: ${agendaSummary.view}`}>
                   {agendaSummary.today}/{agendaSummary.view}
                 </span>
-                <span
-                  className={`text-[8px] font-black uppercase shrink-0 px-1.5 py-0.5 rounded border ${
-                    liveSyncAt && Date.now() - liveSyncAt < 20000
-                      ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                      : 'text-slate-400 bg-slate-50 border-slate-200'
-                  }`}
-                  title={locale === 'en'
-                    ? 'Updates instantly via Realtime; ○ Sync is normal when idle'
-                    : 'Se actualiza al instante con Realtime; ○ Sync es normal si no hay cambios'}
-                >
-                  {liveSyncAt && Date.now() - liveSyncAt < 20000 ? '● Live' : '○ Sync'}
-                </span>
+                <LiveSyncBadge
+                  liveSyncAt={liveSyncAt}
+                  locale={locale}
+                  titleEn="Updates instantly via Realtime; ○ Sync is normal when idle"
+                  titleEs="Se actualiza al instante con Realtime; ○ Sync es normal si no hay cambios"
+                />
                 <span
                   className="text-[8px] font-black uppercase shrink-0 px-1.5 py-0.5 rounded border text-slate-400 bg-slate-50 border-slate-200"
                   title={locale === 'en' ? `App build ${buildSha} (changes only after deploy)` : `Versión de la app ${buildSha} (cambia solo al publicar)`}
