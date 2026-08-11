@@ -105,7 +105,11 @@ export async function POST(request) {
 
     const sampleDate = body.date || '2026-07-15';
     const sampleTime = body.time || '10:00 AM';
-    const sampleEquipment = body.equipment || 'Cámara 1';
+    const activeServices = (servicesRes.data || []).filter((s) => s?.is_active !== false && String(s?.name || '').trim());
+    // Never default Houston samples to GDL "Cámara 1" — use a real clinic service name.
+    const sampleEquipment = String(body.equipment || '').trim()
+      || activeServices[0]?.name
+      || (isShenandoah(clinicName) ? 'Mild HBOT' : 'Cámara 1');
     const instructions = resolveSessionInstructions(cfg, locale, {
       equipment: sampleEquipment,
       services: servicesRes.data || [],
