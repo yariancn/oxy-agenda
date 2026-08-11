@@ -185,6 +185,11 @@ import {
 } from '../lib/staffBookingAlert';
 import { broadcastLiveDataUpdated } from '../lib/liveSyncBroadcast';
 import { clearPendingBitacoraSeal } from '../lib/pendingBitacoraSeal';
+import {
+  APPOINTMENT_LIST_COLUMNS,
+  APPOINTMENT_LIST_COLUMNS_MIN,
+  stripAppointmentSignatures,
+} from '../lib/agendaQueryColumns';
 import { useAgendaLiveSync } from '../lib/useAgendaLiveSync';
 import { useModalViewportLock } from '../lib/useModalViewportLock';
 import { liveSyncDateRange } from '../lib/liveSyncToken';
@@ -1068,18 +1073,18 @@ export default function AppLayout() {
   // --- SINCRONIZACIÓN CON PAGINACIÓN INTELIGENTE ---
   const fullLoadInFlightRef = useRef(false);
 
-  const fetchAllData = async ({ silent = false, liveOnly = false } = {}) => {
+  const fetchAllData = async ({ silent = false, liveOnly = false, patientsOnly = false } = {}) => {
     if (!currentUser) {
       setDbStatus('sin_sesion');
       return;
     }
 
     // Never let a silent live refresh cancel / starve the initial clinic load.
-    if (liveOnly && fullLoadInFlightRef.current) {
+    if ((liveOnly || patientsOnly) && fullLoadInFlightRef.current) {
       return;
     }
 
-    const isFullLoad = !silent && !liveOnly;
+    const isFullLoad = !silent && !liveOnly && !patientsOnly;
     if (isFullLoad) fullLoadInFlightRef.current = true;
 
     const fetchGen = ++fetchGenRef.current;
@@ -1116,14 +1121,17 @@ export default function AppLayout() {
         dateFrom = null,
         dateTo = null,
         orderCol = 'id',
+        select = '*',
+        stripSignatures = false,
       } = {}) => {
         let allData = [];
         const seenIds = new Set();
         let from = 0;
         const step = 1000;
         let useClinicFilter = clinicScoped && shouldScopeTableByClinic(clinicId);
+        let selectCols = select;
         while (true) {
-          let query = clinicDb.from(table).select('*');
+          let query = clinicDb.from(table).select(selectCols);
           if (useClinicFilter) query = query.eq('clinic', clinicId);
           if (dateCol && dateFrom) query = query.gte(dateCol, dateFrom);
           if (dateCol && dateTo) query = query.lte(dateCol, dateTo);
@@ -1132,6 +1140,22 @@ export default function AppLayout() {
           let result = await query.range(from, from + step - 1);
           if (result?.error && useClinicFilter && isMissingClinicColumnError(result.error)) {
             useClinicFilter = false;
+            from = 0;
+            allData = [];
+            seenIds.clear();
+            continue;
+          }
+          // Lean column lists may reference optional columns missing in one clinic schema.
+          if (
+            result?.error
+            && selectCols !== '*'
+            && /column|schema cache/i.test(result.error.message || '')
+          ) {
+            if (table === 'appointments' && selectCols === APPOINTMENT_LIST_COLUMNS) {
+              selectCols = APPOINTMENT_LIST_COLUMNS_MIN;
+            } else {
+              selectCols = '*';
+            }
             from = 0;
             allData = [];
             seenIds.clear();
@@ -1154,33 +1178,60 @@ export default function AppLayout() {
           if (data.length < step) break;
           from += step;
         }
+        if (stripSignatures || (table === 'appointments' && selectCols === '*')) {
+          return stripAppointmentSignatures(allData);
+        }
         return allData;
       };
 
+      if (patientsOnly) {
+        const patientsData = await fetchPaginated('patients');
+        if (fetchGen !== fetchGenRef.current) return;
+        const safePatients = (patientsData || []).map((p) => {
+          const packageHistory = p.package_history || [];
+          const patientName = String(p.Name || p.name || p.Nombre || 'Sin Nombre');
+          return {
+            id: p.id,
+            patient: patientName,
+            phone: String(p.Phone || p.phone || ''),
+            email: String(p.Email || p.email || ''),
+            protocol: String(p.protocol || ''),
+            notes: sanitizePatientNotesForDisplay(p.notes || p.Notes || ''),
+            is_blocked: p.is_blocked || false,
+            prefers_email: p.prefers_email !== false,
+            prefers_sms: p.prefers_sms === true,
+            prefers_sms_reminder: p.prefers_sms_reminder !== false,
+            wallets: p.wallets || {},
+            packageHistory,
+            historicoSesiones: p.historico_sesiones || 0,
+            adeudo: Number(p.adeudo) || 0,
+            sessionGroupId: p.session_group_id || null,
+          };
+        });
+        setDbPatients(safePatients.sort((a, b) => a.patient.localeCompare(b.patient)));
+        return;
+      }
+
       if (liveOnly) {
         const { from: liveFrom, to: liveTo } = liveSyncDateRange(activeClinic);
-        const [appointmentsData, resS, resB, resC] = await Promise.all([
+        const [appointmentsData, resB] = await Promise.all([
           fetchPaginated('appointments', {
             clinicScoped: shouldScopeTableByClinic(clinicId),
             dateCol: 'full_date',
             dateFrom: liveFrom,
             dateTo: liveTo,
+            select: APPOINTMENT_LIST_COLUMNS,
+            stripSignatures: true,
           }),
-          shouldScopeTableByClinic(clinicId)
-            ? staffDbSelectByClinic(clinicDb, 'services', clinicId, (q) => q)
-            : clinicDb.from('services').select('*'),
           shouldScopeTableByClinic(clinicId)
             ? staffDbSelectByClinic(clinicDb, 'blocked_slots', clinicId, (q) => q)
             : clinicDb.from('blocked_slots').select('*'),
-          clinicDb.from('company_config').select('*').eq('clinic', clinicId).maybeSingle(),
         ]);
 
         if (fetchGen !== fetchGenRef.current) return;
 
-        assertDbResult('services', resS);
         assertDbResult('blocked_slots', resB);
 
-        setDbServices((resS.data || []).sort((a, b) => (a.name || '').localeCompare(b.name || '')));
         setDbBlockedSlots(resB.data || []);
         setDbAppointments((prev) => {
           const fresh = appointmentsData || [];
@@ -1199,26 +1250,6 @@ export default function AppLayout() {
           }
           return [...merged.values()];
         });
-        if (resC.data) {
-          const clinicLocale = localeForClinic(activeClinic);
-          setDbCompanyConfig((prev) => ({
-            ...prev,
-            ...resC.data,
-            name: formatClinicField(resC.data.name),
-            address: formatClinicField(resC.data.address),
-            maps_url: String(resC.data.maps_url || '').trim(),
-            phone: formatClinicPhone(resC.data.phone),
-            ticket_message: formatClinicField(resC.data.ticket_message),
-            notify_session_label: resC.data.notify_session_label || prev.notify_session_label || defaultNotifySettings(clinicLocale).notify_session_label,
-            notify_session_default: resC.data.notify_session_default ?? prev.notify_session_default ?? defaultNotifySettings(clinicLocale).notify_session_default,
-            notify_session_url: resC.data.notify_session_url || prev.notify_session_url || defaultNotifySettings(clinicLocale).notify_session_url,
-            notify_sms_first: resC.data.notify_sms_first || prev.notify_sms_first || defaultNotifySettings(clinicLocale).notify_sms_first,
-            notify_sms_booking: resC.data.notify_sms_booking || prev.notify_sms_booking || defaultNotifySettings(clinicLocale).notify_sms_booking,
-            notify_sms_reschedule: resC.data.notify_sms_reschedule || prev.notify_sms_reschedule || defaultNotifySettings(clinicLocale).notify_sms_reschedule,
-            notify_sms_cancel: resC.data.notify_sms_cancel || prev.notify_sms_cancel || defaultNotifySettings(clinicLocale).notify_sms_cancel,
-            notify_sms_reminder: resC.data.notify_sms_reminder || prev.notify_sms_reminder || defaultNotifySettings(clinicLocale).notify_sms_reminder,
-          }));
-        }
         // Recover if a live refresh finished while the UI was still stuck on "loading".
         if (dbStatus === 'error' || dbStatus === 'cargando') {
           setDbStatus('listo');
@@ -1243,7 +1274,11 @@ export default function AppLayout() {
 
       const [patientsData, appointmentsData, resS, resU, resB, resC, resProt, resRoles, resPromo] = await Promise.all([
         fetchPaginated('patients'),
-        fetchPaginated('appointments', { clinicScoped: shouldScopeTableByClinic(clinicId) }),
+        fetchPaginated('appointments', {
+          clinicScoped: shouldScopeTableByClinic(clinicId),
+          select: APPOINTMENT_LIST_COLUMNS,
+          stripSignatures: true,
+        }),
         shouldScopeTableByClinic(clinicId)
           ? staffDbSelectByClinic(clinicDb, 'services', clinicId, (q) => q)
           : clinicDb.from('services').select('*'),
@@ -1487,9 +1522,27 @@ export default function AppLayout() {
 
   fetchAllDataRef.current = fetchAllData;
 
-  const syncCalendarLive = useCallback(async () => {
-    await fetchAllDataRef.current({ silent: true, liveOnly: true });
-    setLiveSyncAt(Date.now());
+  const liveSyncTimerRef = useRef(null);
+  const liveSyncWaitersRef = useRef([]);
+  const syncCalendarLive = useCallback(() => {
+    // Coalesce Realtime + BroadcastChannel + focus bursts into one lean download.
+    return new Promise((resolve) => {
+      liveSyncWaitersRef.current.push(resolve);
+      if (liveSyncTimerRef.current) {
+        window.clearTimeout(liveSyncTimerRef.current);
+      }
+      liveSyncTimerRef.current = window.setTimeout(async () => {
+        liveSyncTimerRef.current = null;
+        const waiters = liveSyncWaitersRef.current;
+        liveSyncWaitersRef.current = [];
+        try {
+          await fetchAllDataRef.current({ silent: true, liveOnly: true });
+          setLiveSyncAt(Date.now());
+        } finally {
+          waiters.forEach((done) => done());
+        }
+      }, 400);
+    });
   }, []);
 
   const notifyCalendarChanged = useCallback(async () => {
@@ -1677,10 +1730,13 @@ export default function AppLayout() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ all: true, lookbackDays: 90 }),
         });
-        if (!cancelled && res.ok) {
-          window.sessionStorage?.setItem(key, '1');
-          // Reload directory so newly created charts (e.g. Claudia) appear immediately.
-          await fetchAllData({ silent: true });
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        window.sessionStorage?.setItem(key, '1');
+        const created = (data?.results || []).reduce((sum, row) => sum + (Number(row?.created) || 0), 0);
+        // Only re-download the patient directory if repair actually created charts.
+        if (res.ok && created > 0) {
+          await fetchAllDataRef.current({ silent: true, patientsOnly: true });
         }
       } catch {
         /* ignore — can re-run on next session */
@@ -4269,9 +4325,31 @@ export default function AppLayout() {
     });
   };
 
-  const printPatientBitacora = (patientName) => {
-    const apps = dbAppointments.filter(a => String(a.patient) === String(patientName) && a.check_in_status === 'Finalizado').sort((a,b) => new Date(b.full_date) - new Date(a.full_date));
-    if(apps.length === 0) return alert(a('noFinishedAppts'));
+  const printPatientBitacora = async (patientName) => {
+    let apps = dbAppointments
+      .filter((a) => String(a.patient) === String(patientName) && a.check_in_status === 'Finalizado')
+      .sort((a, b) => new Date(b.full_date) - new Date(a.full_date));
+    if (apps.length === 0) return alert(a('noFinishedAppts'));
+
+    // Signatures are omitted from agenda loads (too heavy for tablets). Fetch only for this print.
+    try {
+      const ids = apps.map((row) => row.id).filter(Boolean);
+      if (ids.length && activeSupabase) {
+        const { data } = await activeSupabase
+          .from('appointments')
+          .select('id, signature')
+          .in('id', ids);
+        if (data?.length) {
+          const byId = new Map(data.map((row) => [row.id, row.signature]));
+          apps = apps.map((row) => ({
+            ...row,
+            signature: byId.get(row.id) || row.signature || null,
+          }));
+        }
+      }
+    } catch {
+      /* print without embedded signatures if lookup fails */
+    }
 
     const audit = L.p.audit;
     const ROWS_PER_PAGE = 15;
@@ -8876,7 +8954,7 @@ export default function AppLayout() {
                     }
                     if (result.error && result.error.message === 'CLON_DETECTADO') return { error: a('cloneDetected') };
                     if (result.error) return { error: a('saveClientError', result.error.message) };
-                    await fetchAllData({ silent: true });
+                    await fetchAllData({ silent: true, patientsOnly: true });
                     return { detail: result.data?.[0]?.patient || trimmedName };
                   },
                 });
@@ -8927,7 +9005,7 @@ export default function AppLayout() {
                       status: 'available',
                       is_new_patient: !result.linkedExisting,
                     });
-                    await fetchAllData({ silent: true });
+                    await fetchAllData({ silent: true, patientsOnly: true });
                     return { detail: savedName };
                   },
                 });
@@ -9314,7 +9392,7 @@ export default function AppLayout() {
                 sessionGroup: enriched,
               });
               broadcastLiveDataUpdated(activeClinic);
-              await fetchAllData({ silent: true });
+              await fetchAllData({ silent: true, patientsOnly: true });
               return enriched;
             }}
             onAddGroupMember={async ({ groupId, memberPatient }) => {
@@ -9358,7 +9436,7 @@ export default function AppLayout() {
                 },
               });
               broadcastLiveDataUpdated(activeClinic);
-              await fetchAllData({ silent: true });
+              await fetchAllData({ silent: true, patientsOnly: true });
             }}
             onRemoveGroupMember={async ({ groupId, memberId }) => {
               await removeSessionGroupMember(activeSupabase, memberId);
@@ -9378,7 +9456,7 @@ export default function AppLayout() {
                 });
               }
               broadcastLiveDataUpdated(activeClinic);
-              await fetchAllData({ silent: true });
+              await fetchAllData({ silent: true, patientsOnly: true });
             }}
             onGroupPurchase={async ({ groupId, wallets, adeudo, transaction, adjustOnly }) => {
               const group = dbSessionGroups.find((g) => g.id === groupId);
@@ -9399,7 +9477,7 @@ export default function AppLayout() {
                 sessionGroup: updatedGroup,
               });
               broadcastLiveDataUpdated(activeClinic);
-              await fetchAllData({ silent: true });
+              await fetchAllData({ silent: true, patientsOnly: true });
             }}
             onGroupCancelSale={async ({ groupId, transaction }) => {
               const group = dbSessionGroups.find((g) => g.id === groupId);
@@ -9422,7 +9500,7 @@ export default function AppLayout() {
                 sessionGroup: updatedGroup,
               });
               broadcastLiveDataUpdated(activeClinic);
-              await fetchAllData({ silent: true });
+              await fetchAllData({ silent: true, patientsOnly: true });
             }}
             onAllocateTicketNumber={async () => {
               const next = resolveNextTicketNumber({

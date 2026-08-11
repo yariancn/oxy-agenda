@@ -34,7 +34,7 @@ export async function POST(request) {
     }
 
     const data = (body.action || 'select') === 'select'
-      ? sanitizeStaffDbSelectData(user, body.table, result.data ?? null)
+      ? sanitizeStaffDbSelectData(user, body.table, result.data ?? null, body.select)
       : (result.data ?? null);
 
     const response = NextResponse.json({
