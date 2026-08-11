@@ -41,8 +41,11 @@ async function main() {
       phone,
       email,
       patientName: flags.name || 'Yarian (prueba)',
-      includeStaff: true,
-      includePosReceipt: true,
+      includeStaff: flags.staff === true || flags.staff === 'true',
+      includePosReceipt: flags.pos === true || flags.pos === 'true',
+      includeConfirmationSms: flags.confirmation !== false && flags.confirmation !== 'false',
+      locale: flags.locale || undefined,
+      equipment: flags.equipment || undefined,
     }),
   });
 
