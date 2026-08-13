@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import {
   buildAppointmentAriaLabel,
   isCompactColumn,
@@ -93,8 +93,9 @@ function PatientName({ name, isNew, className = '' }) {
   );
 }
 
-const LONG_PRESS_MS = 320;
-const MOVE_CANCEL_PX = 12;
+const LONG_PRESS_MS = 280;
+/** Finger jitter / scroll micro-moves during press — was 12px and canceled too easily on phones. */
+const MOVE_CANCEL_PX = 28;
 
 export default function CalendarAppointmentBlock({
   app,
@@ -141,11 +142,25 @@ export default function CalendarAppointmentBlock({
   const activePointerRef = useRef(null);
   const dragArmedRef = useRef(false);
   const suppressClickRef = useRef(false);
+  const nodeRef = useRef(null);
+  const [pressing, setPressing] = useState(false);
 
   const clearPressTimer = () => {
     if (pressTimerRef.current) {
       clearTimeout(pressTimerRef.current);
       pressTimerRef.current = null;
+    }
+  };
+
+  const releaseCapture = (pointerId) => {
+    const node = nodeRef.current;
+    if (!node || pointerId == null) return;
+    try {
+      if (node.hasPointerCapture?.(pointerId)) {
+        node.releasePointerCapture(pointerId);
+      }
+    } catch {
+      /* ignore */
     }
   };
 
@@ -160,18 +175,25 @@ export default function CalendarAppointmentBlock({
     suppressClickRef.current = false;
     activePointerRef.current = e.pointerId;
     startPosRef.current = { x: e.clientX, y: e.clientY };
+    setPressing(true);
+
+    // Capture immediately so iOS/Android don't hand the gesture to the scroll parent.
+    try {
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    } catch {
+      /* ignore */
+    }
 
     pressTimerRef.current = setTimeout(() => {
       dragArmedRef.current = true;
       suppressClickRef.current = true;
-      try {
-        e.currentTarget.setPointerCapture?.(e.pointerId);
-      } catch {
-        /* ignore */
-      }
-      onTouchDragStart?.(app, { clientX: e.clientX, clientY: e.clientY });
+      setPressing(false);
+      onTouchDragStart?.(app, {
+        clientX: startPosRef.current?.x ?? e.clientX,
+        clientY: startPosRef.current?.y ?? e.clientY,
+      });
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        try { navigator.vibrate(12); } catch { /* ignore */ }
+        try { navigator.vibrate(14); } catch { /* ignore */ }
       }
     }, LONG_PRESS_MS);
   };
@@ -185,7 +207,13 @@ export default function CalendarAppointmentBlock({
       if (start) {
         const dx = Math.abs(e.clientX - start.x);
         const dy = Math.abs(e.clientY - start.y);
-        if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) clearPressTimer();
+        if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) {
+          clearPressTimer();
+          setPressing(false);
+          releaseCapture(e.pointerId);
+          activePointerRef.current = null;
+          startPosRef.current = null;
+        }
       }
       return;
     }
@@ -198,15 +226,13 @@ export default function CalendarAppointmentBlock({
     if (!touchDragEnabled) return;
     if (activePointerRef.current != null && e.pointerId !== activePointerRef.current) return;
     clearPressTimer();
+    setPressing(false);
     const wasDragging = dragArmedRef.current;
     dragArmedRef.current = false;
+    const pointerId = activePointerRef.current;
     activePointerRef.current = null;
     startPosRef.current = null;
-    try {
-      e.currentTarget.releasePointerCapture?.(e.pointerId);
-    } catch {
-      /* ignore */
-    }
+    releaseCapture(pointerId ?? e.pointerId);
     if (wasDragging) {
       e.preventDefault();
       onTouchDragEnd?.({ clientX: e.clientX, clientY: e.clientY });
@@ -225,11 +251,12 @@ export default function CalendarAppointmentBlock({
 
   return (
     <div
+      ref={nodeRef}
       role="button"
       tabIndex={0}
       aria-label={ariaLabel}
       title={touchDragEnabled
-        ? `${ariaLabel} — ${locale === 'en' ? 'Long-press to drag' : 'Mantén pulsado para mover'}`
+        ? `${ariaLabel} — ${locale === 'en' ? 'Hold to drag' : 'Mantén pulsado para mover'}`
         : ariaLabel}
       onClick={handleClick}
       onKeyDown={(e) => {
@@ -247,8 +274,8 @@ export default function CalendarAppointmentBlock({
       onContextMenu={(e) => {
         if (touchDragEnabled) e.preventDefault();
       }}
-      className={`calendar-appt-block absolute ${paddingClass} p-0.5 sm:p-0.5 ${roundedClass} border border-l-[3px] shadow-sm cursor-pointer overflow-hidden flex flex-col group transition-all hover:brightness-[1.02] hover:ring-1 hover:ring-black/10 hover:z-30 ${colorClasses} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1 z-30' : ''} ${isTouchDragging ? 'is-touch-dragging opacity-40' : ''} ${touchDragEnabled ? 'touch-manipulation' : 'touch-pan-y'}`}
-      style={{ top: `${topPx}px`, height: `${heightPx}px`, zIndex: isTouchDragging ? 40 : 10 }}
+      className={`calendar-appt-block absolute ${paddingClass} p-0.5 sm:p-0.5 ${roundedClass} border border-l-[3px] shadow-sm cursor-pointer overflow-hidden flex flex-col group transition-transform hover:brightness-[1.02] hover:ring-1 hover:ring-black/10 hover:z-30 ${colorClasses} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1 z-30' : ''} ${isTouchDragging ? 'is-touch-dragging opacity-40' : ''} ${touchDragEnabled ? 'touch-drag-ready' : 'touch-pan-y'} ${pressing ? 'is-touch-pressing scale-[1.03] ring-2 ring-blue-400/80' : ''}`}
+      style={{ top: `${topPx}px`, height: `${heightPx}px`, zIndex: isTouchDragging ? 50 : 20 }}
     >
       {ultra ? (
         <div className="flex flex-col items-center justify-start h-full py-0.5 gap-0.5 text-center min-w-0 w-full">

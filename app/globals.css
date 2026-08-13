@@ -132,18 +132,27 @@ body {
   -webkit-touch-callout: none;
 }
 
+/* Ready for long-press drag: do not let the calendar scroll steal the gesture. */
+.calendar-appt-block.touch-drag-ready,
+.calendar-appt-block.is-touch-pressing,
 .calendar-appt-block.is-touch-dragging {
   touch-action: none;
+}
+
+.calendar-appt-block.is-touch-pressing {
+  transition: transform 0.12s ease-out;
 }
 
 body.oxy-touch-dragging {
   user-select: none;
   -webkit-user-select: none;
   overflow: hidden;
+  touch-action: none;
 }
 
 body.oxy-touch-dragging .calendar-h-scroll {
   touch-action: none;
+  overflow: hidden;
 }
 
 .appt-detail-close {

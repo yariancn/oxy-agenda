@@ -10002,7 +10002,7 @@ export default function AppLayout() {
 
       {touchDragGhost && (
         <div
-          className="fixed z-[130000] pointer-events-none px-2 py-1.5 rounded-lg bg-blue-700 text-white text-[10px] font-black uppercase shadow-2xl max-w-[180px] truncate border border-blue-300"
+          className="oxy-touch-drag-ghost fixed z-[130000] pointer-events-none px-2 py-1.5 rounded-lg bg-blue-700 text-white text-[10px] font-black uppercase shadow-2xl max-w-[180px] truncate border border-blue-300"
           style={{
             left: touchDragGhost.x,
             top: touchDragGhost.y,
