@@ -33,8 +33,8 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
       groupMembers: selectedSlot?.groupMembers,
       patientName: selectedSlot?.patient,
     });
-    return formatSessionSummaryLines(built, t);
-  }, [sessionSummary, selectedSlot, t]);
+    return formatSessionSummaryLines(built, t, { skipCharge });
+  }, [sessionSummary, selectedSlot, t, skipCharge]);
 
   const statusToneClass = summaryLines.tone === 'debt'
     ? 'bg-orange-100 border-orange-400 text-orange-950'
@@ -205,6 +205,12 @@ export default function BitacoraModal({ selectedSlot, sessionSummary, onClose, o
               {selectedSlot.sessionGroup?.name ? `${t.sharedLabel} · ${t.sessionStatusTitle}` : t.sessionStatusTitle}
             </p>
             <p className="text-sm font-black uppercase leading-snug">{summaryLines.headline}</p>
+            {summaryLines.thisVisit ? (
+              <div className="mt-3 pt-3 border-t border-current/20">
+                <p className="text-[10px] font-black uppercase tracking-widest opacity-70 mb-1">{t.thisVisitTitle}</p>
+                <p className="text-sm font-black uppercase leading-snug">{summaryLines.thisVisit}</p>
+              </div>
+            ) : null}
             {summaryLines.detail ? (
               <p className="text-[10px] font-bold uppercase mt-2 leading-relaxed opacity-90">{summaryLines.detail}</p>
             ) : null}

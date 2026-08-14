@@ -351,6 +351,39 @@ test('valoración: no entra al pool de sesiones ni adeudo', () => {
   });
   assert.match(lines.headline, /Valoración/i);
   assert.equal(lines.tone, 'ok');
+  assert.match(lines.thisVisit || '', /valoración/i);
+});
+
+test('bitácora: resumen aclara número de esta firma (pagada)', () => {
+  const summary = buildSessionSummary({
+    equipment: 'MONOPLAZA',
+    historicoSesiones: 3,
+    adeudo: 0,
+    wallets: { MONOPLAZA: 2 },
+    packageHistory: [{ sessions: 5, price: 1000 }],
+  });
+  const lines = formatSessionSummaryLines(summary, {
+    thisVisitPaid: (taken, total, thisNum, remaining) =>
+      `Ya tomadas: ${taken} de ${total}. Esta firma es la #${thisNum}. Quedan ${remaining} pendientes.`,
+  });
+  assert.match(lines.thisVisit, /#4/);
+  assert.match(lines.thisVisit, /3 de 5/);
+  assert.match(lines.thisVisit, /1 pendiente/);
+});
+
+test('bitácora: cortesía no avanza el contador', () => {
+  const summary = buildSessionSummary({
+    equipment: 'MONOPLAZA',
+    historicoSesiones: 3,
+    adeudo: 0,
+    wallets: { MONOPLAZA: 2 },
+    packageHistory: [{ sessions: 5, price: 1000 }],
+  });
+  const lines = formatSessionSummaryLines(summary, {
+    thisVisitCourtesy: (taken, total) => `Cortesía: siguen ${taken} de ${total}`,
+  }, { skipCharge: true });
+  assert.match(lines.thisVisit, /Cortesía/);
+  assert.match(lines.thisVisit, /3 de 5/);
 });
 
 test('confirmación SMS: ventana flexible tras las 6 h', () => {
