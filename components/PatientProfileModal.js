@@ -8,6 +8,7 @@ import { countPackageChargedSessions } from '../lib/patientAppointmentHistory';
 import { canCreateSessionGroup, canJoinSessionGroup, isGroupTitular, patientMatchesSharedSearch, classifySharedWalletCandidate } from '../lib/sessionGroup';
 import { sanitizePatientNotesForDisplay } from '../lib/patientNotes';
 import PatientSessionHistory from './PatientSessionHistory';
+import { paymentMethodOptions, paymentMethodStoredLabel, resolvePaymentMethodKey } from '../lib/paymentMethod';
 
 export default function PatientProfileModal({
   initialData,
@@ -17,6 +18,7 @@ export default function PatientProfileModal({
   appointments = [],
   companyConfig = {},
   currentUserLevel,
+  currentUserName = '',
   activeClinic = 'Oxygengdl',
   onAllocateTicketNumber,
   onLogSale,
@@ -87,7 +89,7 @@ export default function PatientProfileModal({
   const [posQty, setPosQty] = useState(1);
   const [posUnitPrice, setPosUnitPrice] = useState('');
   const [posPrice, setPosPrice] = useState('');
-  const [posPaymentMethod, setPosPaymentMethod] = useState(locale === 'en' ? 'Credit Card' : 'Tarjeta de Crédito');
+  const [posPaymentMethod, setPosPaymentMethod] = useState('');
   const [posNotes, setPosNotes] = useState('');
   const [posPartial, setPosPartial] = useState(false);
   const [posPackageTotal, setPosPackageTotal] = useState('');
@@ -158,19 +160,7 @@ export default function PatientProfileModal({
     ));
   };
 
-  const paymentOptions = locale === 'en'
-    ? [
-        { value: 'Credit Card', label: t.payCredit },
-        { value: 'Debit Card', label: t.payDebit },
-        { value: 'Cash', label: t.payCash },
-        { value: 'Transfer', label: t.payTransfer },
-      ]
-    : [
-        { value: 'Tarjeta de Crédito', label: t.payCredit },
-        { value: 'Tarjeta de Débito', label: t.payDebit },
-        { value: 'Efectivo', label: t.payCash },
-        { value: 'Transferencia', label: t.payTransfer },
-      ];
+  const paymentOptions = paymentMethodOptions(locale);
 
   const currency = activeClinic === 'Shenandoah' ? 'USD' : 'MXN';
 
@@ -226,6 +216,12 @@ export default function PatientProfileModal({
       alert(t.selectValidService);
       return;
     }
+    if (!resolvePaymentMethodKey(posPaymentMethod)) {
+      alert(t.selectPaymentMethod || (locale === 'en'
+        ? 'Select how the client is paying: cash, debit, credit, or transfer.'
+        : 'Selecciona cómo paga el cliente: efectivo, débito, crédito o transferencia.'));
+      return;
+    }
     const qtyNum = typeof posQty === 'number' ? posQty : parseInt(posQty, 10);
     if (!qtyNum || qtyNum <= 0) {
       alert(t.selectValidService);
@@ -269,8 +265,8 @@ export default function PatientProfileModal({
         sessions,
         unitPrice,
         price: total,
-        paymentMethod: posPaymentMethod,
-        operator: locale === 'en' ? 'POS' : 'Caja POS',
+        paymentMethod: paymentMethodStoredLabel(posPaymentMethod, locale),
+        operator: currentUserName || (locale === 'en' ? 'POS' : 'Caja POS'),
         ticketNotes: posNotes.trim(),
         patient: formData.patient,
         phone: formData.phone,
@@ -363,7 +359,7 @@ export default function PatientProfileModal({
       setPosPartial(false);
       setPosPackageTotal('');
       setPosBalanceDue('');
-      setPosPaymentMethod(paymentOptions[0].value);
+      setPosPaymentMethod('');
     } catch (err) {
       alert(err?.message || String(err));
     } finally {
@@ -1014,7 +1010,12 @@ export default function PatientProfileModal({
               </div>
               <div>
                 <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.method}</label>
-                <select value={posPaymentMethod} onChange={(e) => setPosPaymentMethod(e.target.value)} className="w-full p-2 text-[10px] font-bold uppercase border rounded">
+                <select
+                  value={posPaymentMethod}
+                  onChange={(e) => setPosPaymentMethod(e.target.value)}
+                  className={`w-full p-2 text-[10px] font-bold uppercase border-2 rounded ${posPaymentMethod ? 'border-blue-300' : 'border-amber-400 bg-amber-50'}`}
+                >
+                  <option value="">{t.selectPaymentMethodShort || (locale === 'en' ? 'Select…' : 'Elegir…')}</option>
                   {paymentOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </div>

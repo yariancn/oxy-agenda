@@ -16,6 +16,7 @@ const ERROR_MESSAGES = {
   sms_failed: 'SMS could not be sent.',
   already_sent: 'Confirmation was already sent. Use resend if needed.',
   already_replied: 'Patient already replied YES/NO — cannot resend confirmation.',
+  db_update_failed: 'SMS may have been sent, but the appointment status could not be saved. Refresh and check again, or resend.',
 };
 
 export async function POST(request) {

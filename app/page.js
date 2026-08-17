@@ -61,6 +61,7 @@ import StaffBookingOverrides from '../components/StaffBookingOverrides';
 import DemoOccupancyPanel from '../components/DemoOccupancyPanel';
 import AppSymbolLegend from '../components/AppSymbolLegend';
 import PosReceiptModal from '../components/PosReceiptModal';
+import CashCutModal from '../components/CashCutModal';
 import StaffTabErrorBoundary from '../components/StaffTabErrorBoundary';
 import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
 import CalendarAssessmentBand from '../components/CalendarAssessmentBand';
@@ -385,6 +386,7 @@ export default function AppLayout() {
   const [selectedPatientReport, setSelectedPatientReport] = useState('');
   const [reportReceipt, setReportReceipt] = useState(null);
   const [reportReceiptPhone, setReportReceiptPhone] = useState('');
+  const [showCashCut, setShowCashCut] = useState(false);
 
   const locale = localeForClinic(activeClinic);
   const L = useMemo(() => staffStrings(locale), [locale]);
@@ -5130,6 +5132,7 @@ export default function AppLayout() {
         { id: 'Servicios', icon: '⚙️', label: L.mobileTabs.Servicios },
         { id: 'Reportes', icon: '📊', label: L.mobileTabs.Reportes },
         { id: 'Admin', icon: '🔒', label: L.mobileTabs.Admin },
+        { id: 'CashCut', icon: '💵', label: locale === 'en' ? 'Cash cut' : 'Corte' },
       ]
     : [];
 
@@ -5347,6 +5350,13 @@ export default function AppLayout() {
               <button onClick={() => selectTab('Servicios')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Servicios' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>⚙️ {L.tabs.Servicios}</button>
               <button onClick={() => selectTab('Reportes')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Reportes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📊 {L.tabs.Reportes}</button>
               <button onClick={() => selectTab('Admin')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Admin' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🔒 {L.tabs.Admin}</button>
+              <button
+                type="button"
+                onClick={() => setShowCashCut(true)}
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm text-emerald-300 hover:bg-slate-800"
+              >
+                💵 {locale === 'en' ? 'Cash cut' : 'Corte de efectivo'}
+              </button>
             </>
           )}
         </nav>
@@ -9361,6 +9371,7 @@ export default function AppLayout() {
             companyConfig={dbCompanyConfig}
             activeClinic={activeClinic}
             currentUserLevel={currentUserLevel}
+            currentUserName={currentUser?.name || ''}
             sessionGroupsEnabled={sessionGroupsEnabled}
             allPatients={dbPatients}
             sessionGroup={(() => {
@@ -10033,7 +10044,14 @@ export default function AppLayout() {
               {mobileAdminTabs.map(tab => (
                 <button
                   key={tab.id}
-                  onClick={() => selectTab(tab.id)}
+                  onClick={() => {
+                    setMobileMoreOpen(false);
+                    if (tab.id === 'CashCut') {
+                      setShowCashCut(true);
+                      return;
+                    }
+                    selectTab(tab.id);
+                  }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold ${activeTab === tab.id ? 'bg-blue-600/30 text-blue-300' : 'text-slate-300'}`}
                 >
                   <span className="text-lg">{tab.icon}</span>
@@ -10093,6 +10111,16 @@ export default function AppLayout() {
       )}
     </div>
     <AppSymbolLegend open={showSymbolLegend} onClose={() => setShowSymbolLegend(false)} />
+    <CashCutModal
+      open={showCashCut}
+      onClose={() => setShowCashCut(false)}
+      patients={dbPatients}
+      sessionGroups={dbSessionGroups || []}
+      companyConfig={dbCompanyConfig}
+      activeClinic={activeClinic}
+      currentUserName={currentUser?.name || ''}
+      activeSupabase={activeSupabase}
+    />
     <PosReceiptModal
       open={Boolean(reportReceipt)}
       receipt={reportReceipt}
