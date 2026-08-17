@@ -16,6 +16,8 @@ import {
   withCanonicalPatientName,
 } from '../lib/patientNameSync.js';
 import { isFirstSessionAppointment } from '../lib/emailTemplates.js';
+import { isSmsOptOutKeyword, appointmentHasSmsOptOut } from '../lib/smsOptOut.js';
+import { resolveReminderHours } from '../lib/notifySettings.js';
 import {
   ACTIVE_CLINICS,
   CLINIC_OXYGENDGL,
@@ -386,6 +388,24 @@ test('bitácora: cortesía no avanza el contador', () => {
   assert.match(lines.thisVisit, /3 de 5/);
 });
 
+test('SMS STOP se reconoce como opt-out, no como YES/NO', () => {
+  assert.equal(isSmsOptOutKeyword('STOP'), true);
+  assert.equal(isSmsOptOutKeyword('stopall'), true);
+  assert.equal(isSmsOptOutKeyword('BAJA'), true);
+  assert.equal(isSmsOptOutKeyword('YES'), false);
+  assert.equal(isSmsOptOutKeyword('NO'), false);
+  assert.equal(appointmentHasSmsOptOut({ confirmation_reply: 'STOP' }), true);
+  assert.equal(appointmentHasSmsOptOut({ notes: '⟦oxy:sms-opt-out⟧ 2026-08-17' }), true);
+});
+
+test('México: recordatorio por defecto 12 h; Houston 24 h si no hay valor', () => {
+  assert.equal(resolveReminderHours({}, 'Oxygengdl'), 12);
+  assert.equal(resolveReminderHours({ reminder_hours: 24 }, 'Oxygengdl'), 12);
+  assert.equal(resolveReminderHours({ reminder_hours: 6 }, 'Oxygengdl'), 6);
+  assert.equal(resolveReminderHours({}, 'Shenandoah'), 24);
+  assert.equal(resolveReminderHours({ reminder_hours: 6 }, 'Shenandoah'), 6);
+});
+
 test('confirmación SMS: ventana flexible tras las 6 h', () => {
   const fullDate = '2026-07-13';
   const time = '12:00 PM';
@@ -514,26 +534,35 @@ test('mensajes: canales Correo/SMS por tipo de aviso', () => {
   assert.equal(clinicSmsOff.sendSms, false);
 });
 
-test('mensajes: preferencias del paciente mandan sobre canales por aviso', () => {
-  const adminEmailOnlyReminder = {
+test('mensajes: correo siempre en reserva/cambio; SMS programación solo si se habilita', () => {
+  const clinic = {
     notify_channel_email: true,
     notify_channel_sms: true,
-    notify_use_email_reminder: true,
+    notify_use_sms_booking: true,
     notify_use_sms_reminder: false,
   };
-  const patientWantsSms = resolveNotifyChannelsForPatient(adminEmailOnlyReminder, 'reminder', {
-    prefers_email: true,
-    prefers_sms: true,
+  const bookingNoSms = resolveNotifyChannelsForPatient(clinic, 'booking', {
+    prefers_email: false,
+    prefers_sms: false,
+    prefers_sms_reminder: true,
   });
-  assert.equal(patientWantsSms.sendEmail, true);
-  assert.equal(patientWantsSms.sendSms, true);
+  assert.equal(bookingNoSms.sendEmail, true);
+  assert.equal(bookingNoSms.sendSms, false);
 
-  const smsOnlyPatient = resolveNotifyChannelsForPatient(adminEmailOnlyReminder, 'reminder', {
+  const bookingSmsOn = resolveNotifyChannelsForPatient(clinic, 'booking', {
     prefers_email: false,
     prefers_sms: true,
   });
-  assert.equal(smsOnlyPatient.sendEmail, false);
-  assert.equal(smsOnlyPatient.sendSms, true);
+  assert.equal(bookingSmsOn.sendEmail, true);
+  assert.equal(bookingSmsOn.sendSms, true);
+
+  const reminderClinicSmsOff = resolveNotifyChannelsForPatient(clinic, 'reminder', {
+    prefers_email: false,
+    prefers_sms: true,
+    prefers_sms_reminder: true,
+  });
+  assert.equal(reminderClinicSmsOff.sendEmail, true);
+  assert.equal(reminderClinicSmsOff.sendSms, false);
 });
 
 test('expediente: mismo teléfono con nombre distinto se detecta', () => {

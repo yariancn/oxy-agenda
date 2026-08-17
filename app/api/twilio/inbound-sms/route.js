@@ -13,13 +13,13 @@ import {
 import { bumpAgendaLiveRev } from '../../../../lib/agendaLiveRev.js';
 import { localeForClinic } from '../../../../lib/i18n.js';
 import { insertAuditLog, publicCancelAuditLabels } from '../../../../lib/auditLog.js';
+import { applySmsOptOut, isSmsOptOutKeyword } from '../../../../lib/smsOptOut.js';
 
 export async function POST(request) {
   try {
     const form = await request.formData();
     const from = String(form.get('From') || '');
     const body = String(form.get('Body') || '');
-    const reply = parseConfirmationReply(body);
 
     const twiml = (message) => {
       const text = message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -28,6 +28,38 @@ export async function POST(request) {
         headers: { 'Content-Type': 'text/xml' },
       });
     };
+
+    if (isSmsOptOutKeyword(body)) {
+      const supabase = getSupabaseAdmin(CLINIC_SHENANDOAH);
+      const result = await applySmsOptOut({
+        supabase,
+        clinicName: CLINIC_SHENANDOAH,
+        phone: from,
+        body,
+      });
+
+      const [{ data: companyConfig }, { data: staffRoster }] = await Promise.all([
+        selectCompanyConfigForClinic(supabase, CLINIC_SHENANDOAH),
+        supabase.from('users_staff').select('name, email, phone, notify_on_booking, is_active').eq('is_active', true),
+      ]);
+      await dispatchStaffConfirmationReplyAlert({
+        companyConfig: companyConfig || {},
+        staffRoster: staffRoster || [],
+        clinicName: CLINIC_SHENANDOAH,
+        clinicDisplayName: companyConfig?.name,
+        patientName: result.patientName || 'Patient',
+        date: '',
+        time: '',
+        equipment: '',
+        locale: localeForClinic(CLINIC_SHENANDOAH),
+        reply: 'declined',
+        replyText: `STOP / SMS opt-out${result.appointmentId ? ` · appt ${result.appointmentId}` : ''}`,
+      }).catch(() => null);
+
+      return twiml('You are unsubscribed from clinic text messages. Your appointment is marked pending cancellation until staff confirms. Reply START to opt in again, or call 7135913379.');
+    }
+
+    const reply = parseConfirmationReply(body);
 
     if (!reply) {
       return twiml('Reply YES to confirm or NO to cancel your appointment.');

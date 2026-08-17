@@ -179,6 +179,7 @@ import {
   NOTIFY_SETTING_FIELDS,
   resolveNotifyChannels,
   resolveNotifyChannelsForPatient,
+  resolveReminderHours,
   resolveSessionInstructions,
 } from '../lib/notifySettings';
 import {
@@ -206,6 +207,7 @@ import {
   CANCEL_REQUEST_STATUS,
   isCancelRequestPending,
 } from '../lib/appointmentManage';
+import { appointmentHasSmsOptOut, patientHasSmsOptOut } from '../lib/smsOptOut';
 
 export default function AppLayout() {
   // --- SEGURIDAD Y JERARQUÍA ---
@@ -313,7 +315,7 @@ export default function AppLayout() {
     master_pin: '000000',
     financial_pin: '123456',
     notify_on_booking: true,
-    reminder_hours: 24,
+    reminder_hours: 12,
     calendar_feed_enabled: false,
     calendar_feed_token: '',
     google_calendar_enabled: false,
@@ -465,8 +467,8 @@ export default function AppLayout() {
       id: 'reminder',
       title: locale === 'en' ? '5. Reminder before the visit' : '5. Recordatorio antes de la cita',
       when: locale === 'en'
-        ? `Sent automatically about ${dbCompanyConfig.reminder_hours || 24} hours before the appointment (once per day check).`
-        : `Se envía solo, unas ${dbCompanyConfig.reminder_hours || 24} horas antes de la cita (revisión una vez al día).`,
+        ? `Sent automatically about ${resolveReminderHours(dbCompanyConfig, activeClinic)} hours before the appointment (once per day check).`
+        : `Se envía solo, unas ${resolveReminderHours(dbCompanyConfig, activeClinic)} horas antes de la cita (revisión una vez al día).`,
       autoKey: 'notify_auto_reminder',
       defaultOn: true,
     },
@@ -1466,6 +1468,7 @@ export default function AppLayout() {
           google_calendar_id: resC.data.google_calendar_id || 'primary',
           google_calendar_connected: Boolean(resC.data.google_calendar_refresh_token),
           ticket_counter: Number(resC.data.ticket_counter) || 793,
+          reminder_hours: resolveReminderHours(resC.data, activeClinic),
         });
       } else {
         const clinicLocale = localeForClinic(activeClinic);
@@ -1484,7 +1487,7 @@ export default function AppLayout() {
           master_pin: '000000',
           financial_pin: '123456',
           notify_on_booking: true,
-          reminder_hours: 24,
+          reminder_hours: isShenandoah(clinicId) ? 24 : 12,
           ...defaultNotifySettings(clinicLocale),
           ...emptyEmailTemplateState(clinicLocale),
         };
@@ -6787,12 +6790,14 @@ export default function AppLayout() {
                                   min="1"
                                   max="72"
                                   disabled={!on}
-                                  value={dbCompanyConfig.reminder_hours ?? 24}
+                                  value={dbCompanyConfig.reminder_hours ?? resolveReminderHours(dbCompanyConfig, activeClinic)}
                                   onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, reminder_hours: Number(e.target.value) })}
                                   className="w-24 p-2.5 border border-slate-300 rounded-lg font-bold text-slate-900 bg-white disabled:opacity-50"
                                 />
                                 <span className="text-xs text-slate-500">
-                                  {locale === 'en' ? 'hours before (24 is recommended)' : 'horas antes (recomendado: 24)'}
+                                  {locale === 'en'
+                                    ? (isShenandoah(activeClinic) ? 'hours before (24 is typical in Houston)' : 'hours before (Mexico default: 12)')
+                                    : (isShenandoah(activeClinic) ? 'horas antes (en Houston suele ser 24)' : 'horas antes (México: 12)')}
                                 </span>
                               </div>
                             </div>
@@ -7901,7 +7906,9 @@ export default function AppLayout() {
                     </p>
                     <p className="text-xs text-amber-900/80 mt-1 leading-relaxed">
                       {selectedSlot.confirmation_status === CONFIRMATION_STATUS.DECLINED
-                        ? L.p.appt.cancelPendingSmsNoHint
+                        ? (appointmentHasSmsOptOut(selectedSlot)
+                          ? L.p.appt.cancelPendingSmsOptOutHint
+                          : L.p.appt.cancelPendingSmsNoHint)
                         : L.p.appt.cancelPendingHint}
                     </p>
                   </div>
@@ -8002,6 +8009,22 @@ export default function AppLayout() {
                     <p className="text-[10px] font-bold normal-case leading-relaxed">
                       {locale === 'en' ? selectedSlotConfirmationInfo.summaryEn : selectedSlotConfirmationInfo.summaryEs}
                     </p>
+                    {(appointmentHasSmsOptOut(selectedSlot) || patientHasSmsOptOut({
+                      notes: selectedSlot.notes,
+                      patientNotes: selectedSlot.patientNotes,
+                      confirmation_reply: selectedSlot.confirmation_reply,
+                    })) ? (
+                      <div className="rounded-lg border-2 border-orange-400 bg-orange-50 px-2 py-2">
+                        <p className="text-[10px] font-black uppercase text-orange-950">
+                          {locale === 'en' ? 'SMS opt-out (STOP)' : 'Opt-out de SMS (STOP)'}
+                        </p>
+                        <p className="text-[10px] font-bold normal-case text-orange-900 mt-1 leading-snug">
+                          {locale === 'en'
+                            ? 'This client unsubscribed from clinic texts. Treat as a cancellation pending staff approval.'
+                            : 'Este cliente se dio de baja de los SMS. Trátalo como cancelación pendiente de aprobar por staff.'}
+                        </p>
+                      </div>
+                    ) : null}
                     {selectedSlot.confirmation_status === CONFIRMATION_STATUS.PENDING ? (
                       <p className="text-[10px] font-black uppercase text-slate-700 bg-white/70 border border-slate-200 rounded-lg px-2 py-1.5">
                         {locale === 'en'
@@ -8431,6 +8454,22 @@ export default function AppLayout() {
                   ? '⭐ Resend first-visit message (email/SMS)'
                   : '⭐ Reenviar mensaje de primera cita (email/SMS)'}
               </button>
+              {(appointmentHasSmsOptOut(selectedSlot) || patientHasSmsOptOut({
+                notes: selectedSlot.notes,
+                patientNotes: selectedSlot.patientNotes,
+                confirmation_reply: selectedSlot.confirmation_reply,
+              })) ? (
+                <div className="mt-2 rounded-xl border-2 border-orange-400 bg-orange-50 p-3">
+                  <p className="text-[10px] font-black uppercase text-orange-950">
+                    {locale === 'en' ? 'SMS opt-out (STOP)' : 'Opt-out de SMS (STOP)'}
+                  </p>
+                  <p className="text-[10px] font-bold normal-case text-orange-900 mt-1 leading-snug">
+                    {locale === 'en'
+                      ? 'This client unsubscribed from clinic texts. Treat as a cancellation pending staff approval — do not send more SMS until they opt in.'
+                      : 'Este cliente se dio de baja de los SMS. Trátalo como cancelación pendiente de aprobar por staff; no envíes más SMS hasta que se vuelva a suscribir.'}
+                  </p>
+                </div>
+              ) : null}
               <p className="text-[8px] font-bold text-amber-800/90 normal-case leading-snug mt-1 px-1">
                 {locale === 'en'
                   ? 'Forces the first-visit template with session notes for this patient appointment.'

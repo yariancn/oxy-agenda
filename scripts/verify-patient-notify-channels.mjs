@@ -93,12 +93,12 @@ const emailOnlyReminder = resolveNotifyChannelsForPatient(clinicAllOn, 'reminder
 assert.equal(emailOnlyReminder.sendEmail, true);
 assert.equal(emailOnlyReminder.sendSms, false);
 
-// Patient opted out of both email and reminder SMS
+// Patient opted out of both email and reminder SMS — email still goes out (booking/changes/reminders)
 const optedOut = resolveNotifyChannelsForPatient(clinicAllOn, 'reminder', {
   prefers_email: false,
   prefers_sms_reminder: false,
 });
-assert.equal(optedOut.sendEmail, false);
+assert.equal(optedOut.sendEmail, true);
 assert.equal(optedOut.sendSms, false);
 
 // Clinic-wide SMS kill switch still blocks
@@ -112,15 +112,22 @@ assert.equal(clinicSmsOff.sendSms, false);
 assert.equal(getAutoNotifyBlockReason(clinicAllOn, 'reminder', 'es'), null);
 assert.equal(getAutoNotifyBlockReason({ notify_auto_reminder: false }, 'reminder', 'es') != null, true);
 
-// First visit always email + SMS (ignores patient opt-out and per-event toggles)
-const firstForced = resolveNotifyChannelsForPatient({
+// First visit: email always; SMS unless full STOP opt-out
+const firstDefault = resolveNotifyChannelsForPatient({
+  notify_channel_email: true,
+  notify_channel_sms: true,
+}, 'first', { prefers_email: true, prefers_sms: false, prefers_sms_reminder: true });
+assert.equal(firstDefault.sendEmail, true);
+assert.equal(firstDefault.sendSms, true);
+
+const firstStop = resolveNotifyChannelsForPatient({
   notify_channel_email: true,
   notify_channel_sms: true,
   notify_use_email_first: false,
   notify_use_sms_first: false,
 }, 'first', { prefers_email: false, prefers_sms: false, prefers_sms_reminder: false });
-assert.equal(firstForced.sendEmail, true);
-assert.equal(firstForced.sendSms, true);
+assert.equal(firstStop.sendEmail, true);
+assert.equal(firstStop.sendSms, false);
 
 const firstClinic = resolveNotifyChannels({
   notify_channel_email: true,
