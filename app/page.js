@@ -192,6 +192,7 @@ import {
   APPOINTMENT_LIST_COLUMNS_MIN,
   stripAppointmentSignatures,
 } from '../lib/agendaQueryColumns';
+import { extractMissingColumn } from '../lib/supabaseSelectSafe';
 import { useAgendaLiveSync } from '../lib/useAgendaLiveSync';
 import { useModalViewportLock } from '../lib/useModalViewportLock';
 import { liveSyncDateRange } from '../lib/liveSyncToken';
@@ -1148,12 +1149,17 @@ export default function AppLayout() {
             continue;
           }
           // Lean column lists may reference optional columns missing in one clinic schema.
+          // Strip only the missing column — never jump to a list that drops confirmation_*.
           if (
             result?.error
             && selectCols !== '*'
             && /column|schema cache/i.test(result.error.message || '')
           ) {
-            if (table === 'appointments' && selectCols === APPOINTMENT_LIST_COLUMNS) {
+            const missing = extractMissingColumn(result.error);
+            const cols = String(selectCols).split(',').map((c) => c.trim()).filter(Boolean);
+            if (missing && cols.includes(missing) && cols.length > 1) {
+              selectCols = cols.filter((c) => c !== missing).join(', ');
+            } else if (table === 'appointments' && selectCols === APPOINTMENT_LIST_COLUMNS) {
               selectCols = APPOINTMENT_LIST_COLUMNS_MIN;
             } else {
               selectCols = '*';
@@ -1656,6 +1662,10 @@ export default function AppLayout() {
         sessionGroup: prev.sessionGroup,
         groupMembers: prev.groupMembers,
         is_new_patient: resolvedStar,
+        confirmation_status: fresh.confirmation_status ?? prev.confirmation_status,
+        confirmation_sent_at: fresh.confirmation_sent_at ?? prev.confirmation_sent_at,
+        confirmation_replied_at: fresh.confirmation_replied_at ?? prev.confirmation_replied_at,
+        confirmation_reply: fresh.confirmation_reply ?? prev.confirmation_reply,
       };
     });
   }, [dbAppointments, dbPatients, selectedSlot?.id]);
@@ -3089,7 +3099,7 @@ export default function AppLayout() {
         confirmation_reply: null,
       } : prev));
       setDbAppointments((prev) => prev.map((row) => (
-        row.id === selectedSlot.id
+        String(row.id) === String(selectedSlot.id)
           ? {
             ...row,
             confirmation_status: CONFIRMATION_STATUS.PENDING,
@@ -3099,10 +3109,9 @@ export default function AppLayout() {
           }
           : row
       )));
-      broadcastLiveDataUpdated(activeClinic);
       alert(locale === 'en'
-        ? (isResend ? 'Confirmation SMS resent.' : 'Confirmation SMS sent.')
-        : (isResend ? 'SMS de confirmación reenviado.' : 'SMS de confirmación enviado.'));
+        ? (isResend ? 'Confirmation SMS resent. Status should now show Waiting for YES/NO.' : 'Confirmation SMS sent. Status should now show Waiting for YES/NO.')
+        : (isResend ? 'SMS de confirmación reenviado. El estado debe pasar a Esperando SI/NO.' : 'SMS de confirmación enviado. El estado debe pasar a Esperando SI/NO.'));
     } catch (err) {
       alert(err?.message || (locale === 'en' ? 'Could not send confirmation SMS.' : 'No se pudo enviar la confirmación SMS.'));
     } finally {
