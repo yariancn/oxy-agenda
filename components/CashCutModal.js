@@ -16,6 +16,13 @@ import {
   parseCashCutAuditDetails,
 } from '../lib/cashCut';
 
+function formatLocal(msOrIso, locale) {
+  if (!msOrIso) return '';
+  const t = typeof msOrIso === 'number' ? msOrIso : Date.parse(msOrIso);
+  if (!Number.isFinite(t) || Number.isNaN(t)) return '';
+  return new Date(t).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX');
+}
+
 export default function CashCutModal({
   open,
   onClose,
@@ -36,10 +43,16 @@ export default function CashCutModal({
   const [lastCut, setLastCut] = useState(null);
   const [countedInput, setCountedInput] = useState('');
   const [notes, setNotes] = useState('');
+  const [amountConfirmed, setAmountConfirmed] = useState(false);
   const [error, setError] = useState('');
   const [doneCut, setDoneCut] = useState(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const sinceMs = lastCut ? cashCutRowTimestampMs(lastCut) : 0;
+  const periodFromLabel = sinceMs > 0
+    ? formatLocal(sinceMs, locale)
+    : (es ? 'Sin corte previo (todo el efectivo registrado)' : 'No prior cut (all recorded cash)');
+  const periodToLabel = formatLocal(nowMs, locale);
 
   const summary = useMemo(
     () => collectCashSalesSinceCut({ patients, sessionGroups, sinceMs }),
@@ -52,10 +65,14 @@ export default function CashCutModal({
   );
 
   const counted = parseFloat(countedInput);
-  const countedOk = Number.isFinite(counted);
+  const countedOk = Number.isFinite(counted) && String(countedInput).trim() !== '';
   const difference = countedOk
     ? Math.round((counted - summary.expectedCash) * 100) / 100
     : null;
+  const mismatch = countedOk && difference !== 0;
+  const notesTrimmed = String(notes || '').trim();
+  const notesOk = !mismatch || notesTrimmed.length >= 3;
+  const canConfirm = !loading && !saving && countedOk && amountConfirmed && notesOk;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -64,6 +81,8 @@ export default function CashCutModal({
     setDoneCut(null);
     setCountedInput('');
     setNotes('');
+    setAmountConfirmed(false);
+    setNowMs(Date.now());
     setLoading(true);
 
     (async () => {
@@ -76,7 +95,7 @@ export default function CashCutModal({
           .from('audit_logs')
           .select('*')
           .order('timestamp', { ascending: false })
-          .limit(80);
+          .limit(120);
         if (qErr) throw qErr;
         const cut = (data || []).find(isCashCutAuditRow) || null;
         if (!cancelled) setLastCut(cut);
@@ -93,39 +112,30 @@ export default function CashCutModal({
     return () => { cancelled = true; };
   }, [open, activeSupabase, es]);
 
-  useEffect(() => {
-    if (!open || loading) return;
-    setCountedInput(String(summary.expectedCash.toFixed(2)));
-  }, [open, loading, summary.expectedCash]);
-
   if (!open) return null;
 
   const lastDetails = parseCashCutAuditDetails(lastCut?.details);
-  const lastWhen = lastCut
-    ? new Date(cashCutRowTimestampMs(lastCut) || Date.now()).toLocaleString(es ? 'es-MX' : 'en-US')
-    : null;
 
   const handleConfirm = async () => {
+    setNowMs(Date.now());
     if (!countedOk) {
-      setError(es ? 'Escribe el monto contado / retirado.' : 'Enter the counted / withdrawn amount.');
+      setError(es ? 'Escribe el monto que se está retirando.' : 'Enter the amount being withdrawn.');
       return;
     }
-    if (difference !== 0) {
-      const ok = window.confirm(
-        es
-          ? `El efectivo contado ($${counted.toFixed(2)}) NO coincide con lo esperado ($${summary.expectedCash.toFixed(2)}). Diferencia: $${difference.toFixed(2)}. ¿Registrar el corte de todos modos?`
-          : `Counted cash ($${counted.toFixed(2)}) does NOT match expected ($${summary.expectedCash.toFixed(2)}). Difference: $${difference.toFixed(2)}. Record the cut anyway?`,
-      );
-      if (!ok) return;
-    } else {
-      const ok = window.confirm(
-        es
-          ? `Confirmar corte: retirar $${counted.toFixed(2)} en efectivo (${summary.ticketCount} ticket(s)). ¿Continuar?`
-          : `Confirm cash cut: withdraw $${counted.toFixed(2)} (${summary.ticketCount} ticket(s)). Continue?`,
-      );
-      if (!ok) return;
+    if (!amountConfirmed) {
+      setError(es
+        ? 'Marca la casilla confirmando el monto a retirar.'
+        : 'Check the box confirming the withdrawal amount.');
+      return;
+    }
+    if (mismatch && notesTrimmed.length < 3) {
+      setError(es
+        ? 'Si no coincide, la nota es obligatoria (explica la diferencia).'
+        : 'If amounts do not match, a note is required (explain the difference).');
+      return;
     }
 
+    const closedAtIso = new Date().toISOString();
     const cut = buildCashCutRecord({
       expectedCash: summary.expectedCash,
       countedCash: counted,
@@ -133,9 +143,11 @@ export default function CashCutModal({
       closedBy: currentUserName || '',
       clinic: activeClinic,
       locale,
-      notes,
+      notes: notesTrimmed,
       sinceMs,
-      previousCutAt: lastDetails?.closedAt || null,
+      previousCutAt: lastDetails?.closedAt || (sinceMs > 0 ? new Date(sinceMs).toISOString() : null),
+      periodFrom: sinceMs > 0 ? new Date(sinceMs).toISOString() : null,
+      periodTo: closedAtIso,
     });
 
     setSaving(true);
@@ -196,8 +208,8 @@ export default function CashCutModal({
           </h2>
           <p className="text-emerald-100 text-xs mt-1 font-medium">
             {es
-              ? 'Solo efectivo. Confirma que lo retirado coincide con lo ingresado desde el último corte.'
-              : 'Cash only. Confirm withdrawn cash matches what came in since the last cut.'}
+              ? 'Solo efectivo. El periodo va desde el último corte hasta este momento.'
+              : 'Cash only. The period runs from the last cut until right now.'}
           </p>
         </div>
 
@@ -206,21 +218,33 @@ export default function CashCutModal({
             <p className="text-sm font-bold text-slate-500 uppercase">{es ? 'Cargando…' : 'Loading…'}</p>
           ) : (
             <>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-bold uppercase text-slate-700 space-y-1">
+              <div className="rounded-xl border-2 border-slate-300 bg-slate-50 p-3 text-xs font-bold uppercase text-slate-800 space-y-2">
+                <p className="text-[10px] font-black tracking-widest text-slate-500">
+                  {es ? 'Periodo de este corte' : 'Period for this cut'}
+                </p>
                 <p>
-                  {es ? 'Último corte' : 'Last cut'}
-                  :
+                  <span className="text-slate-500">{es ? 'Desde' : 'From'}:</span>
                   {' '}
-                  {lastWhen || (es ? 'Ninguno (todo el historial en efectivo)' : 'None (all cash history)')}
+                  {periodFromLabel}
+                </p>
+                <p>
+                  <span className="text-slate-500">{es ? 'Hasta' : 'To'}:</span>
+                  {' '}
+                  {periodToLabel}
                 </p>
                 {lastDetails?.closedBy ? (
-                  <p>{es ? 'Por' : 'By'}: {lastDetails.closedBy}</p>
+                  <p className="text-[10px] text-slate-500 normal-case">
+                    {es ? 'Último corte por' : 'Last cut by'}
+                    :
+                    {' '}
+                    {lastDetails.closedBy}
+                  </p>
                 ) : null}
               </div>
 
               <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-4">
                 <p className="text-[10px] font-black uppercase text-emerald-800 tracking-widest mb-1">
-                  {es ? 'Efectivo esperado' : 'Expected cash'}
+                  {es ? 'Efectivo esperado en el periodo' : 'Expected cash in period'}
                 </p>
                 <p className="text-3xl font-black text-emerald-950">
                   ${summary.expectedCash.toFixed(2)}
@@ -237,7 +261,7 @@ export default function CashCutModal({
               {breakdown.length > 0 && (
                 <div className="rounded-xl border border-slate-200 p-3">
                   <p className="text-[10px] font-black uppercase text-slate-500 mb-2">
-                    {es ? 'Otros métodos (referencia, no entran al corte)' : 'Other methods (reference only)'}
+                    {es ? 'Otros métodos en el periodo (referencia)' : 'Other methods in period (reference)'}
                   </p>
                   <ul className="space-y-1 text-xs font-bold text-slate-700">
                     {breakdown.map((row) => (
@@ -272,33 +296,61 @@ export default function CashCutModal({
 
               <div>
                 <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">
-                  {es ? 'Efectivo contado / retirado' : 'Counted / withdrawn cash'}
+                  {es ? 'Monto a retirar (escribe el valor contado)' : 'Amount to withdraw (enter counted value)'}
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   value={countedInput}
-                  onChange={(e) => setCountedInput(e.target.value)}
+                  onChange={(e) => {
+                    setCountedInput(e.target.value);
+                    setAmountConfirmed(false);
+                  }}
+                  placeholder="0.00"
                   className="w-full border-2 border-emerald-400 rounded-xl p-3 font-black text-lg text-emerald-950"
                 />
                 {difference != null && (
                   <p className={`mt-2 text-xs font-black uppercase ${difference === 0 ? 'text-emerald-700' : 'text-orange-700'}`}>
                     {difference === 0
                       ? (es ? '✓ Coincide con lo esperado' : '✓ Matches expected')
-                      : (es ? `Diferencia: $${difference.toFixed(2)}` : `Difference: $${difference.toFixed(2)}`)}
+                      : (es ? `No coincide · diferencia $${difference.toFixed(2)}` : `Mismatch · difference $${difference.toFixed(2)}`)}
                   </p>
                 )}
               </div>
 
+              <label className={`flex items-start gap-3 rounded-xl border-2 p-3 cursor-pointer ${amountConfirmed ? 'border-emerald-500 bg-emerald-50' : 'border-amber-300 bg-amber-50'}`}>
+                <input
+                  type="checkbox"
+                  checked={amountConfirmed}
+                  disabled={!countedOk}
+                  onChange={(e) => setAmountConfirmed(e.target.checked)}
+                  className="mt-0.5 w-5 h-5 shrink-0"
+                />
+                <span className="text-xs font-black uppercase text-slate-800 leading-snug">
+                  {countedOk
+                    ? (es
+                      ? `Confirmo que se retiran $${counted.toFixed(2)} ${currency}`
+                      : `I confirm withdrawing $${counted.toFixed(2)} ${currency}`)
+                    : (es
+                      ? 'Primero escribe el monto a retirar'
+                      : 'Enter the withdrawal amount first')}
+                </span>
+              </label>
+
               <div>
                 <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">
-                  {es ? 'Notas (opcional)' : 'Notes (optional)'}
+                  {mismatch
+                    ? (es ? 'Nota (obligatoria: explica la diferencia)' : 'Note (required: explain the difference)')
+                    : (es ? 'Notas (opcional)' : 'Notes (optional)')}
                 </label>
                 <input
                   type="text"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm font-bold"
+                  className={`w-full border-2 rounded-lg p-2 text-sm font-bold ${mismatch && !notesOk ? 'border-orange-400 bg-orange-50' : 'border-slate-300'}`}
+                  placeholder={mismatch
+                    ? (es ? 'Ej. faltante por cambio, sobrante, error de ticket…' : 'E.g. short change, overage, ticket error…')
+                    : ''}
                 />
               </div>
 
@@ -335,9 +387,9 @@ export default function CashCutModal({
           {!doneCut ? (
             <button
               type="button"
-              disabled={loading || saving}
+              disabled={!canConfirm}
               onClick={handleConfirm}
-              className="flex-[1.4] bg-emerald-700 text-white font-black uppercase text-xs py-3 rounded-xl disabled:opacity-50"
+              className="flex-[1.4] bg-emerald-700 text-white font-black uppercase text-xs py-3 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {saving
                 ? (es ? 'Guardando…' : 'Saving…')
