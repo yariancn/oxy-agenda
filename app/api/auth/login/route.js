@@ -47,7 +47,7 @@ export async function POST(request) {
       || trustedDevice?.email
       || normalizeStaffEmail(result.user?.email);
 
-    if (loginEmail && result.user?.id !== 'admin' && (rememberDevice || trustedDevice?.email)) {
+    if (loginEmail && result.user?.id !== 'admin' && rememberDevice) {
       const deviceToken = createStaffDeviceToken(loginEmail, {
         pinVerifiedAt: Date.now(),
         ip: getRequestClientIp(request),
@@ -56,6 +56,8 @@ export async function POST(request) {
       if (deviceToken) {
         response.cookies.set(STAFF_DEVICE_COOKIE, deviceToken, staffDeviceCookieOptions());
       }
+    } else {
+      response.cookies.set(STAFF_DEVICE_COOKIE, '', { ...staffDeviceCookieOptions(), maxAge: 0 });
     }
 
     return response;

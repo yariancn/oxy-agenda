@@ -79,7 +79,7 @@ import {
 import { insertStaffAppointment, updateStaffAppointment, updateAppointmentNotesAndContact } from '../lib/staffAppointmentSave';
 import { sortOccurrenceDates } from '../lib/appointmentRecurrence';
 import { getRepeatDateAvailability } from '../lib/repeatDateAvailability';
-import { resolveStaffActiveClinic, saveStaffActiveClinic } from '../lib/staffClinicPrefs';
+import { clearStaffActiveClinic, resolveStaffActiveClinic, saveStaffActiveClinic } from '../lib/staffClinicPrefs';
 import {
   applyEquipmentRepairsToAppointments,
   autoRepairOrphanEquipmentNames,
@@ -214,7 +214,7 @@ export default function AppLayout() {
   const [currentUser, setCurrentUser] = useState(null);
   const [loginPin, setLoginPin] = useState('');
   const [loginEmail, setLoginEmail] = useState('');
-  const [rememberDevice, setRememberDevice] = useState(true);
+  const [rememberDevice, setRememberDevice] = useState(false);
   const [trustedDevice, setTrustedDevice] = useState(null);
   const [loginModeTrusted, setLoginModeTrusted] = useState(false);
   const [authBootstrapping, setAuthBootstrapping] = useState(true);
@@ -1824,6 +1824,7 @@ export default function AppLayout() {
     setLoginModeTrusted(false);
     setLoginEmail('');
     setLoginPin('');
+    setRememberDevice(false);
   };
 
   const handleLoginSubmit = async () => {
@@ -1889,11 +1890,18 @@ export default function AppLayout() {
       // ignore
     }
     setCurrentUser(null);
+    setLoginEmail('');
     setLoginPin('');
+    setPinInput('');
+    setTrustedDevice(null);
+    setLoginModeTrusted(false);
+    setRememberDevice(false);
     setActiveTab('Agenda');
     setIsReportsUnlocked(false);
     setActiveClinic(CLINIC_OXYGENDGL);
     setDbStatus('sin_sesion');
+    clearStaffActiveClinic();
+    clearPendingBitacoraSeal();
   };
 
   const handleFinancialUnlock = () => {
@@ -5225,7 +5233,7 @@ export default function AppLayout() {
                  <label className="block text-[10px] font-black uppercase text-slate-400 text-left mb-1 ml-1">{L.loginEmail}</label>
                  <input
                    type="email"
-                   autoComplete="username"
+                   autoComplete="off"
                    value={loginEmail}
                    onChange={(e) => setLoginEmail(e.target.value)}
                    disabled={isLoggingIn}
@@ -5247,7 +5255,7 @@ export default function AppLayout() {
              <label className="block text-[10px] font-black uppercase text-slate-400 text-left mb-1 ml-1">NIP</label>
              <input 
                 type="password"
-                autoComplete="current-password"
+                autoComplete="off"
                 maxLength="10" 
                 value={loginPin} 
                 onChange={e => setLoginPin(e.target.value)} 

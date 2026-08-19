@@ -55,6 +55,11 @@ import { buildPatientSmsMessage } from '../lib/patientStaffSms.js';
 import { isAppointmentInReminderWindow } from '../lib/appointmentReminder.js';
 import { canAutoLoginWithoutPin, hashClientIp } from '../lib/staffDeviceTrust.js';
 import { resolveNotifyChannels, resolveNotifyChannelsForPatient } from '../lib/notifySettings.js';
+import {
+  getPreviousWeekRange,
+  summarizeSalesRows,
+} from '../lib/weeklySalesReport.js';
+import { PAYMENT_METHOD_KEYS } from '../lib/paymentMethod.js';
 
 process.env.STAFF_SESSION_SECRET = process.env.STAFF_SESSION_SECRET || 'test-secret-for-simulations';
 let passed = 0;
@@ -623,6 +628,28 @@ test('recordatorio: ventana diaria según horas antes', () => {
   };
   assert.equal(isAppointmentInReminderWindow(inWindow, 24, now), true);
   assert.equal(isAppointmentInReminderWindow({ full_date: '2026-07-20', time: '15:00' }, 24, now), false);
+});
+
+test('reporte semanal GDL: semana anterior lun-dom', () => {
+  const monday = new Date('2026-08-17T12:00:00-06:00');
+  const range = getPreviousWeekRange('America/Mexico_City', monday);
+  assert.equal(range.startDate, '2026-08-10');
+  assert.equal(range.endDate, '2026-08-16');
+});
+
+test('reporte semanal GDL: subtotales por método de pago', () => {
+  const summary = summarizeSalesRows([
+    { price: 1000, paymentMethod: 'Efectivo' },
+    { price: 500, paymentMethod: 'Transferencia' },
+    { price: 800, paymentMethod: 'Tarjeta de Crédito' },
+    { price: 300, paymentMethod: 'Tarjeta de Débito' },
+  ]);
+  assert.equal(summary.total, 2600);
+  assert.equal(summary.txCount, 4);
+  assert.equal(summary.byMethod[PAYMENT_METHOD_KEYS.CASH], 1000);
+  assert.equal(summary.byMethod[PAYMENT_METHOD_KEYS.TRANSFER], 500);
+  assert.equal(summary.byMethod[PAYMENT_METHOD_KEYS.CREDIT], 800);
+  assert.equal(summary.byMethod[PAYMENT_METHOD_KEYS.DEBIT], 300);
 });
 
 console.log(`\n${passed} pruebas OK\n`);
