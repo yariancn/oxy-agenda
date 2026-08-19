@@ -59,6 +59,7 @@ import {
   getPreviousWeekRange,
   summarizeSalesRows,
 } from '../lib/weeklySalesReport.js';
+import { isMondayInTimezone } from '../lib/dailyCron.js';
 import { PAYMENT_METHOD_KEYS } from '../lib/paymentMethod.js';
 
 process.env.STAFF_SESSION_SECRET = process.env.STAFF_SESSION_SECRET || 'test-secret-for-simulations';
@@ -650,6 +651,13 @@ test('reporte semanal GDL: subtotales por método de pago', () => {
   assert.equal(summary.byMethod[PAYMENT_METHOD_KEYS.TRANSFER], 500);
   assert.equal(summary.byMethod[PAYMENT_METHOD_KEYS.CREDIT], 800);
   assert.equal(summary.byMethod[PAYMENT_METHOD_KEYS.DEBIT], 300);
+});
+
+test('cron diario: reporte PDF solo los lunes CDMX', () => {
+  const monday = new Date('2026-08-17T12:00:00-06:00');
+  const tuesday = new Date('2026-08-18T12:00:00-06:00');
+  assert.equal(isMondayInTimezone('America/Mexico_City', monday), true);
+  assert.equal(isMondayInTimezone('America/Mexico_City', tuesday), false);
 });
 
 console.log(`\n${passed} pruebas OK\n`);
