@@ -60,6 +60,7 @@ import {
   summarizeSalesRows,
 } from '../lib/weeklySalesReport.js';
 import { isMondayInTimezone } from '../lib/dailyCron.js';
+import { isVercelCronRequest } from '../lib/cronRequest.js';
 import { PAYMENT_METHOD_KEYS } from '../lib/paymentMethod.js';
 
 process.env.STAFF_SESSION_SECRET = process.env.STAFF_SESSION_SECRET || 'test-secret-for-simulations';
@@ -658,6 +659,19 @@ test('cron diario: reporte PDF solo los lunes CDMX', () => {
   const tuesday = new Date('2026-08-18T12:00:00-06:00');
   assert.equal(isMondayInTimezone('America/Mexico_City', monday), true);
   assert.equal(isMondayInTimezone('America/Mexico_City', tuesday), false);
+});
+
+test('cron auth: acepta invocación de Vercel sin CRON_SECRET', () => {
+  const req = {
+    headers: {
+      get(name) {
+        if (name === 'x-vercel-cron') return '1';
+        if (name === 'user-agent') return 'vercel-cron/1.0';
+        return '';
+      },
+    },
+  };
+  assert.equal(isVercelCronRequest(req), true);
 });
 
 console.log(`\n${passed} pruebas OK\n`);
