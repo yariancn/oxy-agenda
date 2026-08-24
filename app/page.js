@@ -119,7 +119,7 @@ import { defaultEquipmentForClinic } from '../lib/screenshotEquipment';
 import { getMissingAppointmentFields, resolveAppointmentDraft } from '../lib/appointmentFormValidation';
 import { normalizeAppointmentTime } from '../lib/screenshotAppointmentParse';
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
-import { formatClinicDateIso, getClinicNow } from '../lib/clinicClock';
+import { formatClinicDateIso, getClinicNow, isPastCalendarDay } from '../lib/clinicClock';
 import { isAssessmentService } from '../lib/assessmentService';
 import {
   buildCalendarFeedUrl,
@@ -907,12 +907,8 @@ export default function AppLayout() {
     return h * 60 + m;
   };
 
-  const isPastTime = (dateStr, timeStr) => {
-    if (!dateStr || !clinicNow.dateStr) return false;
-    if (dateStr < clinicNow.dateStr) return true;
-    if (dateStr === clinicNow.dateStr && getMinutes(timeStr) < clinicNow.mins) return true;
-    return false;
-  };
+  /** Staff may book/move same-day earlier hours; only prior calendar days are blocked (moves need 0000). */
+  const isPriorCalendarDay = (dateStr) => isPastCalendarDay(dateStr, clinicNow.dateStr);
 
   /** Seal/sign allowed for today and past calendar days; blocked for future days. */
   const isFutureAppointmentDay = (app) => {
@@ -3635,8 +3631,8 @@ export default function AppLayout() {
       pastOverride: false,
     };
 
-    // iPad/Safari often blocks window.prompt — use an in-app modal instead.
-    if (isPastTime(newFullDate, newTime)) {
+    // Prior calendar days need code 0000. Same-day earlier hours are allowed for staff.
+    if (isPriorCalendarDay(newFullDate)) {
       setPastMoveAuth({ draft, code: '' });
       return false;
     }
@@ -4551,7 +4547,7 @@ export default function AppLayout() {
                   });
                   return;
                 }
-                if (isPastTime(fullDate, timeStr)) {
+                if (isPriorCalendarDay(fullDate)) {
                   alert(a('pastScheduleAppt'));
                   return;
                 }
@@ -4606,7 +4602,7 @@ export default function AppLayout() {
                 });
                 return;
               }
-              if (isPastTime(fullDate, time)) {
+              if (isPriorCalendarDay(fullDate)) {
                 alert(a('pastScheduleAppt'));
                 return;
               }
@@ -4658,7 +4654,7 @@ export default function AppLayout() {
       }
 
       const apptDate = slot.fullDate || slot.full_date || currentFullDate;
-      if (isPastTime(apptDate, slot.time) && slot.status !== 'booked') {
+      if (isPriorCalendarDay(apptDate) && slot.status !== 'booked') {
         return alert(staffAlert(locale, 'pastSchedule'));
       }
 

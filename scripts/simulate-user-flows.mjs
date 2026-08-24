@@ -63,6 +63,7 @@ import { isMondayInTimezone } from '../lib/dailyCron.js';
 import { isVercelCronRequest } from '../lib/cronRequest.js';
 import { PAYMENT_METHOD_KEYS } from '../lib/paymentMethod.js';
 import { validatePatientBlockFields } from '../lib/ensurePatient.js';
+import { isPastCalendarDay, isPastDateTime } from '../lib/clinicClock.js';
 
 process.env.STAFF_SESSION_SECRET = process.env.STAFF_SESSION_SECRET || 'test-secret-for-simulations';
 let passed = 0;
@@ -692,6 +693,16 @@ test('bloqueo paciente: motivo obligatorio al activar', () => {
     validatePatientBlockFields({ is_blocked: false, block_reason: '' }),
     null,
   );
+});
+
+test('staff: mismo día con hora pasada se puede agendar', () => {
+  const today = '2026-08-24';
+  assert.equal(isPastCalendarDay(today, today), false);
+  assert.equal(isPastCalendarDay('2026-08-23', today), true);
+  assert.equal(isPastCalendarDay('2026-08-25', today), false);
+  // Same-day 9:00 AM when now is 10:30 AM — past datetime, but not prior calendar day
+  assert.equal(isPastDateTime(today, 9 * 60, { dateStr: today, mins: 10 * 60 + 30 }), true);
+  assert.equal(isPastCalendarDay(today, today), false);
 });
 
 console.log(`\n${passed} pruebas OK\n`);
