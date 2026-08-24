@@ -8,7 +8,7 @@ import {
   CASH_CUT_AUDIT_ACTION,
   CASH_CUT_AUDIT_ACTION_EN,
   buildCashCutRecord,
-  buildCashCutTicketHtml,
+  buildCashCutDualCopyHtml,
   cashCutRowTimestampMs,
   collectCashSalesSinceCut,
   formatMethodBreakdown,
@@ -42,6 +42,8 @@ export default function CashCutModal({
   const [saving, setSaving] = useState(false);
   const [lastCut, setLastCut] = useState(null);
   const [countedInput, setCountedInput] = useState('');
+  const [deliveredBy, setDeliveredBy] = useState('');
+  const [receivedBy, setReceivedBy] = useState('');
   const [notes, setNotes] = useState('');
   const [amountConfirmed, setAmountConfirmed] = useState(false);
   const [error, setError] = useState('');
@@ -71,8 +73,11 @@ export default function CashCutModal({
     : null;
   const mismatch = countedOk && difference !== 0;
   const notesTrimmed = String(notes || '').trim();
+  const deliveredTrimmed = String(deliveredBy || '').trim();
+  const receivedTrimmed = String(receivedBy || '').trim();
+  const namesOk = deliveredTrimmed.length >= 2 && receivedTrimmed.length >= 2;
   const notesOk = !mismatch || notesTrimmed.length >= 3;
-  const canConfirm = !loading && !saving && countedOk && amountConfirmed && notesOk;
+  const canConfirm = !loading && !saving && countedOk && amountConfirmed && notesOk && namesOk;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -80,6 +85,8 @@ export default function CashCutModal({
     setError('');
     setDoneCut(null);
     setCountedInput('');
+    setDeliveredBy(String(currentUserName || '').trim());
+    setReceivedBy('');
     setNotes('');
     setAmountConfirmed(false);
     setNowMs(Date.now());
@@ -110,7 +117,7 @@ export default function CashCutModal({
     })();
 
     return () => { cancelled = true; };
-  }, [open, activeSupabase, es]);
+  }, [open, activeSupabase, es, currentUserName]);
 
   if (!open) return null;
 
@@ -134,13 +141,21 @@ export default function CashCutModal({
         : 'If amounts do not match, a note is required (explain the difference).');
       return;
     }
+    if (!namesOk) {
+      setError(es
+        ? 'Indica quién entrega y quién recibe el efectivo (nombre completo).'
+        : 'Enter who delivers and who receives the cash (full name).');
+      return;
+    }
 
     const closedAtIso = new Date().toISOString();
     const cut = buildCashCutRecord({
       expectedCash: summary.expectedCash,
       countedCash: counted,
       sales: summary.sales,
-      closedBy: currentUserName || '',
+      closedBy: deliveredTrimmed,
+      deliveredBy: deliveredTrimmed,
+      receivedBy: receivedTrimmed,
       clinic: activeClinic,
       locale,
       notes: notesTrimmed,
@@ -172,14 +187,14 @@ export default function CashCutModal({
         changed_by: currentUserName,
       });
 
-      const html = buildCashCutTicketHtml({
+      const html = buildCashCutDualCopyHtml({
         cut,
         companyConfig,
         clinicName: activeClinic,
         locale,
         currency,
       });
-      await printThermalHtml(html, es ? 'Corte efectivo' : 'Cash cut');
+      await printThermalHtml(html, es ? 'Corte efectivo (2 copias)' : 'Cash cut (2 copies)');
     } catch (err) {
       setError(err?.message || (es ? 'No se pudo guardar el corte.' : 'Could not save cash cut.'));
     } finally {
@@ -189,14 +204,14 @@ export default function CashCutModal({
 
   const reprint = async () => {
     if (!doneCut) return;
-    const html = buildCashCutTicketHtml({
+    const html = buildCashCutDualCopyHtml({
       cut: doneCut,
       companyConfig,
       clinicName: activeClinic,
       locale,
       currency,
     });
-    await printThermalHtml(html, es ? 'Corte efectivo' : 'Cash cut');
+    await printThermalHtml(html, es ? 'Corte efectivo (2 copias)' : 'Cash cut (2 copies)');
   };
 
   return (
@@ -232,12 +247,20 @@ export default function CashCutModal({
                   {' '}
                   {periodToLabel}
                 </p>
-                {lastDetails?.closedBy ? (
+                {lastDetails?.deliveredBy || lastDetails?.closedBy ? (
                   <p className="text-[10px] text-slate-500 normal-case">
-                    {es ? 'Último corte por' : 'Last cut by'}
+                    {es ? 'Último corte — entrega' : 'Last cut — delivered by'}
                     :
                     {' '}
-                    {lastDetails.closedBy}
+                    {lastDetails.deliveredBy || lastDetails.closedBy}
+                    {lastDetails.receivedBy ? (
+                      <>
+                        {' · '}
+                        {es ? 'recibe' : 'received by'}
+                        {' '}
+                        {lastDetails.receivedBy}
+                      </>
+                    ) : null}
                   </p>
                 ) : null}
               </div>
@@ -293,6 +316,33 @@ export default function CashCutModal({
                   </ul>
                 </div>
               )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">
+                    {es ? 'Quién entrega el efectivo' : 'Who delivers the cash'}
+                  </label>
+                  <input
+                    type="text"
+                    value={deliveredBy}
+                    onChange={(e) => setDeliveredBy(e.target.value)}
+                    className="w-full border-2 border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-900"
+                    placeholder={es ? 'Nombre de quien entrega' : 'Deliverer name'}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">
+                    {es ? 'Quién recibe el efectivo' : 'Who receives the cash'}
+                  </label>
+                  <input
+                    type="text"
+                    value={receivedBy}
+                    onChange={(e) => setReceivedBy(e.target.value)}
+                    className={`w-full border-2 rounded-lg p-2.5 text-sm font-bold text-slate-900 ${receivedTrimmed.length >= 2 ? 'border-slate-300' : 'border-amber-400 bg-amber-50'}`}
+                    placeholder={es ? 'Nombre de quien recibe' : 'Receiver name'}
+                  />
+                </div>
+              </div>
 
               <div>
                 <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">
@@ -361,14 +411,16 @@ export default function CashCutModal({
               {doneCut ? (
                 <div className="rounded-xl border border-emerald-400 bg-emerald-50 p-3 space-y-2">
                   <p className="text-sm font-black uppercase text-emerald-900">
-                    {es ? 'Corte guardado. Ticket enviado a imprimir.' : 'Cut saved. Print dialog opened.'}
+                    {es
+                      ? 'Corte guardado. Se imprimen 2 copias (entrega y recibe).'
+                      : 'Cut saved. Printing 2 copies (deliverer and receiver).'}
                   </p>
                   <button
                     type="button"
                     onClick={reprint}
                     className="w-full bg-emerald-700 text-white font-black uppercase text-xs py-2.5 rounded-lg"
                   >
-                    {es ? 'Reimprimir ticket de retiro' : 'Reprint withdrawal ticket'}
+                    {es ? 'Reimprimir 2 copias' : 'Reprint 2 copies'}
                   </button>
                 </div>
               ) : null}
@@ -393,7 +445,7 @@ export default function CashCutModal({
             >
               {saving
                 ? (es ? 'Guardando…' : 'Saving…')
-                : (es ? 'Confirmar corte e imprimir' : 'Confirm cut & print')}
+                : (es ? 'Confirmar corte e imprimir (2 copias)' : 'Confirm cut & print (2 copies)')}
             </button>
           ) : null}
         </div>
