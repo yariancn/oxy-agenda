@@ -13,6 +13,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { SESSION_PRESETS } from '../lib/sessionPresets.js';
+import { blockedSlotAppliesToDate } from '../lib/blockedSlots.js';
 
 const supabaseGdl = createClient(
   process.env.SUPABASE_GDL_URL || process.env.NEXT_PUBLIC_SUPABASE_GDL_URL,
@@ -227,7 +228,7 @@ async function seedWeek(weekOffset, services, config, existingApps, blocked) {
         return overlaps(a, row);
       });
       const clashBlocked = blocked.some((b) => {
-        if (b.date !== w.fullDate) return false;
+        if (!blockedSlotAppliesToDate(b, w.fullDate)) return false;
         if (!b.is_global && b.equipment !== equipment) return false;
         const bStart = getMinutes(b.start_time);
         const bEnd = getMinutes(b.end_time);

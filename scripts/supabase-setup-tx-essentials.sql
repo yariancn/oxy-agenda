@@ -91,6 +91,9 @@ ALTER TABLE appointments
 ALTER TABLE appointments ADD COLUMN IF NOT EXISTS clinic text DEFAULT 'Shenandoah';
 ALTER TABLE services ADD COLUMN IF NOT EXISTS clinic text DEFAULT 'Shenandoah';
 ALTER TABLE blocked_slots ADD COLUMN IF NOT EXISTS clinic text DEFAULT 'Shenandoah';
+ALTER TABLE blocked_slots ADD COLUMN IF NOT EXISTS end_date date;
+
+UPDATE blocked_slots SET end_date = date::date WHERE end_date IS NULL AND date IS NOT NULL AND btrim(date::text) <> '';
 
 -- ─── 4) Carteras compartidas ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS session_groups (

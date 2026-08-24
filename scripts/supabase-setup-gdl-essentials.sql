@@ -60,15 +60,18 @@ ALTER TABLE company_config
 ALTER TABLE appointments ADD COLUMN IF NOT EXISTS clinic text DEFAULT 'Oxygengdl';
 ALTER TABLE services ADD COLUMN IF NOT EXISTS clinic text DEFAULT 'Oxygengdl';
 ALTER TABLE blocked_slots ADD COLUMN IF NOT EXISTS clinic text DEFAULT 'Oxygengdl';
+ALTER TABLE blocked_slots ADD COLUMN IF NOT EXISTS end_date date;
 
 CREATE INDEX IF NOT EXISTS idx_appointments_clinic_date ON appointments (clinic, full_date);
 CREATE INDEX IF NOT EXISTS idx_services_clinic ON services (clinic);
 CREATE INDEX IF NOT EXISTS idx_blocked_slots_clinic_date ON blocked_slots (clinic, date);
+CREATE INDEX IF NOT EXISTS idx_blocked_slots_clinic_date_range ON blocked_slots (clinic, date, end_date);
 
 UPDATE company_config SET clinic = 'Oxygengdl' WHERE clinic IS NULL OR clinic = 'Guadalajara';
 UPDATE appointments SET clinic = 'Oxygengdl' WHERE clinic IS NULL OR clinic = 'Guadalajara';
 UPDATE services SET clinic = 'Oxygengdl' WHERE clinic IS NULL OR clinic = 'Guadalajara';
 UPDATE blocked_slots SET clinic = 'Oxygengdl' WHERE clinic IS NULL OR clinic = 'Guadalajara';
+UPDATE blocked_slots SET end_date = date::date WHERE end_date IS NULL AND date IS NOT NULL AND btrim(date::text) <> '';
 
 INSERT INTO company_config (
   clinic, name, address, maps_url, phone, ticket_message,

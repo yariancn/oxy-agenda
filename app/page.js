@@ -120,6 +120,7 @@ import { getMissingAppointmentFields, resolveAppointmentDraft } from '../lib/app
 import { normalizeAppointmentTime } from '../lib/screenshotAppointmentParse';
 import { loadCalendarPrefs, saveCalendarPrefs } from '../lib/calendarPrefs';
 import { formatClinicDateIso, getClinicNow, isPastCalendarDay } from '../lib/clinicClock';
+import { blockedSlotAppliesToDate, ensureBlockedSlotsEndDates, formatBlockedSlotDateRange, isMultiDayBlockedSlot, normalizeBlockedSlotDate, normalizeBlockedSlotRow, planRemoveDayFromBlockedSlot } from '../lib/blockedSlots';
 import { isAssessmentService } from '../lib/assessmentService';
 import {
   buildCalendarFeedUrl,
@@ -371,6 +372,8 @@ export default function AppLayout() {
   const [oooData, setOOOData] = useState({
     id: null,
     date: '',
+    end_date: '',
+    view_date: '',
     start_time: '07:00',
     end_time: '19:00',
     is_global: true,
@@ -1239,7 +1242,7 @@ export default function AppLayout() {
 
         assertDbResult('blocked_slots', resB);
 
-        setDbBlockedSlots(resB.data || []);
+        setDbBlockedSlots(await ensureBlockedSlotsEndDates(clinicDb, resB.data || []));
         setDbAppointments((prev) => {
           const fresh = appointmentsData || [];
           const freshIds = new Set(fresh.map((a) => a.id));
@@ -1401,7 +1404,7 @@ export default function AppLayout() {
       const safeServices = resS.data || [];
       setDbServices(safeServices.sort((a, b) => (a.name || '').localeCompare(b.name || '')));
       setDbUsers(resU.data || []);
-      setDbBlockedSlots(resB.data || []);
+      setDbBlockedSlots(await ensureBlockedSlotsEndDates(clinicDb, resB.data || []));
       setDbProtocols(resProt.data || []);
       setDbRoles(resRoles.data || []);
       if (resPromo.error) {
@@ -2562,9 +2565,12 @@ export default function AppLayout() {
 
   const openBlockSlotModal = () => {
     const defaultEquip = dynamicColumns[0] || dbServices.find((s) => s.is_active)?.name || '';
+    const defaultDate = clinicNow.dateStr || formatClinicDateIso(currentDate, activeClinic);
     setOOOData({
       id: null,
-      date: clinicNow.dateStr || formatClinicDateIso(currentDate, activeClinic),
+      date: defaultDate,
+      end_date: defaultDate,
+      view_date: '',
       start_time: '07:00',
       end_time: '19:00',
       is_global: true,
@@ -2574,12 +2580,18 @@ export default function AppLayout() {
     setShowOOOModal(true);
   };
 
-  const openBlockedSlotEditor = (block) => {
+  const openBlockedSlotEditor = (block, viewDate = '') => {
     if (!block?.id) return;
     const defaultEquip = dynamicColumns[0] || dbServices.find((s) => s.is_active)?.name || '';
+    const normalized = normalizeBlockedSlotRow(block);
+    const startDate = normalized.date || clinicNow.dateStr || formatClinicDateIso(currentDate, activeClinic);
+    const endDate = normalized.end_date || startDate;
+    const dayView = normalizeBlockedSlotDate(viewDate) || '';
     setOOOData({
       id: block.id,
-      date: block.date || clinicNow.dateStr || formatClinicDateIso(currentDate, activeClinic),
+      date: startDate,
+      end_date: endDate,
+      view_date: dayView && blockedSlotAppliesToDate(normalized, dayView) ? dayView : '',
       start_time: normalizeTimeInputValue(block.start_time, '07:00'),
       end_time: normalizeTimeInputValue(block.end_time, '19:00'),
       is_global: block.is_global !== false && !block.equipment,
@@ -2587,6 +2599,29 @@ export default function AppLayout() {
       reason: block.reason || (locale === 'en' ? 'Blocked' : 'Bloqueo'),
     });
     setShowOOOModal(true);
+  };
+
+  const applyRemoveBlockedSlotDay = async (blockRow, dayToRemove) => {
+    const plan = planRemoveDayFromBlockedSlot(blockRow, dayToRemove);
+    if (!plan) return { error: locale === 'en' ? 'Invalid date.' : 'Fecha inválida.' };
+
+    if (plan.action === 'delete') {
+      const { error } = await activeSupabase.from('blocked_slots').delete().eq('id', blockRow.id);
+      if (error) return { error: error.message };
+      return {};
+    }
+
+    if (plan.action === 'update') {
+      const { error } = await activeSupabase.from('blocked_slots').update(plan.patch).eq('id', blockRow.id);
+      if (error) return { error: error.message };
+      return {};
+    }
+
+    const { error: updateError } = await activeSupabase.from('blocked_slots').update(plan.update).eq('id', blockRow.id);
+    if (updateError) return { error: updateError.message };
+    const { error: insertError } = await activeSupabase.from('blocked_slots').insert([plan.insert]);
+    if (insertError) return { error: insertError.message };
+    return {};
   };
 
   const createEmptyAppointmentDraft = () => {
@@ -5650,13 +5685,13 @@ export default function AppLayout() {
                             )}
 
                             {/* BLOQUEOS OOO */}
-                            {dbBlockedSlots.filter(b => b.date === currentDayInfo.fullDate && (b.is_global || appointmentEquipment(b.equipment) === eqName)).map(b => (
+                            {dbBlockedSlots.filter((b) => blockedSlotAppliesToDate(b, currentDayInfo.fullDate) && (b.is_global || appointmentEquipment(b.equipment) === eqName)).map(b => (
                               <button
                                 type="button"
                                 key={b.id}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  openBlockedSlotEditor(b);
+                                  openBlockedSlotEditor(b, currentDayInfo.fullDate);
                                 }}
                                 title={locale === 'en' ? 'Click to edit or remove block' : 'Clic para editar o quitar el bloqueo'}
                                 className="absolute left-1 right-1 bg-slate-200 border-l-4 border-slate-400 rounded-md opacity-90 overflow-hidden flex flex-col justify-center items-center z-[15] cursor-pointer hover:opacity-100 hover:ring-2 hover:ring-red-400 focus:outline-none focus:ring-2 focus:ring-red-500"
@@ -5772,13 +5807,13 @@ export default function AppLayout() {
                                   </div>
                                 )}
 
-                                {dbBlockedSlots.filter(b => b.date === dayInfo.fullDate && (b.is_global || appointmentEquipment(b.equipment) === eqName)).map(b => (
+                                {dbBlockedSlots.filter((b) => blockedSlotAppliesToDate(b, dayInfo.fullDate) && (b.is_global || appointmentEquipment(b.equipment) === eqName)).map(b => (
                                   <button
                                     type="button"
                                     key={b.id}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      openBlockedSlotEditor(b);
+                                      openBlockedSlotEditor(b, dayInfo.fullDate);
                                     }}
                                     title={locale === 'en' ? 'Click to edit or remove block' : 'Clic para editar o quitar el bloqueo'}
                                     className="absolute left-0.5 right-0.5 bg-slate-200 border-l-2 border-slate-400 rounded-md opacity-90 overflow-hidden flex flex-col justify-center items-center z-[15] cursor-pointer hover:opacity-100 hover:ring-2 hover:ring-red-400 focus:outline-none focus:ring-2 focus:ring-red-500"
@@ -9126,16 +9161,47 @@ export default function AppLayout() {
               {oooData.id ? (
                 <p className="text-[10px] font-bold text-slate-500 normal-case leading-snug bg-slate-100 border border-slate-200 rounded-xl px-3 py-2">
                   {locale === 'en'
-                    ? 'Change the date, times, scope or reason, then save. Or remove the block completely.'
-                    : 'Cambia fecha, horario, ámbito o motivo y guarda. O quita el bloqueo por completo.'}
+                    ? 'Change the date range, times, scope or reason, then save. Or remove the block completely.'
+                    : 'Cambia el rango de fechas, horario, ámbito o motivo y guarda. O quita el bloqueo por completo.'}
                 </p>
               ) : null}
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 ml-1">
-                  {locale === 'en' ? 'Date' : 'Fecha a bloquear'}
-                </label>
-                <input type="date" value={oooData.date} onChange={e => setOOOData({...oooData, date: e.target.value})} className="w-full p-3 border rounded-xl font-bold text-sm outline-none text-slate-900 bg-white" />
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex-1 min-w-0">
+                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">
+                    {locale === 'en' ? 'From date' : 'Desde fecha'}
+                  </label>
+                  <input
+                    type="date"
+                    value={oooData.date}
+                    onChange={(e) => {
+                      const nextDate = e.target.value;
+                      setOOOData({
+                        ...oooData,
+                        date: nextDate,
+                        end_date: !oooData.end_date || oooData.end_date < nextDate ? nextDate : oooData.end_date,
+                      });
+                    }}
+                    className="w-full p-3 border rounded-xl font-bold text-sm outline-none text-slate-900 bg-white"
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <label className="text-[10px] font-black uppercase text-slate-400 ml-1">
+                    {locale === 'en' ? 'To date' : 'Hasta fecha'}
+                  </label>
+                  <input
+                    type="date"
+                    value={oooData.end_date || oooData.date}
+                    min={oooData.date || undefined}
+                    onChange={(e) => setOOOData({ ...oooData, end_date: e.target.value })}
+                    className="w-full p-3 border rounded-xl font-bold text-sm outline-none text-slate-900 bg-white"
+                  />
+                </div>
               </div>
+              <p className="text-[9px] font-bold text-slate-400 normal-case -mt-1">
+                {locale === 'en'
+                  ? 'Use the same start and end date to block a single day.'
+                  : 'Usa la misma fecha de inicio y fin para bloquear un solo día.'}
+              </p>
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="flex-1 min-w-0">
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-1">{locale === 'en' ? 'From' : 'Desde'}</label>
@@ -9187,33 +9253,71 @@ export default function AppLayout() {
             
             <div className="bg-slate-50 px-4 sm:px-8 py-3 sm:py-5 border-t shrink-0 flex flex-col gap-2">
               {oooData.id ? (
-                <button
-                  type="button"
-                  disabled={isSavingAppointment}
-                  onClick={async () => {
-                    if (!window.confirm(locale === 'en'
-                      ? 'Remove this block from the calendar?'
-                      : '¿Quitar este bloqueo del calendario?')) {
-                      return;
-                    }
-                    await runBusyAction({
-                      workingTitle: locale === 'en' ? 'Removing block…' : 'Quitando bloqueo…',
-                      workingDetail: L.p.common.pleaseWait,
-                      successTitle: locale === 'en' ? 'Block removed' : 'Bloqueo quitado',
-                      autoCloseMs: 900,
-                      onDone: () => setShowOOOModal(false),
-                      action: async () => {
-                        const { error } = await activeSupabase.from('blocked_slots').delete().eq('id', oooData.id);
-                        if (error) return { error: error.message };
-                        await notifyCalendarChanged();
-                        return { detail: oooData.date };
-                      },
-                    });
-                  }}
-                  className="w-full bg-white border-2 border-red-300 text-red-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-red-50 disabled:opacity-50"
-                >
-                  {locale === 'en' ? 'Remove block' : 'Quitar bloqueo'}
-                </button>
+                <>
+                  {oooData.view_date && isMultiDayBlockedSlot(oooData) ? (
+                    <button
+                      type="button"
+                      disabled={isSavingAppointment}
+                      onClick={async () => {
+                        if (!window.confirm(locale === 'en'
+                          ? `Remove block only for ${oooData.view_date}? The rest of the range stays.`
+                          : `¿Quitar el bloqueo solo el ${oooData.view_date}? El resto del rango se mantiene.`)) {
+                          return;
+                        }
+                        await runBusyAction({
+                          workingTitle: locale === 'en' ? 'Removing day…' : 'Quitando día…',
+                          workingDetail: L.p.common.pleaseWait,
+                          successTitle: locale === 'en' ? 'Day unblocked' : 'Día desbloqueado',
+                          autoCloseMs: 900,
+                          onDone: () => setShowOOOModal(false),
+                          action: async () => {
+                            const result = await applyRemoveBlockedSlotDay(oooData, oooData.view_date);
+                            if (result.error) return result;
+                            await notifyCalendarChanged();
+                            return { detail: oooData.view_date };
+                          },
+                        });
+                      }}
+                      className="w-full bg-amber-50 border-2 border-amber-300 text-amber-900 font-black py-3 rounded-xl uppercase text-xs hover:bg-amber-100 disabled:opacity-50"
+                    >
+                      {locale === 'en'
+                        ? `Remove only ${oooData.view_date}`
+                        : `Quitar solo ${oooData.view_date}`}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={isSavingAppointment}
+                    onClick={async () => {
+                      const removeLabel = isMultiDayBlockedSlot(oooData)
+                        ? (locale === 'en'
+                          ? `Remove the entire range? (${formatBlockedSlotDateRange(oooData, locale)})`
+                          : `¿Quitar todo el rango? (${formatBlockedSlotDateRange(oooData, locale)})`)
+                        : (locale === 'en'
+                          ? `Remove this block from the calendar? (${formatBlockedSlotDateRange(oooData, locale)})`
+                          : `¿Quitar este bloqueo del calendario? (${formatBlockedSlotDateRange(oooData, locale)})`);
+                      if (!window.confirm(removeLabel)) return;
+                      await runBusyAction({
+                        workingTitle: locale === 'en' ? 'Removing block…' : 'Quitando bloqueo…',
+                        workingDetail: L.p.common.pleaseWait,
+                        successTitle: locale === 'en' ? 'Block removed' : 'Bloqueo quitado',
+                        autoCloseMs: 900,
+                        onDone: () => setShowOOOModal(false),
+                        action: async () => {
+                          const { error } = await activeSupabase.from('blocked_slots').delete().eq('id', oooData.id);
+                          if (error) return { error: error.message };
+                          await notifyCalendarChanged();
+                          return { detail: formatBlockedSlotDateRange(oooData, locale) };
+                        },
+                      });
+                    }}
+                    className="w-full bg-white border-2 border-red-300 text-red-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-red-50 disabled:opacity-50"
+                  >
+                    {isMultiDayBlockedSlot(oooData)
+                      ? (locale === 'en' ? 'Remove entire range' : 'Quitar todo el rango')
+                      : (locale === 'en' ? 'Remove block' : 'Quitar bloqueo')}
+                  </button>
+                </>
               ) : null}
               <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
                 <button disabled={isSavingAppointment} onClick={() => setShowOOOModal(false)} className="w-full sm:w-1/3 bg-white border border-slate-300 font-black py-3 sm:py-4 rounded-xl uppercase text-xs hover:bg-slate-50 disabled:opacity-50">
@@ -9223,6 +9327,12 @@ export default function AppLayout() {
                   disabled={isSavingAppointment}
                   onClick={async () => {
                   if (!oooData.date) return alert(a('selectDate'));
+                  const endDate = oooData.end_date || oooData.date;
+                  if (endDate < oooData.date) {
+                    return alert(locale === 'en'
+                      ? 'End date must be on or after start date.'
+                      : 'La fecha final debe ser igual o posterior a la fecha inicial.');
+                  }
                   if (!oooData.is_global && !oooData.equipment) return alert(L.blockSelectEquipmentRequired);
                   if (oooData.start_time >= oooData.end_time) {
                     return alert(locale === 'en'
@@ -9243,6 +9353,7 @@ export default function AppLayout() {
                     action: async () => {
                       const payload = {
                         date: oooData.date,
+                        end_date: endDate,
                         start_time: oooData.start_time,
                         end_time: oooData.end_time,
                         equipment: oooData.is_global ? null : oooData.equipment,
@@ -9255,7 +9366,7 @@ export default function AppLayout() {
                         : await activeSupabase.from('blocked_slots').insert([payload]);
                       if (error) return { error: error.message };
                       await notifyCalendarChanged();
-                      return { detail: oooData.date };
+                      return { detail: formatBlockedSlotDateRange({ date: oooData.date, end_date: endDate }, locale) };
                     },
                   });
                 }} className="w-full sm:flex-1 bg-red-600 text-white font-black py-3 sm:py-4 rounded-xl uppercase text-xs shadow-lg hover:bg-red-700 disabled:opacity-50">
