@@ -6,6 +6,12 @@ const legacyHosts = (process.env.LEGACY_VERCEL_HOSTS || 'oxy-agenda-houston.verc
   .filter(Boolean);
 
 const nextConfig = {
+  /** pdfkit reads .afm fonts from disk; must stay external on Vercel/serverless */
+  serverExternalPackages: ['pdfkit'],
+  outputFileTracingIncludes: {
+    '/api/cron/appointment-confirmation': ['./node_modules/pdfkit/js/data/**/*'],
+    '/api/cron/weekly-sales-report': ['./node_modules/pdfkit/js/data/**/*'],
+  },
   env: {
     NEXT_PUBLIC_CANONICAL_HOST: canonicalHost,
     NEXT_PUBLIC_BUILD_SHA: (process.env.VERCEL_GIT_COMMIT_SHA || 'dev').slice(0, 7),
