@@ -60,6 +60,7 @@ export default function PatientProfileModal({
     protocol: initialData.protocol || 'Wellness',
     notes: sanitizePatientNotesForDisplay(initialData.patientNotes || initialData.notes || ''),
     is_blocked: initialData.is_blocked || false,
+    block_reason: String(initialData.block_reason || '').trim(),
     prefers_email: initialData.prefers_email !== false,
     prefers_sms: initialData.prefers_sms === true,
     prefers_sms_reminder: initialData.prefers_sms_reminder !== false,
@@ -476,24 +477,52 @@ export default function PatientProfileModal({
             <p className="text-[8px] text-amber-600 mt-1 font-bold uppercase">{t.notesHint}</p>
           </div>
 
-          <div className="bg-red-50 p-4 rounded-xl border border-red-200 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <label className="text-[10px] font-black uppercase text-red-800">{t.blockTitle}</label>
-              <p className="text-[8px] text-red-600 font-bold uppercase mt-1 leading-snug">{t.blockHint}</p>
+          <div className="bg-red-50 p-4 rounded-xl border border-red-200 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <label className="text-[10px] font-black uppercase text-red-800">{t.blockTitle}</label>
+                <p className="text-[8px] text-red-600 font-bold uppercase mt-1 leading-snug">{t.blockHint}</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={formData.is_blocked}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setFormData((prev) => ({
+                    ...prev,
+                    is_blocked: on,
+                    block_reason: on ? prev.block_reason : '',
+                  }));
+                }}
+                className="w-5 h-5 shrink-0"
+                aria-label={t.blockTitle}
+              />
             </div>
-            <input
-              type="checkbox"
-              checked={formData.is_blocked}
-              onChange={(e) => handleChange('is_blocked', e.target.checked)}
-              className="w-5 h-5 shrink-0"
-              aria-label={t.blockTitle}
-            />
+            {formData.is_blocked && (
+              <div>
+                <label className="text-[10px] font-black uppercase text-red-800 mb-1 block">{t.blockReasonLabel}</label>
+                <textarea
+                  value={formData.block_reason}
+                  onChange={(e) => handleChange('block_reason', e.target.value)}
+                  placeholder={t.blockReasonPlaceholder}
+                  className="w-full p-3 border border-red-300 rounded-lg text-xs font-bold bg-white text-red-900"
+                  rows={2}
+                  required
+                />
+                <p className="text-[8px] text-red-600 mt-1 font-bold uppercase">{t.blockReasonHint}</p>
+              </div>
+            )}
           </div>
 
           {formData.is_blocked && (
             <div className="bg-red-600 p-4 rounded-xl text-white text-center">
               <span className="text-xs font-black uppercase">{t.profileBlocked}</span>
               <p className="text-[9px] font-bold mt-1 normal-case opacity-95">{t.blockedScheduleHint}</p>
+              {String(formData.block_reason || '').trim() ? (
+                <p className="text-[10px] font-bold mt-2 normal-case bg-red-700/50 rounded-lg px-2 py-1.5">
+                  {t.blockReasonLabel}: {String(formData.block_reason).trim()}
+                </p>
+              ) : null}
             </div>
           )}
 
@@ -1105,6 +1134,10 @@ export default function PatientProfileModal({
             disabled={savingProfile}
             onClick={async () => {
               if (savingProfile) return;
+              if (formData.is_blocked && !String(formData.block_reason || '').trim()) {
+                alert(t.blockReasonRequired);
+                return;
+              }
               setSavingProfile(true);
               try {
                 await onSave?.(formData);

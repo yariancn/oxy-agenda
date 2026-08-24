@@ -317,6 +317,12 @@ export default function PublicBookingPortal({
           alert(t.slotUnavailable);
           return;
         }
+        if (result.error === 'PATIENT_BLOCKED') {
+          alert(t.patientBlocked || (locale === 'en'
+            ? 'This phone number cannot book online. Please contact the clinic.'
+            : 'Este número no puede agendar en línea. Contacta a la clínica.'));
+          return;
+        }
         throw new Error(result.error || t.genericError);
       }
 

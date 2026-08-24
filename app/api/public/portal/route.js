@@ -111,6 +111,8 @@ export async function POST(request) {
         ? 'PHONE_LENGTH'
         : result.error.message === 'SLOT_UNAVAILABLE'
           ? 'SLOT_UNAVAILABLE'
+          : result.error.message === 'PATIENT_BLOCKED'
+            ? 'PATIENT_BLOCKED'
           : result.error.message;
       return NextResponse.json({ error: message }, { status: 400 });
     }

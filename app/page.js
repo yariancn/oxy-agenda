@@ -1208,6 +1208,7 @@ export default function AppLayout() {
             protocol: String(p.protocol || ''),
             notes: sanitizePatientNotesForDisplay(p.notes || p.Notes || ''),
             is_blocked: p.is_blocked || false,
+            block_reason: String(p.block_reason || '').trim(),
             prefers_email: p.prefers_email !== false,
             prefers_sms: p.prefers_sms === true,
             prefers_sms_reminder: p.prefers_sms_reminder !== false,
@@ -1338,6 +1339,7 @@ export default function AppLayout() {
         protocol: String(p.protocol || ''),
         notes: sanitizePatientNotesForDisplay(p.notes || p.Notes || ''),
         is_blocked: p.is_blocked || false,
+        block_reason: String(p.block_reason || '').trim(),
         prefers_email: p.prefers_email !== false,
         prefers_sms: p.prefers_sms === true,
         prefers_sms_reminder: p.prefers_sms_reminder !== false,
@@ -5859,6 +5861,11 @@ export default function AppLayout() {
                         {p.sessionGroupId && <span title={L.symbolLegend?.legendSharedWallet || 'Cartera compartida'} className="mr-2">👥</span>}
                         {p.patient}
                       </p>
+                      {p.is_blocked && p.block_reason ? (
+                        <p className="text-[9px] font-bold text-red-700 mt-1 leading-snug normal-case line-clamp-2">
+                          {p.block_reason}
+                        </p>
+                      ) : null}
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">{p.phone || L.noPhone}</p>
                       <div className="flex justify-between items-center mt-2 mb-4">
                         <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-1 rounded">{p.protocol}</p>
@@ -9417,6 +9424,8 @@ export default function AppLayout() {
                 phone: profilePatient?.phone || selectedSlot.phone || '',
                 email: profilePatient?.email || selectedSlot.email || '',
                 patientNotes: sanitizePatientNotesForDisplay(profilePatient?.notes || selectedSlot.patientNotes || ''),
+                is_blocked: !!(profilePatient?.is_blocked || selectedSlot.is_blocked),
+                block_reason: String(profilePatient?.block_reason || selectedSlot.block_reason || '').trim(),
                 prefers_email: profilePatient?.prefers_email !== false,
                 prefers_sms: profilePatient?.prefers_sms === true,
                 prefers_sms_reminder: profilePatient?.prefers_sms_reminder !== false,
@@ -9694,6 +9703,7 @@ export default function AppLayout() {
                   protocol: ud.protocol,
                   notes: ud.notes,
                   is_blocked: ud.is_blocked,
+                  block_reason: ud.block_reason || '',
                   prefers_email: ud.prefers_email !== false,
                   prefers_sms: ud.prefers_sms === true,
                   prefers_sms_reminder: ud.prefers_sms_reminder !== false,
@@ -9706,6 +9716,11 @@ export default function AppLayout() {
                   adeudo: inSharedGroup ? 0 : (ud.adeudo ?? 0),
                 });
                 if (saved.error) {
+                  if (saved.error.message === 'BLOCK_REASON_REQUIRED') {
+                    return alert(locale === 'en'
+                      ? 'To block this patient you must enter a reason.'
+                      : 'Para bloquear al paciente debes indicar el motivo.');
+                  }
                   return alert(a('saveClientError', saved.error.message));
                 }
 
@@ -9719,6 +9734,7 @@ export default function AppLayout() {
                       protocol: ud.protocol,
                       notes: ud.notes,
                       is_blocked: !!ud.is_blocked,
+                      block_reason: ud.is_blocked ? String(ud.block_reason || '').trim() : '',
                       prefers_email: ud.prefers_email !== false,
                       prefers_sms: ud.prefers_sms === true,
                       prefers_sms_reminder: ud.prefers_sms_reminder !== false,
@@ -9790,6 +9806,8 @@ export default function AppLayout() {
                       email: ud.email,
                       protocol: ud.protocol,
                       patientNotes: ud.notes,
+                      is_blocked: !!ud.is_blocked,
+                      block_reason: ud.is_blocked ? String(ud.block_reason || '').trim() : '',
                       prefers_email: ud.prefers_email !== false,
                       prefers_sms: ud.prefers_sms === true,
                       prefers_sms_reminder: ud.prefers_sms_reminder !== false,
@@ -9846,6 +9864,7 @@ export default function AppLayout() {
                   protocol: String(p.protocol || ''),
                   notes: sanitizePatientNotesForDisplay(p.notes || p.Notes || ''),
                   is_blocked: p.is_blocked || false,
+                  block_reason: String(p.block_reason || '').trim(),
                   prefers_email: p.prefers_email !== false,
                   prefers_sms: p.prefers_sms === true,
                   prefers_sms_reminder: p.prefers_sms_reminder !== false,

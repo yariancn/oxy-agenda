@@ -103,8 +103,11 @@ CREATE TABLE IF NOT EXISTS session_groups (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE patients
-  ADD COLUMN IF NOT EXISTS session_group_id uuid REFERENCES session_groups(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS session_group_id uuid REFERENCES session_groups(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS is_blocked boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS block_reason text DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_patients_session_group_id ON patients (session_group_id);
+CREATE INDEX IF NOT EXISTS idx_patients_is_blocked ON patients (is_blocked) WHERE is_blocked = true;
 CREATE INDEX IF NOT EXISTS idx_session_groups_titular ON session_groups (titular_patient_id);
 
 -- ─── 5) Promotores ────────────────────────────────────────────────────────

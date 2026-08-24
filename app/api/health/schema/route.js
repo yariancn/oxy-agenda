@@ -103,6 +103,9 @@ async function auditDatabase(clinicName, { includeGdlLocations = false } = {}) {
   const promoters = await probeSelect(supabase, 'promoters', 'id, calendar_feed_token, notes');
   set('promoters_feed', promoters.ok, promoters.error);
 
+  const patientBlock = await probeSelect(supabase, 'patients', 'id, is_blocked, block_reason');
+  set('patients_block', patientBlock.ok, patientBlock.error);
+
   if (includeGdlLocations) {
     const cfg2 = await countWhere(supabase, 'company_config', 'clinic', 'Oxygengdl2');
     const svc2 = await countWhere(supabase, 'services', 'clinic', 'Oxygengdl2');

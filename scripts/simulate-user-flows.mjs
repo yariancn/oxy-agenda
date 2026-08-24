@@ -62,6 +62,7 @@ import {
 import { isMondayInTimezone } from '../lib/dailyCron.js';
 import { isVercelCronRequest } from '../lib/cronRequest.js';
 import { PAYMENT_METHOD_KEYS } from '../lib/paymentMethod.js';
+import { validatePatientBlockFields } from '../lib/ensurePatient.js';
 
 process.env.STAFF_SESSION_SECRET = process.env.STAFF_SESSION_SECRET || 'test-secret-for-simulations';
 let passed = 0;
@@ -672,6 +673,25 @@ test('cron auth: acepta invocación de Vercel sin CRON_SECRET', () => {
     },
   };
   assert.equal(isVercelCronRequest(req), true);
+});
+
+test('bloqueo paciente: motivo obligatorio al activar', () => {
+  assert.equal(
+    validatePatientBlockFields({ is_blocked: true, block_reason: '' }),
+    'BLOCK_REASON_REQUIRED',
+  );
+  assert.equal(
+    validatePatientBlockFields({ is_blocked: true, block_reason: '   ' }),
+    'BLOCK_REASON_REQUIRED',
+  );
+  assert.equal(
+    validatePatientBlockFields({ is_blocked: true, block_reason: 'No-shows reiterados' }),
+    null,
+  );
+  assert.equal(
+    validatePatientBlockFields({ is_blocked: false, block_reason: '' }),
+    null,
+  );
 });
 
 console.log(`\n${passed} pruebas OK\n`);
