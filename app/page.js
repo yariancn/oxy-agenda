@@ -62,6 +62,8 @@ import DemoOccupancyPanel from '../components/DemoOccupancyPanel';
 import AppSymbolLegend from '../components/AppSymbolLegend';
 import PosReceiptModal from '../components/PosReceiptModal';
 import CashCutModal from '../components/CashCutModal';
+import CashArqueoModal from '../components/CashArqueoModal';
+import PettyCashExpenseModal from '../components/PettyCashExpenseModal';
 import StaffTabErrorBoundary from '../components/StaffTabErrorBoundary';
 import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
 import CalendarAssessmentBand from '../components/CalendarAssessmentBand';
@@ -393,6 +395,8 @@ export default function AppLayout() {
   const [reportReceipt, setReportReceipt] = useState(null);
   const [reportReceiptPhone, setReportReceiptPhone] = useState('');
   const [showCashCut, setShowCashCut] = useState(false);
+  const [showCashArqueo, setShowCashArqueo] = useState(false);
+  const [showPettyCashExpense, setShowPettyCashExpense] = useState(false);
 
   const locale = localeForClinic(activeClinic);
   const L = useMemo(() => staffStrings(locale), [locale]);
@@ -5185,11 +5189,17 @@ export default function AppLayout() {
         { id: 'Servicios', icon: '⚙️', label: L.mobileTabs.Servicios },
         { id: 'Reportes', icon: '📊', label: L.mobileTabs.Reportes },
         { id: 'Admin', icon: '🔒', label: L.mobileTabs.Admin },
-        { id: 'CashCut', icon: '💵', label: locale === 'en' ? 'Cash cut' : 'Corte' },
+        { id: 'CashArqueo', icon: '🧮', label: locale === 'en' ? 'Count' : 'Arqueo' },
+        { id: 'CashCut', icon: '💵', label: locale === 'en' ? 'Withdraw' : 'Retiro' },
       ]
     : [];
 
-  const mobileMoreActive = mobileAdminTabs.some(t => t.id === activeTab);
+  // Petty cash expense is available to all staff via sidebar; also add to mobile more for staff
+  const mobileStaffExtraTabs = [
+    { id: 'PettyCash', icon: '🧾', label: locale === 'en' ? 'Expense' : 'Gasto' },
+  ];
+
+  const mobileMoreActive = [...mobileAdminTabs, ...mobileStaffExtraTabs].some(t => t.id === activeTab);
 
   return (
     <StaffLocaleProvider clinic={activeClinic}>
@@ -5396,6 +5406,13 @@ export default function AppLayout() {
           <button onClick={() => selectTab('Pacientes')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Pacientes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>👥 {L.tabs.Pacientes}</button>
           <button onClick={() => selectTab('GFE')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'GFE' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🩺 {L.tabs.GFE}</button>
           <button type="button" onClick={() => setShowAgentChat(true)} className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm text-violet-300 hover:bg-slate-800">🤖 {locale === 'en' ? 'Assistant' : 'Asistente'}</button>
+          <button
+            type="button"
+            onClick={() => setShowPettyCashExpense(true)}
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm text-amber-300 hover:bg-slate-800"
+          >
+            🧾 {locale === 'en' ? 'Petty cash' : 'Gasto caja chica'}
+          </button>
           
           {currentUserLevel <= 2 && (
             <>
@@ -5405,10 +5422,17 @@ export default function AppLayout() {
               <button onClick={() => selectTab('Admin')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Admin' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🔒 {L.tabs.Admin}</button>
               <button
                 type="button"
+                onClick={() => setShowCashArqueo(true)}
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm text-sky-300 hover:bg-slate-800"
+              >
+                🧮 {locale === 'en' ? 'Daily count' : 'Arqueo diario'}
+              </button>
+              <button
+                type="button"
                 onClick={() => setShowCashCut(true)}
                 className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm text-emerald-300 hover:bg-slate-800"
               >
-                💵 {locale === 'en' ? 'Cash cut' : 'Corte de efectivo'}
+                💵 {locale === 'en' ? 'Cash withdrawal' : 'Corte / retiro'}
               </button>
             </>
           )}
@@ -10221,15 +10245,34 @@ export default function AppLayout() {
           {mobileMoreOpen && (
             <div className="lg:hidden fixed inset-0 z-[60] bg-slate-900/50" onClick={() => setMobileMoreOpen(false)} />
           )}
-          {mobileMoreOpen && mobileAdminTabs.length > 0 && (
+          {mobileMoreOpen && (
             <div className="lg:hidden fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] inset-x-2 z-[70] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2">
-              {mobileAdminTabs.map(tab => (
+              {mobileStaffExtraTabs.map((tab) => (
                 <button
                   key={tab.id}
+                  type="button"
+                  onClick={() => {
+                    setMobileMoreOpen(false);
+                    if (tab.id === 'PettyCash') setShowPettyCashExpense(true);
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-amber-300"
+                >
+                  <span className="text-lg">{tab.icon}</span>
+                  {tab.label}
+                </button>
+              ))}
+              {mobileAdminTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
                   onClick={() => {
                     setMobileMoreOpen(false);
                     if (tab.id === 'CashCut') {
                       setShowCashCut(true);
+                      return;
+                    }
+                    if (tab.id === 'CashArqueo') {
+                      setShowCashArqueo(true);
                       return;
                     }
                     selectTab(tab.id);
@@ -10278,21 +10321,36 @@ export default function AppLayout() {
                 <span className="text-base leading-none">🎤</span>
                 <span className="text-[8px] font-black uppercase truncate max-w-full">{locale === 'en' ? 'Voice' : 'Voz'}</span>
               </button>
-              {mobileAdminTabs.length > 0 && (
-                <button
-                  onClick={() => setMobileMoreOpen(v => !v)}
-                  className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-w-0 px-1 ${mobileMoreActive || mobileMoreOpen ? 'text-blue-400' : 'text-slate-500'}`}
-                >
-                  <span className="text-base leading-none">⋯</span>
-                  <span className="text-[8px] font-black uppercase">{L.more}</span>
-                </button>
-              )}
+              <button
+                onClick={() => setMobileMoreOpen(v => !v)}
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 min-w-0 px-1 ${mobileMoreActive || mobileMoreOpen ? 'text-blue-400' : 'text-slate-500'}`}
+              >
+                <span className="text-base leading-none">⋯</span>
+                <span className="text-[8px] font-black uppercase">{L.more}</span>
+              </button>
             </div>
           </nav>
         </>
       )}
     </div>
     <AppSymbolLegend open={showSymbolLegend} onClose={() => setShowSymbolLegend(false)} />
+    <PettyCashExpenseModal
+      open={showPettyCashExpense}
+      onClose={() => setShowPettyCashExpense(false)}
+      activeClinic={activeClinic}
+      currentUserName={currentUser?.name || ''}
+      activeSupabase={activeSupabase}
+    />
+    <CashArqueoModal
+      open={showCashArqueo}
+      onClose={() => setShowCashArqueo(false)}
+      patients={dbPatients}
+      sessionGroups={dbSessionGroups || []}
+      companyConfig={dbCompanyConfig}
+      activeClinic={activeClinic}
+      currentUserName={currentUser?.name || ''}
+      activeSupabase={activeSupabase}
+    />
     <CashCutModal
       open={showCashCut}
       onClose={() => setShowCashCut(false)}

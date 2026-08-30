@@ -34,6 +34,8 @@ const TABLES = [
   'user_roles',
   'protocols',
   'audit_logs',
+  'petty_cash_expenses',
+  'cash_drawer_events',
 ];
 
 const MIN_ROWS = {

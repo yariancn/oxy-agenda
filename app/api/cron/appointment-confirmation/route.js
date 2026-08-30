@@ -13,9 +13,16 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const forceWeeklyReport = searchParams.get('forceWeekly') === '1';
   const skipWeeklyReport = searchParams.get('skipWeekly') === '1';
+  const forceMonthlyReport = searchParams.get('forceMonthly') === '1';
+  const skipMonthlyReport = searchParams.get('skipMonthly') === '1';
 
   try {
-    const result = await runDailyCron({ forceWeeklyReport, skipWeeklyReport });
+    const result = await runDailyCron({
+      forceWeeklyReport,
+      skipWeeklyReport,
+      forceMonthlyReport,
+      skipMonthlyReport,
+    });
     const status = result.ok ? 200 : 207;
     return NextResponse.json(result, { status });
   } catch (error) {

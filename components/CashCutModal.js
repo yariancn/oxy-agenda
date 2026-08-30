@@ -5,16 +5,16 @@ import { useStaffLocale } from './StaffLocaleContext';
 import { isShenandoah } from '../lib/clinicRegistry';
 import { printThermalHtml } from '../lib/printReceipt';
 import {
-  CASH_CUT_AUDIT_ACTION,
-  CASH_CUT_AUDIT_ACTION_EN,
-  buildCashCutRecord,
   buildCashCutDualCopyHtml,
-  cashCutRowTimestampMs,
+  buildCashCutRecord,
   collectCashSalesSinceCut,
-  formatMethodBreakdown,
-  isCashCutAuditRow,
   parseCashCutAuditDetails,
 } from '../lib/cashCut';
+import {
+  buildCashDrawerEventPayload,
+  CASH_DRAWER_EVENT_RETIRO,
+} from '../lib/pettyCash';
+import { loadCashDrawerPeriod } from '../lib/cashDrawerPeriod';
 
 function formatLocal(msOrIso, locale) {
   if (!msOrIso) return '';
@@ -40,7 +40,9 @@ export default function CashCutModal({
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [lastCut, setLastCut] = useState(null);
+  const [sinceMs, setSinceMs] = useState(0);
+  const [lastRetiro, setLastRetiro] = useState(null);
+  const [expenses, setExpenses] = useState([]);
   const [countedInput, setCountedInput] = useState('');
   const [deliveredBy, setDeliveredBy] = useState('');
   const [receivedBy, setReceivedBy] = useState('');
@@ -48,28 +50,24 @@ export default function CashCutModal({
   const [amountConfirmed, setAmountConfirmed] = useState(false);
   const [error, setError] = useState('');
   const [doneCut, setDoneCut] = useState(null);
+  const [tableMissing, setTableMissing] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const sinceMs = lastCut ? cashCutRowTimestampMs(lastCut) : 0;
-  const periodFromLabel = sinceMs > 0
-    ? formatLocal(sinceMs, locale)
-    : (es ? 'Sin corte previo (todo el efectivo registrado)' : 'No prior cut (all recorded cash)');
-  const periodToLabel = formatLocal(nowMs, locale);
-
   const summary = useMemo(
-    () => collectCashSalesSinceCut({ patients, sessionGroups, sinceMs }),
-    [patients, sessionGroups, sinceMs],
-  );
-
-  const breakdown = useMemo(
-    () => formatMethodBreakdown(summary.byMethod, locale),
-    [summary.byMethod, locale],
+    () => collectCashSalesSinceCut({
+      patients,
+      sessionGroups,
+      sinceMs,
+      expenses,
+      clinic: activeClinic,
+    }),
+    [patients, sessionGroups, sinceMs, expenses, activeClinic],
   );
 
   const counted = parseFloat(countedInput);
   const countedOk = Number.isFinite(counted) && String(countedInput).trim() !== '';
   const difference = countedOk
-    ? Math.round((counted - summary.expectedCash) * 100) / 100
+    ? Math.round((counted - summary.expectedInDrawer) * 100) / 100
     : null;
   const mismatch = countedOk && difference !== 0;
   const notesTrimmed = String(notes || '').trim();
@@ -77,7 +75,7 @@ export default function CashCutModal({
   const receivedTrimmed = String(receivedBy || '').trim();
   const namesOk = deliveredTrimmed.length >= 2 && receivedTrimmed.length >= 2;
   const notesOk = !mismatch || notesTrimmed.length >= 3;
-  const canConfirm = !loading && !saving && countedOk && amountConfirmed && notesOk && namesOk;
+  const canConfirm = !loading && !saving && countedOk && amountConfirmed && notesOk && namesOk && !tableMissing;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -95,21 +93,27 @@ export default function CashCutModal({
     (async () => {
       try {
         if (!activeSupabase) {
-          if (!cancelled) setLastCut(null);
+          if (!cancelled) {
+            setSinceMs(0);
+            setExpenses([]);
+            setLastRetiro(null);
+          }
           return;
         }
-        const { data, error: qErr } = await activeSupabase
-          .from('audit_logs')
-          .select('*')
-          .order('timestamp', { ascending: false })
-          .limit(120);
-        if (qErr) throw qErr;
-        const cut = (data || []).find(isCashCutAuditRow) || null;
-        if (!cancelled) setLastCut(cut);
+        const loaded = await loadCashDrawerPeriod(activeSupabase, activeClinic);
+        if (cancelled) return;
+        setSinceMs(loaded.sinceMs);
+        setExpenses(loaded.expenses);
+        setLastRetiro(loaded.lastRetiro);
+        setTableMissing(loaded.tableMissing);
+        if (loaded.tableMissing) {
+          setError(es
+            ? 'Faltan tablas de caja. Ejecuta scripts/supabase-petty-cash.sql en Supabase (GDL).'
+            : 'Cash tables missing. Run scripts/supabase-petty-cash.sql in Supabase.');
+        }
       } catch (err) {
         if (!cancelled) {
-          setLastCut(null);
-          setError(err?.message || (es ? 'No se pudo cargar el último corte.' : 'Could not load last cut.'));
+          setError(err?.message || (es ? 'No se pudo cargar el periodo.' : 'Could not load period.'));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -117,42 +121,46 @@ export default function CashCutModal({
     })();
 
     return () => { cancelled = true; };
-  }, [open, activeSupabase, es, currentUserName]);
+  }, [open, activeSupabase, activeClinic, es, currentUserName]);
 
   if (!open) return null;
 
-  const lastDetails = parseCashCutAuditDetails(lastCut?.details);
+  const lastDetails = lastRetiro?.event_type
+    ? lastRetiro
+    : parseCashCutAuditDetails(lastRetiro?.details);
 
   const handleConfirm = async () => {
     setNowMs(Date.now());
     if (!countedOk) {
-      setError(es ? 'Escribe el monto que se está retirando.' : 'Enter the amount being withdrawn.');
+      setError(es ? 'Escribe el monto contado en caja.' : 'Enter the amount counted in the drawer.');
       return;
     }
     if (!amountConfirmed) {
       setError(es
-        ? 'Marca la casilla confirmando el monto a retirar.'
-        : 'Check the box confirming the withdrawal amount.');
+        ? 'Marca la casilla confirmando el retiro.'
+        : 'Check the box confirming the withdrawal.');
       return;
     }
     if (mismatch && notesTrimmed.length < 3) {
       setError(es
-        ? 'Si no coincide, la nota es obligatoria (explica la diferencia).'
-        : 'If amounts do not match, a note is required (explain the difference).');
+        ? 'Si no coincide, la nota es obligatoria.'
+        : 'If amounts do not match, a note is required.');
       return;
     }
     if (!namesOk) {
       setError(es
-        ? 'Indica quién entrega y quién recibe el efectivo (nombre completo).'
-        : 'Enter who delivers and who receives the cash (full name).');
+        ? 'Indica quién entrega y quién recibe el efectivo.'
+        : 'Enter who delivers and who receives the cash.');
       return;
     }
 
     const closedAtIso = new Date().toISOString();
     const cut = buildCashCutRecord({
-      expectedCash: summary.expectedCash,
+      expectedCash: summary.expectedInDrawer,
+      expectedInDrawer: summary.expectedInDrawer,
       countedCash: counted,
       sales: summary.sales,
+      expenses: summary.expenses,
       closedBy: deliveredTrimmed,
       deliveredBy: deliveredTrimmed,
       receivedBy: receivedTrimmed,
@@ -160,32 +168,51 @@ export default function CashCutModal({
       locale,
       notes: notesTrimmed,
       sinceMs,
-      previousCutAt: lastDetails?.closedAt || (sinceMs > 0 ? new Date(sinceMs).toISOString() : null),
+      previousCutAt: sinceMs > 0 ? new Date(sinceMs).toISOString() : null,
       periodFrom: sinceMs > 0 ? new Date(sinceMs).toISOString() : null,
       periodTo: closedAtIso,
+      floatAmount: summary.floatAmount,
+      cashSalesTotal: summary.cashSalesTotal,
+      expensesTotal: summary.expensesTotal,
+      withdrawAmount: summary.withdrawAmount,
+    });
+
+    const payload = buildCashDrawerEventPayload({
+      eventType: CASH_DRAWER_EVENT_RETIRO,
+      clinic: activeClinic,
+      floatAmount: summary.floatAmount,
+      cashSalesTotal: summary.cashSalesTotal,
+      expensesTotal: summary.expensesTotal,
+      expectedInDrawer: summary.expectedInDrawer,
+      withdrawAmount: summary.withdrawAmount,
+      countedAmount: counted,
+      deliveredBy: deliveredTrimmed,
+      receivedBy: receivedTrimmed,
+      notes: notesTrimmed,
+      ticketCount: summary.ticketCount,
+      expenseCount: summary.expenseCount,
+      periodFrom: cut.periodFrom,
+      periodTo: closedAtIso,
+      details: cut,
+      createdBy: currentUserName || deliveredTrimmed,
     });
 
     setSaving(true);
     setError('');
     try {
       if (activeSupabase) {
-        const { error: insErr } = await activeSupabase.from('audit_logs').insert([{
-          appointment_id: null,
-          patient_name: es ? 'CAJA / EFECTIVO' : 'CASH DRAWER',
-          action: es ? CASH_CUT_AUDIT_ACTION : CASH_CUT_AUDIT_ACTION_EN,
-          changed_by: currentUserName || 'staff',
-          details: JSON.stringify(cut),
-        }]);
+        const { error: insErr } = await activeSupabase.from('cash_drawer_events').insert([payload]);
         if (insErr) throw insErr;
       }
       onLogged?.(cut);
       setDoneCut(cut);
-      setLastCut({
-        action: CASH_CUT_AUDIT_ACTION,
-        details: cut,
-        timestamp: cut.closedAt,
-        changed_by: currentUserName,
+      setLastRetiro({
+        event_type: CASH_DRAWER_EVENT_RETIRO,
+        created_at: closedAtIso,
+        delivered_by: deliveredTrimmed,
+        received_by: receivedTrimmed,
       });
+      setSinceMs(Date.parse(closedAtIso));
 
       const html = buildCashCutDualCopyHtml({
         cut,
@@ -219,12 +246,12 @@ export default function CashCutModal({
       <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[92dvh] overflow-hidden flex flex-col">
         <div className="bg-emerald-800 text-white p-4 sm:p-5 shrink-0">
           <h2 className="text-lg font-black uppercase tracking-widest">
-            {es ? 'Corte de efectivo' : 'Cash cut'}
+            {es ? 'Corte / retiro de efectivo' : 'Cash withdrawal cut'}
           </h2>
           <p className="text-emerald-100 text-xs mt-1 font-medium">
             {es
-              ? 'Solo efectivo. El periodo va desde el último corte hasta este momento.'
-              : 'Cash only. The period runs from the last cut until right now.'}
+              ? `Se retira el excedente. En caja deben quedar $${summary.floatAmount.toFixed(0)} de fondo fijo.`
+              : `Withdraw excess only. Float $${summary.floatAmount.toFixed(0)} stays in the drawer.`}
           </p>
         </div>
 
@@ -240,57 +267,77 @@ export default function CashCutModal({
                 <p>
                   <span className="text-slate-500">{es ? 'Desde' : 'From'}:</span>
                   {' '}
-                  {periodFromLabel}
+                  {sinceMs > 0
+                    ? formatLocal(sinceMs, locale)
+                    : (es ? 'Sin retiro previo' : 'No prior withdrawal')}
                 </p>
                 <p>
                   <span className="text-slate-500">{es ? 'Hasta' : 'To'}:</span>
                   {' '}
-                  {periodToLabel}
+                  {formatLocal(nowMs, locale)}
                 </p>
-                {lastDetails?.deliveredBy || lastDetails?.closedBy ? (
+                {(lastDetails?.delivered_by || lastDetails?.deliveredBy || lastDetails?.closedBy) ? (
                   <p className="text-[10px] text-slate-500 normal-case">
-                    {es ? 'Último corte — entrega' : 'Last cut — delivered by'}
+                    {es ? 'Último retiro — entrega' : 'Last withdrawal — delivered by'}
                     :
                     {' '}
-                    {lastDetails.deliveredBy || lastDetails.closedBy}
-                    {lastDetails.receivedBy ? (
+                    {lastDetails.delivered_by || lastDetails.deliveredBy || lastDetails.closedBy}
+                    {(lastDetails.received_by || lastDetails.receivedBy) ? (
                       <>
                         {' · '}
                         {es ? 'recibe' : 'received by'}
                         {' '}
-                        {lastDetails.receivedBy}
+                        {lastDetails.received_by || lastDetails.receivedBy}
                       </>
                     ) : null}
                   </p>
                 ) : null}
               </div>
 
-              <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-4">
-                <p className="text-[10px] font-black uppercase text-emerald-800 tracking-widest mb-1">
-                  {es ? 'Efectivo esperado en el periodo' : 'Expected cash in period'}
+              <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-4 space-y-1">
+                <p className="text-[10px] font-black uppercase text-emerald-800 tracking-widest">
+                  {es ? 'Esperado en caja' : 'Expected in drawer'}
                 </p>
                 <p className="text-3xl font-black text-emerald-950">
-                  ${summary.expectedCash.toFixed(2)}
+                  ${summary.expectedInDrawer.toFixed(2)}
                   {' '}
                   <span className="text-sm">{currency}</span>
                 </p>
-                <p className="text-[11px] font-bold uppercase text-emerald-900 mt-2">
+                <p className="text-[11px] font-bold text-emerald-900">
+                  {es ? 'Fondo' : 'Float'} ${summary.floatAmount.toFixed(2)}
+                  {' + '}
+                  {es ? 'ventas' : 'sales'} ${summary.cashSalesTotal.toFixed(2)}
+                  {' − '}
+                  {es ? 'gastos' : 'expenses'} ${summary.expensesTotal.toFixed(2)}
+                </p>
+                <p className="text-[11px] font-black uppercase text-emerald-950 pt-1">
+                  {es ? 'A retirar' : 'To withdraw'}
+                  :
+                  {' '}
+                  ${summary.withdrawAmount.toFixed(2)}
+                  {' '}
+                  {currency}
+                  {' · '}
                   {summary.ticketCount}
                   {' '}
-                  {es ? 'ticket(s) en efectivo' : 'cash ticket(s)'}
+                  {es ? 'tickets' : 'tickets'}
+                  {' · '}
+                  {summary.expenseCount}
+                  {' '}
+                  {es ? 'gastos' : 'expenses'}
                 </p>
               </div>
 
-              {breakdown.length > 0 && (
-                <div className="rounded-xl border border-slate-200 p-3">
-                  <p className="text-[10px] font-black uppercase text-slate-500 mb-2">
-                    {es ? 'Otros métodos en el periodo (referencia)' : 'Other methods in period (reference)'}
+              {summary.expenses.length > 0 && (
+                <div className="rounded-xl border border-amber-200 max-h-28 overflow-y-auto">
+                  <p className="sticky top-0 bg-amber-50 px-3 py-2 text-[10px] font-black uppercase text-amber-800">
+                    {es ? 'Gastos caja chica' : 'Petty cash expenses'}
                   </p>
-                  <ul className="space-y-1 text-xs font-bold text-slate-700">
-                    {breakdown.map((row) => (
-                      <li key={row.key} className="flex justify-between gap-2">
-                        <span>{row.label}</span>
-                        <span>${row.amount.toFixed(2)}</span>
+                  <ul className="divide-y divide-amber-100">
+                    {summary.expenses.map((e) => (
+                      <li key={String(e.id)} className="px-3 py-2 text-[11px] font-bold text-slate-800 flex justify-between gap-2">
+                        <span className="truncate">{e.reason}</span>
+                        <span className="shrink-0">−${(Number(e.amount) || 0).toFixed(2)}</span>
                       </li>
                     ))}
                   </ul>
@@ -298,9 +345,9 @@ export default function CashCutModal({
               )}
 
               {summary.sales.length > 0 && (
-                <div className="rounded-xl border border-slate-200 max-h-40 overflow-y-auto">
+                <div className="rounded-xl border border-slate-200 max-h-36 overflow-y-auto">
                   <p className="sticky top-0 bg-slate-100 px-3 py-2 text-[10px] font-black uppercase text-slate-500">
-                    {es ? 'Tickets incluidos' : 'Included tickets'}
+                    {es ? 'Tickets efectivo' : 'Cash tickets'}
                   </p>
                   <ul className="divide-y divide-slate-100">
                     {summary.sales.map((tx) => (
@@ -320,33 +367,31 @@ export default function CashCutModal({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">
-                    {es ? 'Quién entrega el efectivo' : 'Who delivers the cash'}
+                    {es ? 'Quién entrega' : 'Who delivers'}
                   </label>
                   <input
                     type="text"
                     value={deliveredBy}
                     onChange={(e) => setDeliveredBy(e.target.value)}
-                    className="w-full border-2 border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-900"
-                    placeholder={es ? 'Nombre de quien entrega' : 'Deliverer name'}
+                    className="w-full border-2 border-slate-300 rounded-lg p-2.5 text-sm font-bold"
                   />
                 </div>
                 <div>
                   <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">
-                    {es ? 'Quién recibe el efectivo' : 'Who receives the cash'}
+                    {es ? 'Quién recibe' : 'Who receives'}
                   </label>
                   <input
                     type="text"
                     value={receivedBy}
                     onChange={(e) => setReceivedBy(e.target.value)}
-                    className={`w-full border-2 rounded-lg p-2.5 text-sm font-bold text-slate-900 ${receivedTrimmed.length >= 2 ? 'border-slate-300' : 'border-amber-400 bg-amber-50'}`}
-                    placeholder={es ? 'Nombre de quien recibe' : 'Receiver name'}
+                    className={`w-full border-2 rounded-lg p-2.5 text-sm font-bold ${receivedTrimmed.length >= 2 ? 'border-slate-300' : 'border-amber-400 bg-amber-50'}`}
                   />
                 </div>
               </div>
 
               <div>
                 <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">
-                  {es ? 'Monto a retirar (escribe el valor contado)' : 'Amount to withdraw (enter counted value)'}
+                  {es ? 'Monto contado en caja (total)' : 'Amount counted in drawer (total)'}
                 </label>
                 <input
                   type="number"
@@ -379,18 +424,16 @@ export default function CashCutModal({
                 <span className="text-xs font-black uppercase text-slate-800 leading-snug">
                   {countedOk
                     ? (es
-                      ? `Confirmo que se retiran $${counted.toFixed(2)} ${currency}`
-                      : `I confirm withdrawing $${counted.toFixed(2)} ${currency}`)
-                    : (es
-                      ? 'Primero escribe el monto a retirar'
-                      : 'Enter the withdrawal amount first')}
+                      ? `Confirmo retiro de $${summary.withdrawAmount.toFixed(2)} ${currency} y dejo $${summary.floatAmount.toFixed(2)} de fondo fijo`
+                      : `I confirm withdrawing $${summary.withdrawAmount.toFixed(2)} ${currency} and leaving $${summary.floatAmount.toFixed(2)} float`)
+                    : (es ? 'Primero escribe el monto contado' : 'Enter the counted amount first')}
                 </span>
               </label>
 
               <div>
                 <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">
                   {mismatch
-                    ? (es ? 'Nota (obligatoria: explica la diferencia)' : 'Note (required: explain the difference)')
+                    ? (es ? 'Nota (obligatoria)' : 'Note (required)')
                     : (es ? 'Notas (opcional)' : 'Notes (optional)')}
                 </label>
                 <input
@@ -398,9 +441,6 @@ export default function CashCutModal({
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className={`w-full border-2 rounded-lg p-2 text-sm font-bold ${mismatch && !notesOk ? 'border-orange-400 bg-orange-50' : 'border-slate-300'}`}
-                  placeholder={mismatch
-                    ? (es ? 'Ej. faltante por cambio, sobrante, error de ticket…' : 'E.g. short change, overage, ticket error…')
-                    : ''}
                 />
               </div>
 
@@ -445,7 +485,7 @@ export default function CashCutModal({
             >
               {saving
                 ? (es ? 'Guardando…' : 'Saving…')
-                : (es ? 'Confirmar corte e imprimir (2 copias)' : 'Confirm cut & print (2 copies)')}
+                : (es ? 'Confirmar retiro e imprimir (2)' : 'Confirm withdrawal & print (2)')}
             </button>
           ) : null}
         </div>
