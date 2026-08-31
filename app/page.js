@@ -5192,14 +5192,14 @@ export default function AppLayout() {
         { id: 'Servicios', icon: '⚙️', label: L.mobileTabs.Servicios },
         { id: 'Reportes', icon: '📊', label: L.mobileTabs.Reportes },
         { id: 'Admin', icon: '🔒', label: L.mobileTabs.Admin },
-        { id: 'CashArqueo', icon: '🧮', label: locale === 'en' ? 'Count' : 'Arqueo' },
-        { id: 'CashCut', icon: '💵', label: locale === 'en' ? 'Withdraw' : 'Retiro' },
       ]
     : [];
 
-  // Petty cash expense is available to all staff via sidebar; also add to mobile more for staff
+  // Caja chica / arqueo / retiro: todo el staff (sidebar + menú móvil «Más»)
   const mobileStaffExtraTabs = [
     { id: 'PettyCash', icon: '🧾', label: locale === 'en' ? 'Expense' : 'Gasto' },
+    { id: 'CashArqueo', icon: '🧮', label: locale === 'en' ? 'Count' : 'Arqueo' },
+    { id: 'CashCut', icon: '💵', label: locale === 'en' ? 'Withdraw' : 'Retiro' },
   ];
 
   const mobileMoreActive = [...mobileAdminTabs, ...mobileStaffExtraTabs].some(t => t.id === activeTab);
@@ -5416,6 +5416,20 @@ export default function AppLayout() {
           >
             🧾 {locale === 'en' ? 'Petty cash' : 'Gasto caja chica'}
           </button>
+          <button
+            type="button"
+            onClick={() => setShowCashArqueo(true)}
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm text-sky-300 hover:bg-slate-800"
+          >
+            🧮 {locale === 'en' ? 'Daily count' : 'Arqueo diario'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCashCut(true)}
+            className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm text-emerald-300 hover:bg-slate-800"
+          >
+            💵 {locale === 'en' ? 'Cash withdrawal' : 'Corte / retiro'}
+          </button>
           
           {currentUserLevel <= 2 && (
             <>
@@ -5423,20 +5437,6 @@ export default function AppLayout() {
               <button onClick={() => selectTab('Servicios')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Servicios' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>⚙️ {L.tabs.Servicios}</button>
               <button onClick={() => selectTab('Reportes')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Reportes' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>📊 {L.tabs.Reportes}</button>
               <button onClick={() => selectTab('Admin')} className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm ${activeTab === 'Admin' ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-slate-800'}`}>🔒 {L.tabs.Admin}</button>
-              <button
-                type="button"
-                onClick={() => setShowCashArqueo(true)}
-                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm text-sky-300 hover:bg-slate-800"
-              >
-                🧮 {locale === 'en' ? 'Daily count' : 'Arqueo diario'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowCashCut(true)}
-                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm text-emerald-300 hover:bg-slate-800"
-              >
-                💵 {locale === 'en' ? 'Cash withdrawal' : 'Corte / retiro'}
-              </button>
             </>
           )}
         </nav>
@@ -10284,8 +10284,14 @@ export default function AppLayout() {
                   onClick={() => {
                     setMobileMoreOpen(false);
                     if (tab.id === 'PettyCash') setShowPettyCashExpense(true);
+                    if (tab.id === 'CashArqueo') setShowCashArqueo(true);
+                    if (tab.id === 'CashCut') setShowCashCut(true);
                   }}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-amber-300"
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold ${
+                    tab.id === 'PettyCash' ? 'text-amber-300'
+                      : tab.id === 'CashArqueo' ? 'text-sky-300'
+                        : 'text-emerald-300'
+                  }`}
                 >
                   <span className="text-lg">{tab.icon}</span>
                   {tab.label}
@@ -10297,14 +10303,6 @@ export default function AppLayout() {
                   type="button"
                   onClick={() => {
                     setMobileMoreOpen(false);
-                    if (tab.id === 'CashCut') {
-                      setShowCashCut(true);
-                      return;
-                    }
-                    if (tab.id === 'CashArqueo') {
-                      setShowCashArqueo(true);
-                      return;
-                    }
                     selectTab(tab.id);
                   }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold ${activeTab === tab.id ? 'bg-blue-600/30 text-blue-300' : 'text-slate-300'}`}
