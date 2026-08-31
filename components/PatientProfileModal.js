@@ -9,11 +9,13 @@ import { canCreateSessionGroup, canJoinSessionGroup, isGroupTitular, patientMatc
 import { sanitizePatientNotesForDisplay } from '../lib/patientNotes';
 import PatientSessionHistory from './PatientSessionHistory';
 import { paymentMethodOptions, paymentMethodStoredLabel, resolvePaymentMethodKey } from '../lib/paymentMethod';
+import { preferUnblockedPatient } from '../lib/deletePatientChart';
 
 export default function PatientProfileModal({
   initialData,
   onSave,
   onClose,
+  onDeletePatient,
   servicios,
   appointments = [],
   companyConfig = {},
@@ -37,6 +39,8 @@ export default function PatientProfileModal({
   const { locale, L } = useStaffLocale();
   const t = L.modals.patient;
   const canCancelSales = currentUserLevel <= 2;
+  const canDeleteChart = currentUserLevel <= 2 && typeof onDeletePatient === 'function';
+  const [deletingChart, setDeletingChart] = useState(false);
 
   const [formData, setFormData] = useState(() => {
     const packageHistory = initialData.packageHistory || [];
@@ -525,6 +529,44 @@ export default function PatientProfileModal({
               ) : null}
             </div>
           )}
+
+          {canDeleteChart && formData.id ? (
+            <div className="bg-slate-100 p-4 rounded-xl border border-slate-300 space-y-2">
+              <p className="text-[10px] font-black uppercase text-slate-700">{t.deleteChartTitle}</p>
+              <p className="text-[9px] font-bold text-slate-600 normal-case leading-snug">{t.deleteChartHint}</p>
+              <button
+                type="button"
+                disabled={deletingChart || savingProfile}
+                onClick={async () => {
+                  const name = String(formData.patient || '').trim() || '—';
+                  if (!window.confirm(t.deleteChartConfirm(name))) return;
+                  const keep = preferUnblockedPatient(
+                    (allPatients || []).filter(
+                      (p) => String(p.id) !== String(formData.id)
+                        && String(p.patient || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+                          === String(formData.patient || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(),
+                    ),
+                  );
+                  setDeletingChart(true);
+                  try {
+                    await onDeletePatient({
+                      patientId: formData.id,
+                      keepPatientId: keep?.id || null,
+                      reason: keep ? 'Eliminar duplicado' : 'Eliminar expediente',
+                    });
+                    alert(t.deleteChartDone);
+                  } catch (err) {
+                    alert(err?.message || String(err));
+                  } finally {
+                    setDeletingChart(false);
+                  }
+                }}
+                className="w-full bg-white border border-red-300 text-red-700 text-[10px] font-black uppercase py-2.5 rounded-lg hover:bg-red-50 disabled:opacity-60"
+              >
+                {deletingChart ? t.deleteChartWorking : t.deleteChartButton}
+              </button>
+            </div>
+          ) : null}
 
           <div className="rounded-xl border-2 border-indigo-300 bg-indigo-50 p-3">
             <p className="text-[11px] font-black uppercase text-indigo-900">{t.packagesSectionTitle}</p>

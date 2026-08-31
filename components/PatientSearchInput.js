@@ -83,7 +83,15 @@ export default function PatientSearchInput({
 
   const term = normalizeStr(query);
   const termDigits = digitsOnly(query);
-  const exactMatch = searchPool.find((p) => normalizeStr(p.patient) === normalizeStr(query) && !String(p.id).startsWith('hint:'));
+  const nameMatches = searchPool.filter(
+    (p) => normalizeStr(p.patient) === normalizeStr(query) && !String(p.id).startsWith('hint:'),
+  );
+  const exactMatch = (pickedId
+    ? nameMatches.find((p) => String(p.id) === String(pickedId))
+    : null)
+    || nameMatches.find((p) => !p.is_blocked)
+    || nameMatches[0]
+    || null;
   const confirmed = exactMatch && String(exactMatch.id) === String(pickedId);
 
   const filtered = searchPool
@@ -96,10 +104,13 @@ export default function PatientSearchInput({
       return false;
     })
     .sort((a, b) => {
-      // Prefer real charts over appointment hints; then names that start with the term.
+      // Prefer real charts over appointment hints; then unblocked; then names that start with the term.
       const aHint = a._fromAppointment ? 1 : 0;
       const bHint = b._fromAppointment ? 1 : 0;
       if (aHint !== bHint) return aHint - bHint;
+      const aBlocked = a.is_blocked ? 1 : 0;
+      const bBlocked = b.is_blocked ? 1 : 0;
+      if (aBlocked !== bBlocked) return aBlocked - bBlocked;
       const aStarts = normalizeStr(a.patient).startsWith(term) ? 0 : 1;
       const bStarts = normalizeStr(b.patient).startsWith(term) ? 0 : 1;
       if (aStarts !== bStarts) return aStarts - bStarts;

@@ -63,6 +63,11 @@ import { isMondayInTimezone } from '../lib/dailyCron.js';
 import { isVercelCronRequest } from '../lib/cronRequest.js';
 import { PAYMENT_METHOD_KEYS } from '../lib/paymentMethod.js';
 import { validatePatientBlockFields } from '../lib/ensurePatient.js';
+import {
+  isPatientBlockedForScheduling,
+  pickKeeperPatient,
+  preferUnblockedPatient,
+} from '../lib/deletePatientChart.js';
 import { isPastCalendarDay, isPastDateTime } from '../lib/clinicClock.js';
 
 process.env.STAFF_SESSION_SECRET = process.env.STAFF_SESSION_SECRET || 'test-secret-for-simulations';
@@ -693,6 +698,21 @@ test('bloqueo paciente: motivo obligatorio al activar', () => {
     validatePatientBlockFields({ is_blocked: false, block_reason: '' }),
     null,
   );
+});
+
+test('duplicados: bloquear uno no bloquea al otro por id', () => {
+  const patients = [
+    { id: 'a', patient: 'LUCIA TORRES', is_blocked: true },
+    { id: 'b', patient: 'LUCIA TORRES', is_blocked: false },
+  ];
+  assert.equal(isPatientBlockedForScheduling({ patient: 'LUCIA TORRES', patientId: 'b' }, patients), false);
+  assert.equal(isPatientBlockedForScheduling({ patient: 'LUCIA TORRES', patientId: 'a' }, patients), true);
+  assert.equal(isPatientBlockedForScheduling({ patient: 'LUCIA TORRES' }, patients), false);
+  assert.equal(preferUnblockedPatient(patients)?.id, 'b');
+  assert.equal(pickKeeperPatient([
+    { id: 'a', is_blocked: true, historico_sesiones: 10 },
+    { id: 'b', is_blocked: false, historico_sesiones: 2 },
+  ])?.id, 'b');
 });
 
 test('staff: mismo día con hora pasada se puede agendar', () => {

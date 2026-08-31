@@ -37,6 +37,10 @@ import {
   updatePatientRecord,
 } from '../lib/ensurePatient';
 import {
+  isPatientBlockedForScheduling,
+  preferUnblockedPatient,
+} from '../lib/deletePatientChart';
+import {
   buildCalendarWeek,
   getDayNameFromDate,
   localeForClinic,
@@ -2741,13 +2745,7 @@ export default function AppLayout() {
 
   const newAppointmentPatientBlocked = useMemo(() => {
     if (!showNewAppointment || !selectedSlot?.patient) return false;
-    if (selectedSlot.is_blocked) return true;
-    if (selectedSlot.patientId) {
-      return !!dbPatients.find((p) => String(p.id) === String(selectedSlot.patientId) && p.is_blocked);
-    }
-    return !!dbPatients.find(
-      (p) => normalizeStr(p.patient) === normalizeStr(selectedSlot.patient) && p.is_blocked,
-    );
+    return isPatientBlockedForScheduling(selectedSlot, dbPatients);
   }, [showNewAppointment, selectedSlot, dbPatients]);
 
   const formatAppointmentDateWithWeekday = (isoDate) => {
@@ -3645,8 +3643,10 @@ export default function AppLayout() {
     }
 
     const pInfo = resolvePatientForAppointment(original, dbPatients)
-      || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(original.patient));
-    if (pInfo && pInfo.is_blocked) {
+      || preferUnblockedPatient(
+        dbPatients.filter((x) => normalizeStr(x.patient) === normalizeStr(original.patient)),
+      );
+    if (pInfo?.is_blocked || isPatientBlockedForScheduling(original, dbPatients)) {
       alert(a('patientBlockedMove'));
       return false;
     }
@@ -4697,11 +4697,14 @@ export default function AppLayout() {
         return alert(staffAlert(locale, 'pastSchedule'));
       }
 
-      const existingP = (slot.patientId
+      const existingP = slot.patientId
         ? dbPatients.find((x) => String(x.id) === String(slot.patientId))
-        : null)
-        || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(slot.patient));
-      if (existingP?.is_blocked) return alert(staffAlert(locale, 'patientBlockedShort'));
+        : preferUnblockedPatient(
+          dbPatients.filter((x) => normalizeStr(x.patient) === normalizeStr(slot.patient)),
+        );
+      if (isPatientBlockedForScheduling(slot, dbPatients) || existingP?.is_blocked) {
+        return alert(staffAlert(locale, 'patientBlockedShort'));
+      }
 
       // One chart only: if the typed name matches an existing patient, staff MUST pick
       // from the search list (patientId). Freehand typing caused fake “two databases”
@@ -9541,10 +9544,14 @@ export default function AppLayout() {
         <div className="relative z-50" style={{ zIndex: 9999 }}>
           <PatientProfileModal 
             initialData={(() => {
-              const profilePatient = (selectedSlot.patientId
+              const byId = selectedSlot.patientId
                 ? dbPatients.find((p) => String(p.id) === String(selectedSlot.patientId))
-                : null)
-                || dbPatients.find((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient))
+                : null;
+              const byName = dbPatients.filter(
+                (x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient),
+              );
+              const profilePatient = byId
+                || preferUnblockedPatient(byName)
                 || resolvePatientForAppointment(selectedSlot, dbPatients);
               return {
                 ...selectedSlot,
@@ -9555,8 +9562,8 @@ export default function AppLayout() {
                 phone: profilePatient?.phone || selectedSlot.phone || '',
                 email: profilePatient?.email || selectedSlot.email || '',
                 patientNotes: sanitizePatientNotesForDisplay(profilePatient?.notes || selectedSlot.patientNotes || ''),
-                is_blocked: !!(profilePatient?.is_blocked || selectedSlot.is_blocked),
-                block_reason: String(profilePatient?.block_reason || selectedSlot.block_reason || '').trim(),
+                is_blocked: !!(profilePatient?.is_blocked),
+                block_reason: String(profilePatient?.block_reason || '').trim(),
                 prefers_email: profilePatient?.prefers_email !== false,
                 prefers_sms: profilePatient?.prefers_sms === true,
                 prefers_sms_reminder: profilePatient?.prefers_sms_reminder !== false,
@@ -9570,6 +9577,29 @@ export default function AppLayout() {
             currentUserName={currentUser?.name || ''}
             sessionGroupsEnabled={sessionGroupsEnabled}
             allPatients={dbPatients}
+            onDeletePatient={currentUserLevel <= 2 ? async ({ patientId, keepPatientId, reason }) => {
+              const res = await fetch('/api/staff/delete-patient', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                  clinic: activeClinic,
+                  patientId,
+                  keepPatientId: keepPatientId || null,
+                  reason: reason || 'Eliminar duplicado',
+                }),
+              });
+              const json = await res.json().catch(() => ({}));
+              if (!res.ok || !json.ok) {
+                throw new Error(json.error || (locale === 'en' ? 'Could not delete chart' : 'No se pudo eliminar el expediente'));
+              }
+              setDbPatients((prev) => prev.filter((p) => String(p.id) !== String(patientId)));
+              setShowPatientProfile(false);
+              setSelectedSlot(null);
+              broadcastLiveDataUpdated(activeClinic);
+              await fetchAllData({ silent: true, patientsOnly: true });
+              return json;
+            } : undefined}
             sessionGroup={(() => {
               const profilePat = (selectedSlot.patientId
                 ? dbPatients.find((p) => String(p.id) === String(selectedSlot.patientId))
