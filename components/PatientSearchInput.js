@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { preferUnblockedPatient } from '../lib/deletePatientChart';
 
 function normalizeStr(str) {
   return String(str || '')
@@ -54,9 +55,22 @@ export default function PatientSearchInput({
   }, []);
 
   const searchPool = useMemo(() => {
-    const byKey = new Map();
+    const chartByContact = new Map();
+    const chartsWithoutContact = [];
     for (const p of patients || []) {
       if (!p) continue;
+      const last10 = digitsOnly(p.phone).slice(-10);
+      const nameNorm = normalizeStr(p.patient);
+      if (last10.length === 10 && nameNorm) {
+        const ck = `${nameNorm}|${last10}`;
+        const prev = chartByContact.get(ck);
+        chartByContact.set(ck, prev ? (preferUnblockedPatient([prev, p]) || p) : p);
+      } else {
+        chartsWithoutContact.push(p);
+      }
+    }
+    const byKey = new Map();
+    for (const p of [...chartByContact.values(), ...chartsWithoutContact]) {
       const idKey = p.id != null ? `id:${p.id}` : null;
       const nameKey = `name:${normalizeStr(p.patient)}`;
       if (idKey) byKey.set(idKey, p);

@@ -68,6 +68,7 @@ import {
   pickKeeperPatient,
   preferUnblockedPatient,
 } from '../lib/deletePatientChart.js';
+import { digitsOnly } from '../lib/ensurePatient.js';
 import { isPastCalendarDay, isPastDateTime } from '../lib/clinicClock.js';
 
 process.env.STAFF_SESSION_SECRET = process.env.STAFF_SESSION_SECRET || 'test-secret-for-simulations';
@@ -698,6 +699,13 @@ test('bloqueo paciente: motivo obligatorio al activar', () => {
     validatePatientBlockFields({ is_blocked: false, block_reason: '' }),
     null,
   );
+});
+
+test('teléfono con espacios: mismos 10 dígitos que sin espacios', () => {
+  const spaced = '998 203 2660';
+  const plain = '9982032660';
+  assert.equal(digitsOnly(spaced).slice(-10), digitsOnly(plain).slice(-10));
+  assert.equal(digitsOnly(spaced).slice(-10), '9982032660');
 });
 
 test('duplicados: bloquear uno no bloquea al otro por id', () => {

@@ -8716,6 +8716,7 @@ export default function AppLayout() {
                 if (!conflicts.length) return null;
                 const exact = conflicts.find((c) => c.exact);
                 if (exact) {
+                  const keeper = preferUnblockedPatient(conflicts.filter((c) => c.exact)) || exact;
                   return (
                     <div className="rounded-xl border-2 border-red-400 bg-red-50 px-3 py-2.5">
                       <p className="text-[10px] font-black uppercase text-red-900">
@@ -8723,9 +8724,28 @@ export default function AppLayout() {
                       </p>
                       <p className="text-[9px] font-bold text-red-800 mt-1 normal-case leading-snug">
                         {locale === 'en'
-                          ? `«${exact.patient}» already has this name with the same phone/email. Use that chart — do not create a duplicate.`
-                          : `«${exact.patient}» ya está con ese nombre y el mismo teléfono/correo. Usa ese expediente; no crees un duplicado.`}
+                          ? `«${exact.patient}» already has this name with the same phone/email. Pick them from the list — do not create a duplicate.`
+                          : `«${exact.patient}» ya está con ese nombre y el mismo teléfono/correo. Selecciónala de la lista; no crees un duplicado.`}
                       </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const p = dbPatients.find((x) => String(x.id) === String(keeper.id));
+                          if (!p) return;
+                          setSelectedSlot((prev) => ({
+                            ...prev,
+                            patient: p.patient,
+                            phone: p.phone || prev?.phone || '',
+                            email: p.email || prev?.email || '',
+                            patientId: p.id,
+                            protocol: p.protocol || prev?.protocol || 'Wellness',
+                            patientNotes: p.notes || prev?.patientNotes || '',
+                          }));
+                        }}
+                        className="mt-2 w-full bg-red-700 text-white text-[9px] font-black uppercase py-2 rounded-lg hover:bg-red-800"
+                      >
+                        {locale === 'en' ? 'Use existing chart' : 'Usar expediente existente'}
+                      </button>
                     </div>
                   );
                 }
