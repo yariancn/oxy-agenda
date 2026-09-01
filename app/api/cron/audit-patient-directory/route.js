@@ -28,17 +28,34 @@ export async function GET(request) {
   try {
     const supabase = getSupabaseAdmin(CLINIC_OXYGENDGL);
 
-    const [{ count: patientCount }, { data: patients }, { data: appointments }, { data: deleteAudits }] =
+    const [{ count: patientCount }, { data: patientsRaw, error: pErr }, { data: deleteAudits }] =
       await Promise.all([
         supabase.from('patients').select('*', { count: 'exact', head: true }),
-        supabase.from('patients').select('id, Name, name, Phone, phone, created_at'),
-        supabase.from('appointments').select('id, patient, phone, patient_id, full_date'),
+        supabase.from('patients').select('*'),
         supabase.from('audit_logs')
           .select('patient_name, action, details, timestamp')
           .eq('action', 'ELIMINAR EXPEDIENTE')
           .order('timestamp', { ascending: false })
           .limit(500),
       ]);
+    if (pErr) throw new Error(pErr.message);
+
+    const patients = patientsRaw || [];
+    const appointments = [];
+    let from = 0;
+    const step = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('id, patient, phone, patient_id, full_date')
+        .order('id', { ascending: true })
+        .range(from, from + step - 1);
+      if (error) throw new Error(error.message);
+      if (!data?.length) break;
+      appointments.push(...data);
+      if (data.length < step) break;
+      from += step;
+    }
 
     const namesOnAppointments = new Map();
     for (const app of appointments || []) {
