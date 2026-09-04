@@ -73,6 +73,8 @@ export async function GET(request) {
       todayRes,
       donovanApptRes,
       donovanPatRes,
+      patriciaPatRes,
+      emptyPatientApptRes,
     ] = await Promise.all([
       fetchAll(supabase, 'patients', '*'),
       fetchAll(supabase, 'appointments', 'id, patient, phone, patient_id, full_date, check_in_status, time, equipment', {
@@ -95,6 +97,17 @@ export async function GET(request) {
         .from('patients')
         .select('*')
         .ilike('Name', '%donovan%')
+        .limit(20),
+      supabase
+        .from('patients')
+        .select('*')
+        .ilike('Name', '%patricia%')
+        .limit(40),
+      supabase
+        .from('appointments')
+        .select('id, patient, phone, patient_id, full_date, check_in_status, time, equipment')
+        .eq('full_date', today)
+        .or('patient.is.null,patient.eq.')
         .limit(20),
     ]);
 
@@ -132,12 +145,16 @@ export async function GET(request) {
       const alt = await supabase.from('patients').select('*').ilike('name', '%donovan%').limit(20);
       donovanPatients = (alt.data || []).map(mapPatient);
     }
+    const patriciaPatients = (patriciaPatRes.data || []).map(mapPatient);
+    const emptyTodayFromFilter = emptyPatientApptRes.error ? [] : (emptyPatientApptRes.data || []);
+
+    // Client-side blank detection on today (handles whitespace-only names)
+    const todayWhitespaceBlank = todayRows.filter((a) => !usablePatientDisplayName(a.patient));
 
     let repair = null;
     if (!dryRun) {
-      // Repair across full window + today's blank rows.
       repair = await repairBlankPatientNames(supabase, {
-        appointments: [...appointments, ...todayBlank],
+        appointments: [...appointments, ...todayBlank, ...todayWhitespaceBlank],
         patients,
       });
     }
@@ -149,6 +166,8 @@ export async function GET(request) {
       blankAppointments: blankAppts.length,
       blankCharts: blankCharts.length,
       todayBlankCount: todayBlank.length,
+      todayWhitespaceBlank: todayWhitespaceBlank.length,
+      emptyTodayFromFilter,
       todayBlank: todayBlank.map((a) => ({
         id: a.id,
         time: a.time,
@@ -160,6 +179,7 @@ export async function GET(request) {
       todayAppointments,
       donovanAppointments: donovanApptRes.data || [],
       donovanPatients,
+      patriciaPatients: patriciaPatients.map((p) => ({ id: p.id, patient: p.patient, phone: p.phone })),
       dryRun,
       repair,
     });
