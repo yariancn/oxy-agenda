@@ -115,11 +115,26 @@ test('calendario muestra nombre canónico aunque cita tenga nombre viejo', () =>
   assert.equal(shown.patient, 'Maria de Jesus');
 });
 
+test('calendario NO borra el nombre de la cita si el expediente está vacío', () => {
+  const patients = [{ id: '1', patient: '', phone: '3311111111' }];
+  const app = { id: 'a1', patient: 'Patricia Donovan', patient_id: '1', phone: '3311111111' };
+  const shown = withCanonicalPatientName(app, patients);
+  assert.equal(shown.patient, 'Patricia Donovan');
+});
+
+test('calendario rellena cita en blanco desde expediente con nombre', () => {
+  const patients = [{ id: '1', patient: 'Patricia Donovan', phone: '3311111111' }];
+  const app = { id: 'a1', patient: '', patient_id: '1', phone: '3311111111' };
+  const shown = withCanonicalPatientName(app, patients);
+  assert.equal(shown.patient, 'Patricia Donovan');
+});
+
 test('detecta nombre desincronizado en cita activa', () => {
   const app = { patient: 'Maria vera', phone: '3311111111' };
   const pat = { patient: 'Maria de Jesus', phone: '3311111111' };
   assert.equal(isStaleAppointmentPatientName(app, pat), true);
   assert.equal(isStaleAppointmentPatientName(app, { patient: 'Maria vera' }), false);
+  assert.equal(isStaleAppointmentPatientName(app, { patient: '' }), false);
 });
 
 test('notas Setmore se ocultan en expediente', () => {

@@ -98,6 +98,7 @@ import {
 import {
   isStaleAppointmentPatientName,
   renamePatientAcrossClinic,
+  repairBlankPatientNames,
   repairStaleAppointmentNames,
   syncAppointmentPatientName,
   withCanonicalPatientName,
@@ -1602,7 +1603,16 @@ export default function AppLayout() {
         } catch {
           /* ignore */
         }
-        repairStaleAppointmentNames(clinicDb, appointmentsReady, safePatients)
+        // Background only — does not block agenda paint.
+        Promise.resolve()
+          .then(async () => {
+            const blank = await repairBlankPatientNames(clinicDb, {
+              appointments: appointmentsReady,
+              patients: safePatients,
+            });
+            const stale = await repairStaleAppointmentNames(clinicDb, appointmentsReady, safePatients);
+            return (blank?.appointmentsFixed || 0) + (blank?.chartsFixed || 0) + (stale || 0);
+          })
           .then((repaired) => {
             if (repaired > 0 && fetchGen === fetchGenRef.current) {
               fetchAllDataRef.current({ silent: true, liveOnly: true });
