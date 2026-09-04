@@ -46,80 +46,120 @@ function mapAppointment(row) {
     patient_id: row.patient_id,
     full_date: row.full_date,
     check_in_status: row.check_in_status,
+    time: row.time,
+    equipment: row.equipment,
   };
 }
 
 /**
- * Heal blank appointment/chart names in the live agenda window.
- * GET ?name=patricia  — optional filter sample
+ * Heal blank appointment/chart names + diagnose Patricia Donovan-style blanks.
+ * GET ?dryRun=1 — inspect only
  */
 export async function GET(request) {
   const denied = authorizeCron(request);
   if (denied) return denied;
 
   const { searchParams } = new URL(request.url);
-  const nameFilter = String(searchParams.get('name') || '').trim().toLowerCase();
   const dryRun = searchParams.get('dryRun') === '1';
 
   try {
     const supabase = getSupabaseAdmin(CLINIC_OXYGENDGL);
     const { from, to } = liveSyncDateRange(CLINIC_OXYGENDGL);
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
 
-    const [patientsRaw, appointmentsRaw] = await Promise.all([
+    const [
+      patientsRaw,
+      appointmentsRaw,
+      todayRes,
+      donovanApptRes,
+      donovanPatRes,
+    ] = await Promise.all([
       fetchAll(supabase, 'patients', '*'),
-      fetchAll(supabase, 'appointments', 'id, patient, phone, patient_id, full_date, check_in_status', {
+      fetchAll(supabase, 'appointments', 'id, patient, phone, patient_id, full_date, check_in_status, time, equipment', {
         dateCol: 'full_date',
         dateFrom: from,
         dateTo: to,
       }),
+      supabase
+        .from('appointments')
+        .select('id, patient, phone, patient_id, full_date, check_in_status, time, equipment')
+        .eq('full_date', today)
+        .order('time'),
+      supabase
+        .from('appointments')
+        .select('id, patient, phone, patient_id, full_date, check_in_status, time, equipment')
+        .ilike('patient', '%donovan%')
+        .order('full_date', { ascending: false })
+        .limit(20),
+      supabase
+        .from('patients')
+        .select('*')
+        .ilike('Name', '%donovan%')
+        .limit(20),
     ]);
+
+    if (todayRes.error) throw new Error(todayRes.error.message);
 
     const patients = (patientsRaw || []).map(mapPatient);
     const appointments = (appointmentsRaw || []).map(mapAppointment);
+    const todayRows = (todayRes.data || []).map(mapAppointment);
 
     const blankAppts = appointments.filter((a) => !usablePatientDisplayName(a.patient));
     const blankCharts = patients.filter((p) => !usablePatientDisplayName(p.patient));
-    const sample = blankAppts
-      .filter((a) => !nameFilter || String(a.phone || '').includes(nameFilter) || String(a.patient_id || '').includes(nameFilter))
-      .slice(0, 20)
-      .map((a) => ({
+    const todayBlank = todayRows.filter((a) => !usablePatientDisplayName(a.patient));
+
+    const patientById = new Map(patients.map((p) => [String(p.id), p]));
+    const todayAppointments = todayRows.map((a) => {
+      const chart = a.patient_id != null ? patientById.get(String(a.patient_id)) : null;
+      return {
         id: a.id,
-        date: a.full_date,
+        time: a.time,
+        equipment: a.equipment,
+        patient: a.patient,
+        patientLen: String(a.patient ?? '').length,
+        patientJson: JSON.stringify(a.patient),
         patient_id: a.patient_id,
         phone: a.phone,
-        chartName: patients.find((p) => String(p.id) === String(a.patient_id))?.patient || null,
-      }));
-
-    // Also find Patricia Donovan specifically for diagnostics
-    const patriciaCharts = patients.filter((p) => /patricia/i.test(p.patient) && /donovan/i.test(p.patient));
-    const patriciaAppts = appointments.filter((a) => {
-      const n = String(a.patient || '');
-      const chart = patients.find((p) => String(p.id) === String(a.patient_id));
-      return /patricia/i.test(n) || /donovan/i.test(n)
-        || (chart && /patricia/i.test(chart.patient) && /donovan/i.test(chart.patient))
-        || (a.patient_id && patriciaCharts.some((p) => String(p.id) === String(a.patient_id)));
+        status: a.check_in_status,
+        chartName: chart?.patient || null,
+        chartNameLen: chart ? String(chart.patient || '').length : null,
+        wouldDisplay: usablePatientDisplayName(chart?.patient) || usablePatientDisplayName(a.patient) || '(blank)',
+      };
     });
+
+    let donovanPatients = (donovanPatRes.data || []).map(mapPatient);
+    if (donovanPatRes.error) {
+      const alt = await supabase.from('patients').select('*').ilike('name', '%donovan%').limit(20);
+      donovanPatients = (alt.data || []).map(mapPatient);
+    }
 
     let repair = null;
     if (!dryRun) {
-      repair = await repairBlankPatientNames(supabase, { appointments, patients });
+      // Repair across full window + today's blank rows.
+      repair = await repairBlankPatientNames(supabase, {
+        appointments: [...appointments, ...todayBlank],
+        patients,
+      });
     }
 
     return NextResponse.json({
       ok: true,
+      today,
       window: { from, to },
       blankAppointments: blankAppts.length,
       blankCharts: blankCharts.length,
-      blankSample: sample,
-      patriciaCharts,
-      patriciaAppts: patriciaAppts.map((a) => ({
+      todayBlankCount: todayBlank.length,
+      todayBlank: todayBlank.map((a) => ({
         id: a.id,
-        date: a.full_date,
-        patient: a.patient,
+        time: a.time,
+        equipment: a.equipment,
         patient_id: a.patient_id,
         phone: a.phone,
-        status: a.check_in_status,
+        chartName: patientById.get(String(a.patient_id))?.patient || null,
       })),
+      todayAppointments,
+      donovanAppointments: donovanApptRes.data || [],
+      donovanPatients,
       dryRun,
       repair,
     });
