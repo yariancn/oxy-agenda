@@ -54,7 +54,9 @@ export default function CalendarAssessmentBand({
               {app.time}
             </span>
             <span className="text-[8px] font-black text-fuchsia-950 uppercase truncate leading-tight">
-              {app.patient}
+              {String(app.patient || '').trim()
+                || String(app.phone || '').trim()
+                || (locale === 'en' ? 'No name' : 'Sin nombre')}
             </span>
             {blockMins >= 40 && (
               <span className="hidden sm:inline text-[6px] font-bold text-fuchsia-700 uppercase shrink-0">

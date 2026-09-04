@@ -101,6 +101,7 @@ import {
   repairBlankPatientNames,
   repairStaleAppointmentNames,
   syncAppointmentPatientName,
+  usablePatientDisplayName,
   withCanonicalPatientName,
 } from '../lib/patientNameSync';
 import { downloadCsv } from '../lib/reportCsvExport';
@@ -201,6 +202,8 @@ import {
   APPOINTMENT_LIST_COLUMNS_MIN,
   PATIENT_LIST_COLUMNS,
   PATIENT_LIST_COLUMNS_ALT,
+  isPatientIdentityColumn,
+  patientListColumnsForClinic,
   stripAppointmentSignatures,
 } from '../lib/agendaQueryColumns';
 import { extractMissingColumn } from '../lib/supabaseSelectSafe';
@@ -1170,7 +1173,20 @@ export default function AppLayout() {
           ) {
             const missing = extractMissingColumn(result.error);
             const cols = String(selectCols).split(',').map((c) => c.trim()).filter(Boolean);
-            if (missing && cols.includes(missing) && cols.length > 1) {
+            // Houston/TX uses name/phone/email — never strip Name one-by-one or charts lose display names.
+            if (
+              table === 'patients'
+              && selectCols === PATIENT_LIST_COLUMNS
+              && isPatientIdentityColumn(missing)
+            ) {
+              selectCols = PATIENT_LIST_COLUMNS_ALT;
+            } else if (
+              table === 'patients'
+              && selectCols === PATIENT_LIST_COLUMNS_ALT
+              && isPatientIdentityColumn(missing)
+            ) {
+              selectCols = '*';
+            } else if (missing && cols.includes(missing) && cols.length > 1) {
               selectCols = cols.filter((c) => c !== missing).join(', ');
             } else if (table === 'appointments' && selectCols === APPOINTMENT_LIST_COLUMNS) {
               selectCols = APPOINTMENT_LIST_COLUMNS_MIN;
@@ -1208,11 +1224,16 @@ export default function AppLayout() {
       };
 
       if (patientsOnly) {
-        const patientsData = await fetchPaginated('patients', { select: PATIENT_LIST_COLUMNS });
+        const patientsData = await fetchPaginated('patients', {
+          select: patientListColumnsForClinic(clinicId),
+        });
         if (fetchGen !== fetchGenRef.current) return;
         const safePatients = (patientsData || []).map((p) => {
           const packageHistory = p.package_history || [];
-          const patientName = String(p.Name || p.name || p.Nombre || 'Sin Nombre');
+          const rawName = String(p.Name || p.name || p.Nombre || '').trim();
+          const patientName = (!rawName || /^sin nombre$/i.test(rawName) || /^no name$/i.test(rawName))
+            ? 'Sin Nombre'
+            : rawName;
           return {
             id: p.id,
             patient: patientName,
@@ -1299,7 +1320,7 @@ export default function AppLayout() {
       const { from: agendaFrom, to: agendaTo } = liveSyncDateRange(activeClinic);
 
       const [patientsData, appointmentsData, resS, resU, resB, resC, resProt, resRoles, resPromo] = await Promise.all([
-        fetchPaginated('patients', { select: PATIENT_LIST_COLUMNS }),
+        fetchPaginated('patients', { select: patientListColumnsForClinic(clinicId) }),
         // Fast path: agenda window only (−21…+120 days). History merges in after UI is ready.
         fetchPaginated('appointments', {
           clinicScoped: shouldScopeTableByClinic(clinicId),
@@ -1337,18 +1358,25 @@ export default function AppLayout() {
       // On the fast windowed load, prefer stored historico — full charged recount runs after history merge.
       const safePatients = (patientsData || []).map(p => {
         const packageHistory = p.package_history || [];
-        const patientName = String(p.Name || p.name || p.Nombre || 'Sin Nombre');
+        const patientName = (() => {
+          const raw = String(p.Name || p.name || p.Nombre || '').trim();
+          if (!raw || raw.toLowerCase() === 'sin nombre' || raw.toLowerCase() === 'no name') return '';
+          return raw;
+        })();
+        // Prefer empty over placeholder «Sin Nombre» so agenda text is not overwritten.
+        const displayName = patientName || '';
+        const chargedFromAppointments = null;
         // Silent auto-balance using real charged visits (Finalizado + No Asistió).
         const reconciled = reconcilePatientWalletState({
           wallets: p.wallets || {},
           adeudo: Number(p.adeudo) || 0,
           historicoSesiones: p.historico_sesiones || 0,
-          chargedFromAppointments: null,
+          chargedFromAppointments,
           packageHistory,
         });
         return {
         id: p.id,
-        patient: patientName,
+        patient: displayName || 'Sin Nombre',
         phone: String(p.Phone || p.phone || ''),
         email: String(p.Email || p.email || ''),
         protocol: String(p.protocol || ''),
@@ -1364,6 +1392,7 @@ export default function AppLayout() {
         adeudo: reconciled.adeudo,
         sessionGroupId: p.session_group_id || null,
         _walletRepairPending: reconciled.changed,
+        _nameMissing: !displayName,
       };
       });
 
@@ -2077,11 +2106,17 @@ export default function AppLayout() {
 
   const calendarAppointments = useMemo(
     () => withResolvedNewPatientStars(
-      dbAppointments.map((app) => withCanonicalPatientName(app, dbPatients)),
+      dbAppointments.map((app) => {
+        const named = withCanonicalPatientName(app, dbPatients);
+        const display = usablePatientDisplayName(named.patient)
+          || usablePatientDisplayName(app.phone)
+          || (locale === 'en' ? 'No name' : 'Sin nombre');
+        return { ...named, patient: display };
+      }),
       dbPatients,
       normalizeStr,
     ),
-    [dbAppointments, dbPatients],
+    [dbAppointments, dbPatients, locale],
   );
 
   // Unique names/phones from agenda so autocomplete works even if a chart was missing from a bad page load.

@@ -1,11 +1,16 @@
 import { NextResponse } from 'next/server';
 import { authorizeCron } from '../../../../lib/cronAuth.js';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
-import { CLINIC_OXYGENDGL } from '../../../../lib/clinicRegistry.js';
+import {
+  CLINIC_OXYGENDGL,
+  CLINIC_SHENANDOAH,
+  normalizeClinicId,
+} from '../../../../lib/clinicRegistry.js';
 import { liveSyncDateRange } from '../../../../lib/liveSyncToken.js';
 import {
   repairBlankPatientNames,
   usablePatientDisplayName,
+  withCanonicalPatientName,
 } from '../../../../lib/patientNameSync.js';
 
 export const runtime = 'nodejs';
@@ -51,9 +56,18 @@ function mapAppointment(row) {
   };
 }
 
+function resolveClinic(raw) {
+  const v = String(raw || '').trim().toLowerCase();
+  if (!v || v === 'gdl' || v === 'oxygengdl' || v === 'mx') return CLINIC_OXYGENDGL;
+  if (v === 'tx' || v === 'houston' || v === 'shenandoah' || v.includes('shenandoah')) {
+    return CLINIC_SHENANDOAH;
+  }
+  return normalizeClinicId(raw) || CLINIC_OXYGENDGL;
+}
+
 /**
- * Heal blank appointment/chart names + diagnose Patricia Donovan-style blanks.
- * GET ?dryRun=1 — inspect only
+ * Heal blank appointment/chart names.
+ * GET ?clinic=Shenandoah|Oxygengdl&dryRun=1
  */
 export async function GET(request) {
   const denied = authorizeCron(request);
@@ -61,127 +75,130 @@ export async function GET(request) {
 
   const { searchParams } = new URL(request.url);
   const dryRun = searchParams.get('dryRun') === '1';
+  const clinic = resolveClinic(searchParams.get('clinic') || 'Shenandoah');
+  const both = searchParams.get('both') === '1';
 
   try {
-    const supabase = getSupabaseAdmin(CLINIC_OXYGENDGL);
-    const { from, to } = liveSyncDateRange(CLINIC_OXYGENDGL);
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+    const clinics = both ? [CLINIC_OXYGENDGL, CLINIC_SHENANDOAH] : [clinic];
+    const results = [];
 
-    const [
-      patientsRaw,
-      appointmentsRaw,
-      todayRes,
-      donovanApptRes,
-      donovanPatRes,
-      patriciaPatRes,
-      emptyPatientApptRes,
-    ] = await Promise.all([
-      fetchAll(supabase, 'patients', '*'),
-      fetchAll(supabase, 'appointments', 'id, patient, phone, patient_id, full_date, check_in_status, time, equipment', {
-        dateCol: 'full_date',
-        dateFrom: from,
-        dateTo: to,
-      }),
-      supabase
-        .from('appointments')
-        .select('id, patient, phone, patient_id, full_date, check_in_status, time, equipment')
-        .eq('full_date', today)
-        .order('time'),
-      supabase
-        .from('appointments')
-        .select('id, patient, phone, patient_id, full_date, check_in_status, time, equipment')
-        .ilike('patient', '%donovan%')
-        .order('full_date', { ascending: false })
-        .limit(20),
-      supabase
-        .from('patients')
-        .select('*')
-        .ilike('Name', '%donovan%')
-        .limit(20),
-      supabase
-        .from('patients')
-        .select('*')
-        .ilike('Name', '%patricia%')
-        .limit(40),
-      supabase
-        .from('appointments')
-        .select('id, patient, phone, patient_id, full_date, check_in_status, time, equipment')
-        .eq('full_date', today)
-        .or('patient.is.null,patient.eq.')
-        .limit(20),
-    ]);
+    for (const clinicId of clinics) {
+      const supabase = getSupabaseAdmin(clinicId);
+      const { from, to } = liveSyncDateRange(clinicId);
+      const today = new Date().toLocaleDateString('en-CA', {
+        timeZone: clinicId === CLINIC_SHENANDOAH ? 'America/Chicago' : 'America/Mexico_City',
+      });
 
-    if (todayRes.error) throw new Error(todayRes.error.message);
+      const [patientsRaw, appointmentsRaw, todayRes, donovanApptRes, donovanPatRes] = await Promise.all([
+        fetchAll(supabase, 'patients', '*'),
+        fetchAll(supabase, 'appointments', 'id, patient, phone, patient_id, full_date, check_in_status, time, equipment', {
+          dateCol: 'full_date',
+          dateFrom: from,
+          dateTo: to,
+        }),
+        supabase
+          .from('appointments')
+          .select('id, patient, phone, patient_id, full_date, check_in_status, time, equipment')
+          .eq('full_date', today)
+          .order('time'),
+        supabase
+          .from('appointments')
+          .select('id, patient, phone, patient_id, full_date, check_in_status, time, equipment')
+          .ilike('patient', '%donovan%')
+          .order('full_date', { ascending: false })
+          .limit(20),
+        (async () => {
+          let res = await supabase.from('patients').select('*').ilike('Name', '%donovan%').limit(20);
+          if (res.error) res = await supabase.from('patients').select('*').ilike('name', '%donovan%').limit(20);
+          return res;
+        })(),
+      ]);
 
-    const patients = (patientsRaw || []).map(mapPatient);
-    const appointments = (appointmentsRaw || []).map(mapAppointment);
-    const todayRows = (todayRes.data || []).map(mapAppointment);
+      if (todayRes.error) throw new Error(`${clinicId} today: ${todayRes.error.message}`);
 
-    const blankAppts = appointments.filter((a) => !usablePatientDisplayName(a.patient));
-    const blankCharts = patients.filter((p) => !usablePatientDisplayName(p.patient));
-    const todayBlank = todayRows.filter((a) => !usablePatientDisplayName(a.patient));
+      const patients = (patientsRaw || []).map(mapPatient);
+      const appointments = (appointmentsRaw || []).map(mapAppointment);
+      const todayRows = (todayRes.data || []).map(mapAppointment);
+      const patientById = new Map(patients.map((p) => [String(p.id), p]));
 
-    const patientById = new Map(patients.map((p) => [String(p.id), p]));
-    const todayAppointments = todayRows.map((a) => {
-      const chart = a.patient_id != null ? patientById.get(String(a.patient_id)) : null;
-      return {
-        id: a.id,
-        time: a.time,
-        equipment: a.equipment,
-        patient: a.patient,
-        patientLen: String(a.patient ?? '').length,
-        patientJson: JSON.stringify(a.patient),
-        patient_id: a.patient_id,
-        phone: a.phone,
-        status: a.check_in_status,
-        chartName: chart?.patient || null,
-        chartNameLen: chart ? String(chart.patient || '').length : null,
-        wouldDisplay: usablePatientDisplayName(chart?.patient) || usablePatientDisplayName(a.patient) || '(blank)',
-      };
-    });
+      const blankAppts = appointments.filter((a) => !usablePatientDisplayName(a.patient));
+      const blankCharts = patients.filter((p) => !usablePatientDisplayName(p.patient));
+      const todayBlank = todayRows.filter((a) => !usablePatientDisplayName(a.patient));
 
-    let donovanPatients = (donovanPatRes.data || []).map(mapPatient);
-    if (donovanPatRes.error) {
-      const alt = await supabase.from('patients').select('*').ilike('name', '%donovan%').limit(20);
-      donovanPatients = (alt.data || []).map(mapPatient);
-    }
-    const patriciaPatients = (patriciaPatRes.data || []).map(mapPatient);
-    const emptyTodayFromFilter = emptyPatientApptRes.error ? [] : (emptyPatientApptRes.data || []);
+      // What the calendar WOULD show after withCanonicalPatientName (catches empty chart overwrite)
+      const todayDisplay = todayRows.map((a) => {
+        const shown = withCanonicalPatientName(a, patients);
+        const display = usablePatientDisplayName(shown.patient)
+          || usablePatientDisplayName(a.phone)
+          || '(blank)';
+        return {
+          id: a.id,
+          time: a.time,
+          equipment: a.equipment,
+          rawPatient: a.patient,
+          display,
+          patient_id: a.patient_id,
+          chartName: patientById.get(String(a.patient_id))?.patient || null,
+          status: a.check_in_status,
+        };
+      });
 
-    // Client-side blank detection on today (handles whitespace-only names)
-    const todayWhitespaceBlank = todayRows.filter((a) => !usablePatientDisplayName(a.patient));
+      const wouldShowBlank = todayDisplay.filter((a) => a.display === '(blank)' || !usablePatientDisplayName(a.display));
 
-    let repair = null;
-    if (!dryRun) {
-      repair = await repairBlankPatientNames(supabase, {
-        appointments: [...appointments, ...todayBlank, ...todayWhitespaceBlank],
-        patients,
+      let donovanPatients = (donovanPatRes.data || []).map(mapPatient);
+      const donovanAppts = donovanApptRes.data || [];
+
+      // Also find donovan by chart link even if appointment.patient blank
+      const donovanLinked = todayRows.filter((a) => {
+        const chart = patientById.get(String(a.patient_id));
+        return chart && /donovan/i.test(chart.patient);
+      });
+
+      let repair = null;
+      if (!dryRun) {
+        repair = await repairBlankPatientNames(supabase, {
+          appointments: [...appointments, ...todayBlank, ...donovanAppts.map(mapAppointment)],
+          patients,
+        });
+        // Force-fill Patricia Donovan style blanks from chart when appointment.patient empty
+        for (const app of [...todayBlank, ...donovanLinked]) {
+          const chart = patientById.get(String(app.patient_id));
+          const chartName = usablePatientDisplayName(chart?.patient);
+          if (!chartName || usablePatientDisplayName(app.patient)) continue;
+          const { error } = await supabase.from('appointments').update({ patient: chartName }).eq('id', app.id);
+          if (!error) {
+            repair = repair || { appointmentsFixed: 0, chartsFixed: 0 };
+            repair.appointmentsFixed = (repair.appointmentsFixed || 0) + 1;
+            app.patient = chartName;
+          }
+        }
+      }
+
+      results.push({
+        clinic: clinicId,
+        today,
+        window: { from, to },
+        blankAppointments: blankAppts.length,
+        blankCharts: blankCharts.length,
+        todayBlankCount: todayBlank.length,
+        todayWouldShowBlank: wouldShowBlank,
+        todayAppointments: todayDisplay,
+        donovanAppointments: donovanAppts,
+        donovanPatients,
+        donovanLinkedToday: donovanLinked.map((a) => ({
+          id: a.id,
+          time: a.time,
+          patient: a.patient,
+          chartName: patientById.get(String(a.patient_id))?.patient,
+        })),
+        dryRun,
+        repair,
       });
     }
 
     return NextResponse.json({
       ok: true,
-      today,
-      window: { from, to },
-      blankAppointments: blankAppts.length,
-      blankCharts: blankCharts.length,
-      todayBlankCount: todayBlank.length,
-      todayWhitespaceBlank: todayWhitespaceBlank.length,
-      emptyTodayFromFilter,
-      todayBlank: todayBlank.map((a) => ({
-        id: a.id,
-        time: a.time,
-        equipment: a.equipment,
-        patient_id: a.patient_id,
-        phone: a.phone,
-        chartName: patientById.get(String(a.patient_id))?.patient || null,
-      })),
-      todayAppointments,
-      donovanAppointments: donovanApptRes.data || [],
-      donovanPatients,
-      patriciaPatients: patriciaPatients.map((p) => ({ id: p.id, patient: p.patient, phone: p.phone })),
-      dryRun,
-      repair,
+      results: both ? results : results[0],
     });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error.message || 'Repair failed' }, { status: 500 });
