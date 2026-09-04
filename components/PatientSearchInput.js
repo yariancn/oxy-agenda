@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { preferUnblockedPatient } from '../lib/deletePatientChart';
 
 function normalizeStr(str) {
@@ -15,10 +15,11 @@ function digitsOnly(str) {
   return String(str || '').replace(/\D/g, '');
 }
 
+const MAX_DROPDOWN_RESULTS = 40;
+
 /**
  * Directory search for booking. Prefer real patient charts; optionally enrich with
  * unique names seen on appointments so orphan agenda names still autocomplete.
- * No hard cap on results — scroll the dropdown to see everyone who matches.
  */
 export default function PatientSearchInput({
   patients = [],
@@ -37,6 +38,7 @@ export default function PatientSearchInput({
   const [open, setOpen] = useState(false);
   const [pickedId, setPickedId] = useState(selectedPatientId);
   const wrapRef = useRef(null);
+  const deferredQuery = useDeferredValue(query);
 
   useEffect(() => {
     setQuery(value || '');
@@ -70,19 +72,22 @@ export default function PatientSearchInput({
       }
     }
     const byKey = new Map();
+    const nameKeys = new Set();
     for (const p of [...chartByContact.values(), ...chartsWithoutContact]) {
       const idKey = p.id != null ? `id:${p.id}` : null;
-      const nameKey = `name:${normalizeStr(p.patient)}`;
+      const nameNorm = normalizeStr(p.patient);
+      const nameKey = `name:${nameNorm}`;
       if (idKey) byKey.set(idKey, p);
       else if (nameKey !== 'name:') byKey.set(nameKey, p);
+      if (nameNorm) nameKeys.add(nameNorm);
     }
     for (const hint of appointmentHints || []) {
       const name = String(hint?.patient || '').trim();
       if (!name) continue;
-      const nameKey = `name:${normalizeStr(name)}`;
-      if (nameKey === 'name:') continue;
-      const already = [...byKey.values()].some((p) => normalizeStr(p.patient) === normalizeStr(name));
-      if (already) continue;
+      const nameNorm = normalizeStr(name);
+      if (!nameNorm || nameKeys.has(nameNorm)) continue;
+      nameKeys.add(nameNorm);
+      const nameKey = `name:${nameNorm}`;
       byKey.set(`hint:${nameKey}`, {
         id: hint.patientId || hint.patient_id || `hint:${nameKey}`,
         patient: name,
@@ -95,8 +100,8 @@ export default function PatientSearchInput({
     return [...byKey.values()];
   }, [patients, appointmentHints]);
 
-  const term = normalizeStr(query);
-  const termDigits = digitsOnly(query);
+  const term = normalizeStr(deferredQuery);
+  const termDigits = digitsOnly(deferredQuery);
   const nameMatches = searchPool.filter(
     (p) => normalizeStr(p.patient) === normalizeStr(query) && !String(p.id).startsWith('hint:'),
   );
@@ -108,28 +113,30 @@ export default function PatientSearchInput({
     || null;
   const confirmed = exactMatch && String(exactMatch.id) === String(pickedId);
 
-  const filtered = searchPool
-    .filter((p) => {
-      if (!term && !termDigits) return false;
-      const name = normalizeStr(p.patient);
-      const phoneDigits = digitsOnly(p.phone);
-      if (term && name.includes(term)) return true;
-      if (termDigits && phoneDigits.includes(termDigits)) return true;
-      return false;
-    })
-    .sort((a, b) => {
-      // Prefer real charts over appointment hints; then unblocked; then names that start with the term.
-      const aHint = a._fromAppointment ? 1 : 0;
-      const bHint = b._fromAppointment ? 1 : 0;
-      if (aHint !== bHint) return aHint - bHint;
-      const aBlocked = a.is_blocked ? 1 : 0;
-      const bBlocked = b.is_blocked ? 1 : 0;
-      if (aBlocked !== bBlocked) return aBlocked - bBlocked;
-      const aStarts = normalizeStr(a.patient).startsWith(term) ? 0 : 1;
-      const bStarts = normalizeStr(b.patient).startsWith(term) ? 0 : 1;
-      if (aStarts !== bStarts) return aStarts - bStarts;
-      return String(a.patient || '').localeCompare(String(b.patient || ''), undefined, { sensitivity: 'base' });
-    });
+  const filtered = useMemo(() => {
+    if (!term && !termDigits) return [];
+    return searchPool
+      .filter((p) => {
+        const name = normalizeStr(p.patient);
+        const phoneDigits = digitsOnly(p.phone);
+        if (term && name.includes(term)) return true;
+        if (termDigits && phoneDigits.includes(termDigits)) return true;
+        return false;
+      })
+      .sort((a, b) => {
+        const aHint = a._fromAppointment ? 1 : 0;
+        const bHint = b._fromAppointment ? 1 : 0;
+        if (aHint !== bHint) return aHint - bHint;
+        const aBlocked = a.is_blocked ? 1 : 0;
+        const bBlocked = b.is_blocked ? 1 : 0;
+        if (aBlocked !== bBlocked) return aBlocked - bBlocked;
+        const aStarts = normalizeStr(a.patient).startsWith(term) ? 0 : 1;
+        const bStarts = normalizeStr(b.patient).startsWith(term) ? 0 : 1;
+        if (aStarts !== bStarts) return aStarts - bStarts;
+        return String(a.patient || '').localeCompare(String(b.patient || ''), undefined, { sensitivity: 'base' });
+      })
+      .slice(0, MAX_DROPDOWN_RESULTS);
+  }, [searchPool, term, termDigits]);
 
   const handlePick = (p) => {
     setQuery(p.patient);

@@ -198,6 +198,8 @@ import { clearPendingBitacoraSeal } from '../lib/pendingBitacoraSeal';
 import {
   APPOINTMENT_LIST_COLUMNS,
   APPOINTMENT_LIST_COLUMNS_MIN,
+  PATIENT_LIST_COLUMNS,
+  PATIENT_LIST_COLUMNS_ALT,
   stripAppointmentSignatures,
 } from '../lib/agendaQueryColumns';
 import { extractMissingColumn } from '../lib/supabaseSelectSafe';
@@ -345,6 +347,7 @@ export default function AppLayout() {
   const [adminSubTab, setAdminSubTab] = useState('general');
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [directoryVisibleCount, setDirectoryVisibleCount] = useState(48);
   const [dbStatus, setDbStatus] = useState('cargando');
   const [dbErrorMessage, setDbErrorMessage] = useState('');
   const fetchGenRef = useRef(0);
@@ -1170,6 +1173,8 @@ export default function AppLayout() {
               selectCols = cols.filter((c) => c !== missing).join(', ');
             } else if (table === 'appointments' && selectCols === APPOINTMENT_LIST_COLUMNS) {
               selectCols = APPOINTMENT_LIST_COLUMNS_MIN;
+            } else if (table === 'patients' && selectCols === PATIENT_LIST_COLUMNS) {
+              selectCols = PATIENT_LIST_COLUMNS_ALT;
             } else {
               selectCols = '*';
             }
@@ -1202,7 +1207,7 @@ export default function AppLayout() {
       };
 
       if (patientsOnly) {
-        const patientsData = await fetchPaginated('patients');
+        const patientsData = await fetchPaginated('patients', { select: PATIENT_LIST_COLUMNS });
         if (fetchGen !== fetchGenRef.current) return;
         const safePatients = (patientsData || []).map((p) => {
           const packageHistory = p.package_history || [];
@@ -1290,10 +1295,16 @@ export default function AppLayout() {
         return res;
       };
 
+      const { from: agendaFrom, to: agendaTo } = liveSyncDateRange(activeClinic);
+
       const [patientsData, appointmentsData, resS, resU, resB, resC, resProt, resRoles, resPromo] = await Promise.all([
-        fetchPaginated('patients'),
+        fetchPaginated('patients', { select: PATIENT_LIST_COLUMNS }),
+        // Fast path: agenda window only (−21…+120 days). History merges in after UI is ready.
         fetchPaginated('appointments', {
           clinicScoped: shouldScopeTableByClinic(clinicId),
+          dateCol: 'full_date',
+          dateFrom: agendaFrom,
+          dateTo: agendaTo,
           select: APPOINTMENT_LIST_COLUMNS,
           stripSignatures: true,
         }),
@@ -1322,20 +1333,16 @@ export default function AppLayout() {
       assertDbResult('protocols', resProt);
       assertDbResult('user_roles', resRoles);
 
-      const appointmentsForBalance = appointmentsData || [];
+      // On the fast windowed load, prefer stored historico — full charged recount runs after history merge.
       const safePatients = (patientsData || []).map(p => {
         const packageHistory = p.package_history || [];
         const patientName = String(p.Name || p.name || p.Nombre || 'Sin Nombre');
-        const chargedFromAppointments = countPackageChargedSessions(appointmentsForBalance, {
-          patientId: p.id,
-          patientName,
-        });
         // Silent auto-balance using real charged visits (Finalizado + No Asistió).
         const reconciled = reconcilePatientWalletState({
           wallets: p.wallets || {},
           adeudo: Number(p.adeudo) || 0,
           historicoSesiones: p.historico_sesiones || 0,
-          chargedFromAppointments,
+          chargedFromAppointments: null,
           packageHistory,
         });
         return {
@@ -1546,6 +1553,41 @@ export default function AppLayout() {
       if (!silent) pendingScrollToNowRef.current = true;
       // Do NOT broadcast here — loading this tab is not a data change, and same-tab
       // BroadcastChannel + live sync was aborting in-flight loads (stuck "LOADING").
+
+      // Background: history outside the agenda window (reports, charts, ⭐ accuracy).
+      // UI is already interactive with −21…+120 days.
+      const shiftIso = (iso, days) => {
+        const [y, m, d] = String(iso || '').split('-').map(Number);
+        if (![y, m, d].every(Number.isFinite)) return iso;
+        const dt = new Date(Date.UTC(y, m - 1, d));
+        dt.setUTCDate(dt.getUTCDate() + days);
+        return dt.toISOString().slice(0, 10);
+      };
+      Promise.all([
+        fetchPaginated('appointments', {
+          clinicScoped: shouldScopeTableByClinic(clinicId),
+          dateCol: 'full_date',
+          dateTo: shiftIso(agendaFrom, -1),
+          select: APPOINTMENT_LIST_COLUMNS,
+          stripSignatures: true,
+        }),
+        fetchPaginated('appointments', {
+          clinicScoped: shouldScopeTableByClinic(clinicId),
+          dateCol: 'full_date',
+          dateFrom: shiftIso(agendaTo, 1),
+          select: APPOINTMENT_LIST_COLUMNS,
+          stripSignatures: true,
+        }),
+      ]).then(([before, after]) => {
+        if (fetchGen !== fetchGenRef.current) return;
+        const extra = [...(before || []), ...(after || [])];
+        if (!extra.length) return;
+        setDbAppointments((prev) => {
+          const merged = new Map((prev || []).map((a) => [a.id, a]));
+          for (const row of extra) merged.set(row.id, row);
+          return [...merged.values()];
+        });
+      }).catch(() => {});
 
       const nameRepairKey = `oxy_name_repair_${clinicId}`;
       let allowNameRepair = true;
@@ -3475,6 +3517,8 @@ export default function AppLayout() {
     if (termDigits && pPhoneDigits.includes(termDigits)) return true;
     return false;
   });
+  const visibleDirectoryPatients = filteredPatients.slice(0, directoryVisibleCount);
+  const directoryHasMore = filteredPatients.length > directoryVisibleCount;
 
   const openSaleReceiptModal = (tx, patientName, patientPhone = '') => {
     setReportReceipt({ ...tx, patient: patientName || tx.patient });
@@ -5896,7 +5940,16 @@ export default function AppLayout() {
                 <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">{L.directory}: {activeClinic}</h2>
                 <button onClick={() => setShowNewPatientModal(true)} className="bg-emerald-100 text-emerald-800 border border-emerald-300 px-4 py-2 rounded-lg text-xs font-black uppercase shadow-sm hover:bg-emerald-200 transition">+ {L.newPatient}</button>
               </div>
-              <input type="text" placeholder={L.searchPatients} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full md:max-w-md p-3 border border-slate-300 rounded-xl shadow-sm outline-none focus:border-blue-500 font-bold bg-white text-slate-900 text-sm" />
+              <input
+                type="text"
+                placeholder={L.searchPatients}
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setDirectoryVisibleCount(48);
+                }}
+                className="w-full md:max-w-md p-3 border border-slate-300 rounded-xl shadow-sm outline-none focus:border-blue-500 font-bold bg-white text-slate-900 text-sm"
+              />
             </div>
             {currentUserLevel <= 2 && (
               <div className="mb-4 bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 text-[10px] font-bold text-violet-900 normal-case leading-relaxed">
@@ -5906,7 +5959,7 @@ export default function AppLayout() {
             
             {dbStatus === 'listo' && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                 {filteredPatients.map(p => (
+                 {visibleDirectoryPatients.map(p => (
                    <div key={p.id} className={`bg-slate-50 border ${p.is_blocked ? 'border-red-400 bg-red-50' : 'border-slate-200'} p-4 rounded-2xl hover:shadow-lg transition flex flex-col relative`}>
 
                       {p.is_blocked && (
@@ -5962,6 +6015,22 @@ export default function AppLayout() {
                    </div>
                  ))}
                  {filteredPatients.length === 0 && <div className="col-span-full py-20 text-center"><p className="text-slate-400 font-black uppercase text-lg">{L.noPatients}</p></div>}
+                 {directoryHasMore && (
+                   <div className="col-span-full flex flex-col items-center gap-2 py-4">
+                     <p className="text-[10px] font-bold text-slate-500 uppercase">
+                       {locale === 'en'
+                         ? `Showing ${visibleDirectoryPatients.length} of ${filteredPatients.length}`
+                         : `Mostrando ${visibleDirectoryPatients.length} de ${filteredPatients.length}`}
+                     </p>
+                     <button
+                       type="button"
+                       onClick={() => setDirectoryVisibleCount((n) => n + 48)}
+                       className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-black uppercase px-4 py-2 rounded-lg border border-slate-300"
+                     >
+                       {locale === 'en' ? 'Show more' : 'Mostrar más'}
+                     </button>
+                   </div>
+                 )}
               </div>
             )}
             {dbStatus !== 'listo' && (

@@ -70,6 +70,12 @@ import {
 } from '../lib/deletePatientChart.js';
 import { digitsOnly } from '../lib/ensurePatient.js';
 import { isPastCalendarDay, isPastDateTime } from '../lib/clinicClock.js';
+import { withResolvedNewPatientStars } from '../lib/patientFirstVisit.js';
+import {
+  buildChargedSessionCountIndex,
+  chargedSessionsFromIndex,
+  countPackageChargedSessions,
+} from '../lib/patientAppointmentHistory.js';
 
 process.env.STAFF_SESSION_SECRET = process.env.STAFF_SESSION_SECRET || 'test-secret-for-simulations';
 let passed = 0;
@@ -731,6 +737,35 @@ test('staff: mismo día con hora pasada se puede agendar', () => {
   // Same-day 9:00 AM when now is 10:30 AM — past datetime, but not prior calendar day
   assert.equal(isPastDateTime(today, 9 * 60, { dateStr: today, mins: 10 * 60 + 30 }), true);
   assert.equal(isPastCalendarDay(today, today), false);
+});
+
+test('⭐ new-patient: índice O(n) marca solo la primera visita', () => {
+  const patients = [{ id: 'p1', patient: 'Ana', historicoSesiones: 0 }];
+  const apps = [
+    { id: 1, patient: 'Ana', patient_id: 'p1', full_date: '2026-01-10', time: '10:00 AM', check_in_status: 'Finalizado' },
+    { id: 2, patient: 'Ana', patient_id: 'p1', full_date: '2026-02-10', time: '10:00 AM', check_in_status: 'Agendado' },
+    { id: 3, patient: 'Bob', patient_id: 'p2', full_date: '2026-02-11', time: '09:00 AM', check_in_status: 'Agendado' },
+  ];
+  const resolved = withResolvedNewPatientStars(apps, patients);
+  assert.equal(resolved.find((a) => a.id === 1)?.is_new_patient, true);
+  assert.equal(resolved.find((a) => a.id === 2)?.is_new_patient, false);
+  assert.equal(resolved.find((a) => a.id === 3)?.is_new_patient, true);
+});
+
+test('sesiones cobradas: índice one-pass coincide con conteo por paciente', () => {
+  const apps = [
+    { patient_id: 'p1', patient: 'Ana', check_in_status: 'Finalizado', equipment: 'Cámara 1' },
+    { patient_id: 'p1', patient: 'Ana', check_in_status: 'No Asistió', equipment: 'Cámara 1' },
+    { patient_id: 'p1', patient: 'Ana', check_in_status: 'Cancelado', equipment: 'Cámara 1' },
+    { patient_id: 'p2', patient: 'Bob', check_in_status: 'Finalizado', equipment: 'Cámara 2' },
+  ];
+  const index = buildChargedSessionCountIndex(apps);
+  assert.equal(chargedSessionsFromIndex(index, { patientId: 'p1', patientName: 'Ana' }), 2);
+  assert.equal(chargedSessionsFromIndex(index, { patientId: 'p2', patientName: 'Bob' }), 1);
+  assert.equal(
+    chargedSessionsFromIndex(index, { patientId: 'p1', patientName: 'Ana' }),
+    countPackageChargedSessions(apps, { patientId: 'p1', patientName: 'Ana' }),
+  );
 });
 
 console.log(`\n${passed} pruebas OK\n`);

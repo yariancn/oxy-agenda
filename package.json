@@ -17,7 +17,11 @@
     "seed-demo:gdl:both": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs --both",
     "import-setmore:gdl": "node --env-file=.env.local scripts/import-setmore-gdl.mjs",
     "import-setmore:gdl:dry": "node --env-file=.env.local scripts/import-setmore-gdl.mjs --dry-run",
-    "import-setmore:gdl:no-clear": "node --env-file=.env.local scripts/import-setmore-gdl.mjs --no-clear",
+    "import-setmore:gdl:wipe": "node --env-file=.env.local scripts/import-setmore-gdl.mjs --confirm-wipe",
+    "import-setmore:gdl:no-clear": "node --env-file=.env.local scripts/import-setmore-gdl.mjs",
+    "import-setmore:customers:gdl": "node --env-file=.env.local scripts/import-setmore-customers-gdl.mjs",
+    "import-setmore:customers:gdl:dry": "node --env-file=.env.local scripts/import-setmore-customers-gdl.mjs --dry-run",
+    "backup:gdl": "node --env-file=.env.local scripts/backup-gdl.mjs",
     "simulate": "node scripts/simulate-user-flows.mjs"
   },
   "dependencies": {

@@ -4,9 +4,11 @@
  * Importa citas Setmore → Supabase GDL (Oxygengdl).
  *
  * Uso:
- *   npm run import-setmore:gdl:dry
- *   npm run import-setmore:gdl          # limpia TODO + importa
- *   npm run import-setmore:gdl -- --no-clear   # solo importa
+ *   npm run import-setmore:gdl:dry              # vista previa
+ *   npm run import-setmore:gdl                  # importa SIN borrar (default seguro)
+ *   npm run import-setmore:gdl:wipe             # borra TODO + importa (requiere --confirm-wipe)
+ *
+ * NUNCA borra pacientes/citas salvo --confirm-wipe explícito (con respaldo previo).
  *
  * Archivos por defecto (~/Downloads):
  *   Appointments-2.xlsx  — ene–jul 2026 (histórico)
@@ -25,6 +27,8 @@ import {
   mergeSetmoreRows,
   mexicoNow,
 } from '../lib/setmoreImport.js';
+import { backupClinicTables, fetchAllRows } from '../lib/clinicBackup.js';
+import { digitsOnly } from '../lib/setmoreImport.js';
 
 const DOWNLOADS = join(homedir(), 'Downloads');
 const DEFAULT_FILES = {
@@ -35,7 +39,10 @@ const DEFAULT_FILES = {
 
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
-const noClear = args.has('--no-clear');
+/** Destructive wipe — must be passed explicitly. Default is merge-only (no delete). */
+const confirmWipe = args.has('--confirm-wipe');
+/** @deprecated no-op; kept so old commands do not wipe by accident */
+const legacyNoClear = args.has('--no-clear');
 const fileArg = (flag) => process.argv.find((a) => a.startsWith(`${flag}=`))?.split('=').slice(1).join('=');
 
 const paths = {
@@ -68,7 +75,7 @@ async function wipeTable(supabase, table, selectCol = 'id') {
 }
 
 async function clearAllData(supabase) {
-  console.log('\n🧹 Limpieza total (datos de prueba)…');
+  console.log('\n🧹 Limpieza total — SOLO con --confirm-wipe…');
   const audit = await wipeTable(supabase, 'audit_logs');
   const apps = await wipeTable(supabase, 'appointments');
   let groups = 0;
@@ -177,15 +184,26 @@ function timeToMins(timeStr) {
   return h * 60 + min;
 }
 
-async function insertPatients(supabase, patients) {
+async function insertPatients(supabase, patients, { skipExistingPhones = false } = {}) {
+  let rows = patients;
+  if (skipExistingPhones) {
+    const existing = await fetchAllRows(supabase, 'patients');
+    const phones = new Set(
+      existing.map((p) => digitsOnly(p.Phone || p.phone).slice(-10)).filter((p) => p.length === 10),
+    );
+    rows = patients.filter((p) => !phones.has(digitsOnly(p.Phone).slice(-10)));
+    console.log(`  Omitidos (teléfono ya en base): ${patients.length - rows.length}`);
+  }
+  if (!rows.length) return 0;
+
   let inserted = 0;
   const batchSize = 100;
-  for (let i = 0; i < patients.length; i += batchSize) {
-    const batch = patients.slice(i, i + batchSize);
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
     const { error } = await supabase.from('patients').insert(batch);
     if (error) throw new Error(`patients insert: ${error.message}`);
     inserted += batch.length;
-    process.stdout.write(`\r  Pacientes: ${inserted}/${patients.length}`);
+    process.stdout.write(`\r  Pacientes: ${inserted}/${rows.length}`);
   }
   process.stdout.write('\n');
   return inserted;
@@ -264,16 +282,30 @@ async function main() {
     console.log('\n[dry-run] Sin cambios en la base de datos.');
     console.log('  Pacientes sin cartera/pagos (wallets={}, adeudo=0)');
     console.log(`  Nota en citas: "${IMPORT_NOTE}"`);
+    if (confirmWipe) {
+      console.log('\n⚠️  Con --confirm-wipe se borrarían TODOS los pacientes/citas antes de importar.');
+      console.log('   Se haría respaldo JSON automático en ~/Downloads antes del borrado.');
+    } else {
+      console.log('\nℹ️  Modo seguro: importaría sin borrar expedientes existentes.');
+      console.log('   Pacientes con mismo teléfono pueden fallar al insertar — usa import de clientes aparte.');
+    }
     return;
   }
 
-  if (!noClear) {
+  if (confirmWipe) {
     if (!supabase) throw new Error('Se requiere SUPABASE_GDL_SERVICE_ROLE_KEY para limpiar e importar');
+    console.log('\n💾 Respaldando antes del borrado total…');
+    const backup = await backupClinicTables(supabase, { label: 'gdl-pre-wipe' });
+    console.log(`✓ Respaldo en: ${backup.dir}`);
     await clearAllData(supabase);
+  } else if (legacyNoClear) {
+    console.log('\nℹ️  --no-clear ya no es necesario: el import no borra por default.');
+  } else {
+    console.log('\nℹ️  Importación sin borrado (pacientes existentes se conservan).');
   }
 
   console.log('\n⬆️  Insertando pacientes (sin pagos ni cartera)…');
-  await insertPatients(supabase, plan.patients);
+  await insertPatients(supabase, plan.patients, { skipExistingPhones: !confirmWipe });
 
   console.log('⬆️  Insertando citas…');
   const apptRows = plan.mapped.map((m) => m.appointment);
