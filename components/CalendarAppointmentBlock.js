@@ -82,13 +82,16 @@ function StackedIndicators({ app, locale, compact, ultra }) {
   );
 }
 
-function PatientName({ name, isNew, className = '' }) {
+function PatientName({ name, phone, isNew, className = '', locale = 'es' }) {
+  const display = String(name || '').trim()
+    || String(phone || '').trim()
+    || (locale === 'en' ? 'No name' : 'Sin nombre');
   return (
     <div
       className={`font-black uppercase leading-[1.15] line-clamp-2 break-words w-full min-w-0 ${className}`}
-      title={name}
+      title={display}
     >
-      {isNew ? '⭐ ' : ''}{name}
+      {isNew ? '⭐ ' : ''}{display}
     </div>
   );
 }
@@ -281,9 +284,9 @@ export default function CalendarAppointmentBlock({
         <div className="flex flex-col items-center justify-start h-full py-0.5 gap-0.5 text-center min-w-0 w-full">
           <span className="text-[6px] font-black uppercase leading-none opacity-80 shrink-0">{app.time.replace(' AM', 'a').replace(' PM', 'p')}</span>
           {showNameInUltra ? (
-            <PatientName name={app.patient} isNew={app.is_new_patient} className="text-[7px] text-center" />
+            <PatientName name={app.patient} phone={app.phone} isNew={app.is_new_patient} locale={locale} className="text-[7px] text-center" />
           ) : (
-            <span className="text-[8px] font-black uppercase leading-none">{getPatientInitials(app.patient)}</span>
+            <span className="text-[8px] font-black uppercase leading-none">{getPatientInitials(app.patient || app.phone)}</span>
           )}
           <StackedIndicators app={app} locale={locale} compact ultra />
         </div>
@@ -305,7 +308,9 @@ export default function CalendarAppointmentBlock({
             <div className="flex flex-col items-stretch min-w-0 w-full flex-1 min-h-0">
               <PatientName
                 name={app.patient}
+                phone={app.phone}
                 isNew={app.is_new_patient}
+                locale={locale}
                 className={shortBlock ? 'text-[7px]' : 'text-[8px] sm:text-[9px]'}
               />
               <StackedIndicators app={app} locale={locale} compact ultra={false} />
@@ -314,7 +319,9 @@ export default function CalendarAppointmentBlock({
             <>
               <PatientName
                 name={app.patient}
+                phone={app.phone}
                 isNew={app.is_new_patient}
+                locale={locale}
                 className={shortBlock ? 'text-[8px]' : 'text-[10px]'}
               />
               {blockMins > 45 && (
