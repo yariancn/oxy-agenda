@@ -427,7 +427,10 @@ export default function AppLayout() {
     try {
       const res = await fetch('/api/auth/me', { credentials: 'include' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.user) return false;
+      // Network / 5xx: keep local session so a blip does not log everyone out.
+      if (!res.ok) return false;
+      // Explicit null user = cookie gone or staff deactivated.
+      if (!data?.user) return false;
       const user = normalizeStaffSessionUser(data.user, { roleLevel: data.user?.accessLevel });
       setCurrentUser(user);
       return true;
@@ -673,7 +676,16 @@ export default function AppLayout() {
     setAppointmentSaveFeedback((current) => {
       const onDone = current?.onDone;
       const closeForm = current?.closeForm;
+      const sessionExpired = Boolean(current?.sessionExpired);
       window.setTimeout(() => {
+        if (sessionExpired) {
+          try {
+            fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+          } catch { /* ignore */ }
+          setCurrentUser(null);
+          setDbStatus('sin_sesion');
+          return;
+        }
         if (typeof onDone === 'function') {
           try { onDone(); } catch { /* ignore */ }
         } else if (closeForm) {
@@ -698,6 +710,7 @@ export default function AppLayout() {
     autoCloseMs = 1200,
     onDone,
     action,
+    requireSession = true,
   }) => {
     if (isSavingAppointment) return undefined;
     setIsSavingAppointment(true);
@@ -707,19 +720,39 @@ export default function AppLayout() {
       detail: workingDetail || L.p.common.pleaseWait,
     });
     try {
+      if (requireSession) {
+        const sessionFresh = await refreshStaffSessionForSave();
+        if (!sessionFresh) {
+          setAppointmentSaveFeedback({
+            phase: 'error',
+            title: locale === 'en' ? 'Error' : 'Error',
+            detail: L.dbErrorUnauthorized,
+            closeForm: false,
+            sessionExpired: true,
+          });
+          return { error: L.dbErrorUnauthorized, sessionExpired: true };
+        }
+      }
       const result = await action();
       if (result?.cancelled) {
         setAppointmentSaveFeedback(null);
         return result;
       }
       if (result?.error) {
+        const raw = result.error;
+        const detail = formatAppointmentSaveError(
+          raw && typeof raw === 'object' ? raw : { message: String(raw) },
+        );
+        const sessionExpired = Boolean(result.sessionExpired)
+          || /unauthorized|sesión expirada|session expired/i.test(`${raw} ${detail}`);
         setAppointmentSaveFeedback({
           phase: 'error',
           title: locale === 'en' ? 'Error' : 'Error',
-          detail: String(result.error),
+          detail,
           closeForm: false,
+          sessionExpired,
         });
-        return result;
+        return { error: detail, sessionExpired };
       }
       setAppointmentSaveFeedback({
         phase: 'success',
@@ -731,13 +764,17 @@ export default function AppLayout() {
       });
       return result;
     } catch (e) {
+      const detail = formatAppointmentSaveError(e);
+      const sessionExpired = Boolean(e?.sessionExpired)
+        || /unauthorized|sesión expirada|session expired/i.test(`${e?.message || ''} ${detail}`);
       setAppointmentSaveFeedback({
         phase: 'error',
         title: locale === 'en' ? 'Error' : 'Error',
-        detail: e?.message || String(e),
+        detail,
         closeForm: false,
+        sessionExpired,
       });
-      return { error: e?.message || String(e) };
+      return { error: detail, sessionExpired };
     } finally {
       setIsSavingAppointment(false);
     }
@@ -1697,6 +1734,10 @@ export default function AppLayout() {
     clinic: activeClinic,
     endpoint: '/api/staff/live-sync',
     onChange: syncCalendarLive,
+    onUnauthorized: () => {
+      setCurrentUser(null);
+      setDbStatus('sin_sesion');
+    },
   });
 
   // Renew staff cookie while the agenda stays open (sliding TTL).
