@@ -357,7 +357,7 @@ export default function CashCutModal({
                           {' '}
                           {tx.patientName || tx.patient || ''}
                         </span>
-                        <span className="shrink-0">${(Number(tx.price) || 0).toFixed(2)}</span>
+                        <span className="shrink-0">${(Number(tx.cashPortion ?? tx.price) || 0).toFixed(2)}</span>
                       </li>
                     ))}
                   </ul>

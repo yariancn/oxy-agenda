@@ -6763,7 +6763,12 @@ export default function AppLayout() {
                                  <td className="p-4 text-center font-black text-slate-800 text-sm">{tx.sessions ?? '—'}</td>
                                  <td className="p-4 text-right font-black text-emerald-600 text-sm">${tx.price} {currencyStr}</td>
                                  <td className="p-4">
-                                    <span className="text-[9px] font-black text-slate-500 uppercase bg-slate-100 inline-block px-2 py-0.5 rounded">{tx.paymentMethod || '—'}</span>
+                                    <span className="text-[9px] font-black text-slate-500 uppercase bg-slate-100 inline-block px-2 py-0.5 rounded max-w-[14rem] leading-snug">
+                                      {tx.paymentMethod || '—'}
+                                    </span>
+                                    {(tx.splitPayment || (Array.isArray(tx.paymentSplits) && tx.paymentSplits.length >= 2)) ? (
+                                      <p className="text-[8px] font-black text-blue-700 uppercase mt-0.5">Pago dividido</p>
+                                    ) : null}
                                  </td>
                                  <td className="p-4 text-center">
                                    <div className="flex flex-col gap-1 items-center">

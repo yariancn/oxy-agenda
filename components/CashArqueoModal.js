@@ -130,7 +130,7 @@ export default function CashArqueoModal({
       details: {
         sales: summary.sales.slice(0, 80).map((tx) => ({
           id: tx.id,
-          amount: tx.price,
+          amount: tx.cashPortion ?? tx.price,
           ticket: tx.ticketNumber,
         })),
         expenses: summary.expenses.slice(0, 80).map((e) => ({

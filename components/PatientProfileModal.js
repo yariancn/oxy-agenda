@@ -8,7 +8,7 @@ import { countPackageChargedSessions } from '../lib/patientAppointmentHistory';
 import { canCreateSessionGroup, canJoinSessionGroup, isGroupTitular, patientMatchesSharedSearch, classifySharedWalletCandidate } from '../lib/sessionGroup';
 import { sanitizePatientNotesForDisplay } from '../lib/patientNotes';
 import PatientSessionHistory from './PatientSessionHistory';
-import { paymentMethodOptions, paymentMethodStoredLabel, resolvePaymentMethodKey } from '../lib/paymentMethod';
+import { paymentMethodOptions, paymentMethodStoredLabel, resolvePaymentMethodKey, formatPaymentSplitsLabel, formatSalePaymentMethod, sumPaymentSplits, validatePaymentSplits } from '../lib/paymentMethod';
 import { preferUnblockedPatient } from '../lib/deletePatientChart';
 
 export default function PatientProfileModal({
@@ -98,6 +98,9 @@ export default function PatientProfileModal({
   const [posNotes, setPosNotes] = useState('');
   const [posPartial, setPosPartial] = useState(false);
   const [posPackageTotal, setPosPackageTotal] = useState('');
+  const emptySplitRow = () => ({ method: '', amount: '' });
+  const [posSplit, setPosSplit] = useState(false);
+  const [posSplits, setPosSplits] = useState([emptySplitRow(), emptySplitRow()]);
   const [posBalanceDue, setPosBalanceDue] = useState('');
   const [receipt, setReceipt] = useState(null);
   const [charging, setCharging] = useState(false);
@@ -221,16 +224,40 @@ export default function PatientProfileModal({
       alert(t.selectValidService);
       return;
     }
-    if (!resolvePaymentMethodKey(posPaymentMethod)) {
-      alert(t.selectPaymentMethod || (locale === 'en'
-        ? 'Select how the client is paying: cash, debit, credit, or transfer.'
-        : 'Selecciona cómo paga el cliente: efectivo, débito, crédito o transferencia.'));
-      return;
-    }
     const qtyNum = typeof posQty === 'number' ? posQty : parseInt(posQty, 10);
     if (!qtyNum || qtyNum <= 0) {
       alert(t.selectValidService);
       return;
+    }
+
+    const total = parseFloat(posPrice) || 0;
+    let paymentMethodLabelStored = '';
+    let paymentSplitsStored = null;
+    let splitPaymentFlag = false;
+
+    if (posSplit) {
+      const validated = validatePaymentSplits(posSplits, total, locale);
+      if (!validated.ok) {
+        if (validated.error === 'sum') {
+          const sum = sumPaymentSplits(posSplits).toFixed(2);
+          alert(t.splitSumMismatch(sum, total.toFixed(2)));
+        } else if (validated.error === 'methods') {
+          alert(t.splitDuplicateMethods);
+        } else {
+          alert(t.splitNeedMethods);
+        }
+        return;
+      }
+      paymentSplitsStored = validated.splits;
+      splitPaymentFlag = true;
+      paymentMethodLabelStored = formatPaymentSplitsLabel(validated.splits, locale);
+    } else if (!resolvePaymentMethodKey(posPaymentMethod)) {
+      alert(t.selectPaymentMethod || (locale === 'en'
+        ? 'Select how the client is paying: cash, debit, credit, or transfer.'
+        : 'Selecciona cómo paga el cliente: efectivo, débito, crédito o transferencia.'));
+      return;
+    } else {
+      paymentMethodLabelStored = paymentMethodStoredLabel(posPaymentMethod, locale);
     }
 
     let baseService = posService;
@@ -239,7 +266,6 @@ export default function PatientProfileModal({
       if (srv) baseService = srv.equipment;
     }
 
-    const total = parseFloat(posPrice) || 0;
     const sessions = qtyNum;
     const unitPrice = sessions > 0 ? total / sessions : (parseFloat(posUnitPrice) || 0);
 
@@ -270,7 +296,10 @@ export default function PatientProfileModal({
         sessions,
         unitPrice,
         price: total,
-        paymentMethod: paymentMethodStoredLabel(posPaymentMethod, locale),
+        paymentMethod: paymentMethodLabelStored,
+        ...(splitPaymentFlag
+          ? { paymentSplits: paymentSplitsStored, splitPayment: true }
+          : {}),
         operator: currentUserName || (locale === 'en' ? 'POS' : 'Caja POS'),
         ticketNotes: posNotes.trim(),
         patient: formData.patient,
@@ -365,6 +394,8 @@ export default function PatientProfileModal({
       setPosPackageTotal('');
       setPosBalanceDue('');
       setPosPaymentMethod('');
+      setPosSplit(false);
+      setPosSplits([emptySplitRow(), emptySplitRow()]);
     } catch (err) {
       alert(err?.message || String(err));
     } finally {
@@ -1033,6 +1064,9 @@ export default function PatientProfileModal({
                           #{tx.ticketNumber || tx.ticket_number || String(tx.id).slice(-6)} · {tx.serviceName} ({tx.sessions} {t.sessionsShort})
                         </p>
                         <p className="text-[8px] text-slate-400 uppercase">{tx.date} · ${tx.price}</p>
+                        <p className="text-[8px] font-bold text-slate-500 uppercase mt-0.5">
+                          {formatSalePaymentMethod(tx, locale) || tx.paymentMethod || '—'}
+                        </p>
                         {(Number(tx.balanceDue) || 0) > 0 && (
                           <p className="text-[8px] font-black text-amber-700 uppercase mt-0.5">
                             {t.balanceDueBadge(Number(tx.balanceDue).toFixed(2))}
@@ -1084,7 +1118,8 @@ export default function PatientProfileModal({
                 <select
                   value={posPaymentMethod}
                   onChange={(e) => setPosPaymentMethod(e.target.value)}
-                  className={`w-full p-2 text-[10px] font-bold uppercase border-2 rounded ${posPaymentMethod ? 'border-blue-300' : 'border-amber-400 bg-amber-50'}`}
+                  disabled={posSplit}
+                  className={`w-full p-2 text-[10px] font-bold uppercase border-2 rounded disabled:opacity-50 disabled:cursor-not-allowed ${posSplit || posPaymentMethod ? 'border-blue-300' : 'border-amber-400 bg-amber-50'}`}
                 >
                   <option value="">{t.selectPaymentMethodShort || (locale === 'en' ? 'Select…' : 'Elegir…')}</option>
                   {paymentOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -1104,6 +1139,107 @@ export default function PatientProfileModal({
                 <p className="text-[9px] font-bold text-blue-800 mt-1 uppercase">
                   {t.posTotalPreview(posQty, parseFloat(posUnitPrice).toFixed(2), parseFloat(posPrice).toFixed(2), currency)}
                 </p>
+              )}
+              <label className="flex items-start gap-2 mt-2 bg-white border border-blue-200 rounded-lg px-3 py-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={posSplit}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setPosSplit(on);
+                    if (on) {
+                      setPosPaymentMethod('');
+                      setPosSplits([emptySplitRow(), emptySplitRow()]);
+                    } else {
+                      setPosSplits([emptySplitRow(), emptySplitRow()]);
+                    }
+                  }}
+                  className="w-4 h-4 mt-0.5 shrink-0"
+                />
+                <span>
+                  <span className="block text-[9px] font-black uppercase text-blue-900">{t.splitPayment}</span>
+                  <span className="block text-[8px] font-bold text-blue-700/90 normal-case leading-snug mt-0.5">{t.splitPaymentHint}</span>
+                </span>
+              </label>
+              {posSplit && (
+                <div className="mt-2 space-y-2 bg-white border border-blue-200 rounded-lg p-3">
+                  {posSplits.map((row, idx) => (
+                    <div key={`split-${idx}`} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
+                      <div>
+                        <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">
+                          {t.method} {idx + 1}
+                        </label>
+                        <select
+                          value={row.method}
+                          onChange={(e) => {
+                            const next = [...posSplits];
+                            next[idx] = { ...next[idx], method: e.target.value };
+                            setPosSplits(next);
+                          }}
+                          className="w-full p-2 text-[10px] font-bold uppercase border rounded"
+                        >
+                          <option value="">{t.selectPaymentMethodShort}</option>
+                          {paymentOptions.map((o) => (
+                            <option
+                              key={o.value}
+                              value={o.value}
+                              disabled={posSplits.some((s, i) => i !== idx && s.method === o.value)}
+                            >
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.splitAmount}</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={row.amount}
+                          onChange={(e) => {
+                            const next = [...posSplits];
+                            next[idx] = { ...next[idx], amount: e.target.value };
+                            setPosSplits(next);
+                          }}
+                          className="w-full p-2 font-black border rounded"
+                        />
+                      </div>
+                      {posSplits.length > 2 ? (
+                        <button
+                          type="button"
+                          onClick={() => setPosSplits(posSplits.filter((_, i) => i !== idx))}
+                          className="text-[9px] font-black uppercase text-red-600 px-2 py-2 border border-red-200 rounded"
+                        >
+                          {t.splitPaymentRemove}
+                        </button>
+                      ) : (
+                        <span className="w-12" />
+                      )}
+                    </div>
+                  ))}
+                  {posSplits.length < 3 && (
+                    <button
+                      type="button"
+                      onClick={() => setPosSplits([...posSplits, emptySplitRow()])}
+                      className="w-full text-[9px] font-black uppercase text-blue-700 py-2 border border-dashed border-blue-300 rounded hover:bg-blue-50"
+                    >
+                      {t.splitPaymentAdd}
+                    </button>
+                  )}
+                  {(() => {
+                    const total = parseFloat(posPrice) || 0;
+                    const sum = sumPaymentSplits(posSplits);
+                    const ok = total > 0 && Math.abs(sum - total) <= 0.009;
+                    return (
+                      <p className={`text-[9px] font-black uppercase ${ok ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        {ok
+                          ? t.splitSumOk(sum.toFixed(2), total.toFixed(2))
+                          : t.splitSumMismatch(sum.toFixed(2), total.toFixed(2))}
+                      </p>
+                    );
+                  })()}
+                </div>
               )}
               <label className="flex items-start gap-2 mt-2 bg-white border border-blue-200 rounded-lg px-3 py-2 cursor-pointer">
                 <input
