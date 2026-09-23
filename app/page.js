@@ -8799,11 +8799,15 @@ export default function AppLayout() {
                   placeholder={L.p.appt.searchPatient}
                   selectedLabel={L.p.appt.patientSelected}
                   pickHint={L.p.appt.pickPatientHint}
+                  multiMatchHint={L.p.appt.multiMatchHint}
                   blockedBadge={locale === 'en' ? 'Patient blocked' : 'Paciente bloqueado'}
                   className="ios-text-input w-full p-3 border border-slate-300 rounded-xl font-bold uppercase outline-none focus:border-emerald-500 text-slate-900 bg-white mt-1"
                   onQueryChange={(pName) => {
-                    const exact = dbPatients.find(x => normalizeStr(x.patient) === normalizeStr(pName));
-                    const hint = !exact
+                    const nameHits = dbPatients.filter((x) => normalizeStr(x.patient) === normalizeStr(pName));
+                    // Only auto-fill contact when there is exactly one chart with that name.
+                    // Multiple same-name charts must be picked from the list (phone differs).
+                    const exact = nameHits.length === 1 ? nameHits[0] : null;
+                    const hint = !exact && nameHits.length === 0
                       ? patientAppointmentHints.find((h) => normalizeStr(h.patient) === normalizeStr(pName))
                       : null;
                     // Typing alone never locks a chart — patientId cleared until list pick.
@@ -8813,20 +8817,20 @@ export default function AppLayout() {
                       phone: exact ? exact.phone : (hint?.phone || ''),
                       appointments: dbAppointments,
                       historicoSesiones: 0,
-                      justCreated: !exact,
+                      justCreated: !exact && nameHits.length === 0,
                       normalize: normalizeStr,
                     });
                     setSelectedSlot((prev) => ({
                       ...(prev || createEmptyAppointmentDraft()),
                       patient: pName,
                       patientId: null,
-                      phone: exact ? exact.phone : (hint?.phone || prev?.phone || ''),
-                      email: exact ? exact.email : (hint?.email || prev?.email || ''),
+                      phone: exact ? exact.phone : (hint?.phone || ''),
+                      email: exact ? exact.email : (hint?.email || ''),
                       protocol: exact ? exact.protocol : (prev?.protocol || ''),
-                      patientNotes: exact ? exact.notes : (prev?.patientNotes || ''),
-                      prefers_email: exact ? exact.prefers_email !== false : prev?.prefers_email !== false,
-                      prefers_sms: exact ? exact.prefers_sms === true : prev?.prefers_sms === true,
-                      prefers_sms_reminder: exact ? exact.prefers_sms_reminder !== false : prev?.prefers_sms_reminder !== false,
+                      patientNotes: exact ? exact.notes : '',
+                      prefers_email: exact ? exact.prefers_email !== false : true,
+                      prefers_sms: exact ? exact.prefers_sms === true : false,
+                      prefers_sms_reminder: exact ? exact.prefers_sms_reminder !== false : true,
                       is_blocked: exact ? !!exact.is_blocked : false,
                       is_new_patient: star,
                     }));
@@ -8863,9 +8867,16 @@ export default function AppLayout() {
               </div>
               {selectedSlot?.patient?.trim()
                 && !selectedSlot?.patientId
-                && dbPatients.some((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient)) ? (
+                && dbPatients.filter((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient)).length === 1 ? (
                 <p className="text-[10px] font-black uppercase text-amber-800 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
                   {L.p.appt.mustPickFromList || L.p.appt.pickPatientHint}
+                </p>
+              ) : null}
+              {selectedSlot?.patient?.trim()
+                && !selectedSlot?.patientId
+                && dbPatients.filter((x) => normalizeStr(x.patient) === normalizeStr(selectedSlot.patient)).length > 1 ? (
+                <p className="text-[10px] font-black uppercase text-amber-900 bg-amber-50 border border-amber-400 rounded-lg px-3 py-2">
+                  {L.p.appt.multiMatchMustPick || L.p.appt.multiMatchHint}
                 </p>
               ) : null}
               {newAppointmentPatientBlocked ? (

@@ -20,6 +20,8 @@ const MAX_DROPDOWN_RESULTS = 40;
 /**
  * Directory search for booking. Prefer real patient charts; optionally enrich with
  * unique names seen on appointments so orphan agenda names still autocomplete.
+ *
+ * Same name + different phones → list ALL charts so staff can pick the right one.
  */
 export default function PatientSearchInput({
   patients = [],
@@ -32,6 +34,7 @@ export default function PatientSearchInput({
   className = '',
   selectedLabel = 'Paciente seleccionado',
   pickHint = 'Clic en la lista para confirmar',
+  multiMatchHint = 'Hay varios expedientes con ese nombre — elige el teléfono correcto',
   blockedBadge = 'Paciente bloqueado',
 }) {
   const [query, setQuery] = useState(value);
@@ -57,6 +60,7 @@ export default function PatientSearchInput({
   }, []);
 
   const searchPool = useMemo(() => {
+    // Keep every chart with an id. Only collapse true clones (same name + same last-10 phone).
     const chartByContact = new Map();
     const chartsWithoutContact = [];
     for (const p of patients || []) {
@@ -71,14 +75,12 @@ export default function PatientSearchInput({
         chartsWithoutContact.push(p);
       }
     }
-    const byKey = new Map();
+    const byId = new Map();
     const nameKeys = new Set();
     for (const p of [...chartByContact.values(), ...chartsWithoutContact]) {
-      const idKey = p.id != null ? `id:${p.id}` : null;
+      if (p?.id == null) continue;
+      byId.set(String(p.id), p);
       const nameNorm = normalizeStr(p.patient);
-      const nameKey = `name:${nameNorm}`;
-      if (idKey) byKey.set(idKey, p);
-      else if (nameKey !== 'name:') byKey.set(nameKey, p);
       if (nameNorm) nameKeys.add(nameNorm);
     }
     for (const hint of appointmentHints || []) {
@@ -87,9 +89,9 @@ export default function PatientSearchInput({
       const nameNorm = normalizeStr(name);
       if (!nameNorm || nameKeys.has(nameNorm)) continue;
       nameKeys.add(nameNorm);
-      const nameKey = `name:${nameNorm}`;
-      byKey.set(`hint:${nameKey}`, {
-        id: hint.patientId || hint.patient_id || `hint:${nameKey}`,
+      const hintId = hint.patientId || hint.patient_id || `hint:name:${nameNorm}`;
+      byId.set(String(hintId), {
+        id: hintId,
         patient: name,
         phone: hint.phone || '',
         email: hint.email || '',
@@ -97,25 +99,36 @@ export default function PatientSearchInput({
         _fromAppointment: true,
       });
     }
-    return [...byKey.values()];
+    return [...byId.values()];
   }, [patients, appointmentHints]);
 
   const term = normalizeStr(deferredQuery);
   const termDigits = digitsOnly(deferredQuery);
-  const nameMatches = searchPool.filter(
-    (p) => normalizeStr(p.patient) === normalizeStr(query) && !String(p.id).startsWith('hint:'),
-  );
+
+  const nameMatches = useMemo(() => {
+    const q = normalizeStr(query);
+    if (!q) return [];
+    return searchPool
+      .filter((p) => normalizeStr(p.patient) === q && !String(p.id).startsWith('hint:'))
+      .sort((a, b) => {
+        const aBlocked = a.is_blocked ? 1 : 0;
+        const bBlocked = b.is_blocked ? 1 : 0;
+        if (aBlocked !== bBlocked) return aBlocked - bBlocked;
+        return String(a.phone || '').localeCompare(String(b.phone || ''), undefined, { numeric: true });
+      });
+  }, [searchPool, query]);
+
+  const multiNameMatch = nameMatches.length > 1;
   const exactMatch = (pickedId
     ? nameMatches.find((p) => String(p.id) === String(pickedId))
     : null)
-    || nameMatches.find((p) => !p.is_blocked)
-    || nameMatches[0]
-    || null;
-  const confirmed = exactMatch && String(exactMatch.id) === String(pickedId);
+    || (!multiNameMatch ? (nameMatches.find((p) => !p.is_blocked) || nameMatches[0] || null) : null);
+  const confirmed = Boolean(exactMatch && pickedId && String(exactMatch.id) === String(pickedId));
 
   const filtered = useMemo(() => {
     if (!term && !termDigits) return [];
-    return searchPool
+
+    const ranked = searchPool
       .filter((p) => {
         const name = normalizeStr(p.patient);
         const phoneDigits = digitsOnly(p.phone);
@@ -124,6 +137,9 @@ export default function PatientSearchInput({
         return false;
       })
       .sort((a, b) => {
+        const aExact = normalizeStr(a.patient) === term ? 0 : 1;
+        const bExact = normalizeStr(b.patient) === term ? 0 : 1;
+        if (aExact !== bExact) return aExact - bExact;
         const aHint = a._fromAppointment ? 1 : 0;
         const bHint = b._fromAppointment ? 1 : 0;
         if (aHint !== bHint) return aHint - bHint;
@@ -133,9 +149,12 @@ export default function PatientSearchInput({
         const aStarts = normalizeStr(a.patient).startsWith(term) ? 0 : 1;
         const bStarts = normalizeStr(b.patient).startsWith(term) ? 0 : 1;
         if (aStarts !== bStarts) return aStarts - bStarts;
-        return String(a.patient || '').localeCompare(String(b.patient || ''), undefined, { sensitivity: 'base' });
-      })
-      .slice(0, MAX_DROPDOWN_RESULTS);
+        const byName = String(a.patient || '').localeCompare(String(b.patient || ''), undefined, { sensitivity: 'base' });
+        if (byName !== 0) return byName;
+        return String(a.phone || '').localeCompare(String(b.phone || ''), undefined, { numeric: true });
+      });
+
+    return ranked.slice(0, MAX_DROPDOWN_RESULTS);
   }, [searchPool, term, termDigits]);
 
   const handlePick = (p) => {
@@ -149,14 +168,34 @@ export default function PatientSearchInput({
     } : p);
   };
 
+  const renderRow = (p, { emphasizePhone = false } = {}) => (
+    <button
+      type="button"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => handlePick(p)}
+      className={`w-full text-left px-3 py-2.5 hover:bg-emerald-50 border-b border-slate-100 last:border-0 transition ${String(p.id) === String(pickedId) ? 'bg-emerald-100' : ''} ${p.is_blocked ? 'bg-red-50 hover:bg-red-100' : ''}`}
+    >
+      <span className="block font-black uppercase text-sm text-slate-800 truncate">
+        {p.is_blocked ? '🚫 ' : ''}{p.patient}
+      </span>
+      <span className={`block mt-0.5 font-bold ${emphasizePhone ? 'text-xs text-slate-800' : 'text-[10px] text-slate-500'}`}>
+        {p.phone || 'Sin teléfono'}
+        {p.email ? ` · ${p.email}` : ''}
+        {p._fromAppointment ? ' · visto en agenda' : ''}
+        {p.is_blocked ? ` · ${blockedBadge}` : ''}
+      </span>
+    </button>
+  );
+
   const inputClass = [
     className,
     confirmed && exactMatch?.is_blocked ? 'border-red-400 bg-red-50 ring-2 ring-red-200' : '',
     confirmed && !exactMatch?.is_blocked ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : '',
-    exactMatch && !confirmed ? 'border-amber-400 bg-amber-50' : '',
+    !confirmed && (multiNameMatch || exactMatch) && query.trim() ? 'border-amber-400 bg-amber-50' : '',
   ].filter(Boolean).join(' ');
 
-  const showDropdown = open && (term || termDigits) && filtered.length > 0;
+  const showDropdown = open && (term || termDigits) && filtered.length > 0 && !multiNameMatch;
+  const showMultiPanel = multiNameMatch && !confirmed && query.trim();
 
   return (
     <div ref={wrapRef} className="relative">
@@ -183,6 +222,19 @@ export default function PatientSearchInput({
           {exactMatch.is_blocked ? `🚫 ${blockedBadge}` : selectedLabel}: {exactMatch.patient}
           {exactMatch.phone ? ` · ${exactMatch.phone}` : ''}
         </p>
+      ) : showMultiPanel ? (
+        <div className="mt-2 rounded-xl border-2 border-amber-400 bg-amber-50 overflow-hidden">
+          <p className="px-3 py-2 text-[10px] font-black uppercase text-amber-950 border-b border-amber-200">
+            {multiMatchHint} ({nameMatches.length})
+          </p>
+          <ul className="max-h-64 overflow-y-auto bg-white">
+            {nameMatches.map((p) => (
+              <li key={String(p.id)}>
+                {renderRow(p, { emphasizePhone: true })}
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : exactMatch && query.trim() ? (
         <p className="mt-1.5 text-[10px] font-black uppercase text-amber-700">{pickHint}</p>
       ) : null}
@@ -190,26 +242,12 @@ export default function PatientSearchInput({
         <ul className="absolute z-[10000] w-full mt-1 max-h-72 overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-xl">
           {filtered.map((p) => (
             <li key={String(p.id)}>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handlePick(p)}
-                className={`w-full text-left px-3 py-2.5 hover:bg-emerald-50 border-b border-slate-100 last:border-0 transition ${String(p.id) === String(pickedId) ? 'bg-emerald-100' : ''} ${p.is_blocked ? 'bg-red-50 hover:bg-red-100' : ''}`}
-              >
-                <span className="block font-black uppercase text-sm text-slate-800 truncate">
-                  {p.is_blocked ? '🚫 ' : ''}{p.patient}
-                </span>
-                <span className="block text-[10px] font-bold text-slate-500 mt-0.5">
-                  {p.phone || '—'}
-                  {p._fromAppointment ? ' · visto en agenda' : ''}
-                  {p.is_blocked ? ` · ${blockedBadge}` : ''}
-                </span>
-              </button>
+              {renderRow(p, { emphasizePhone: normalizeStr(p.patient) === term })}
             </li>
           ))}
         </ul>
       )}
-      {open && (term || termDigits) && filtered.length === 0 && (
+      {open && (term || termDigits) && filtered.length === 0 && !showMultiPanel && (
         <p className="mt-1.5 text-[10px] font-bold text-slate-500 uppercase">
           Sin coincidencias · prueba otro nombre o teléfono
         </p>
