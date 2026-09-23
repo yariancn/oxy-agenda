@@ -4951,8 +4951,22 @@ export default function AppLayout() {
       let namePolicy = 'keep_existing';
       let forceCreate = false;
       let existingByPhone = null;
-      if (phoneDigits.length === 10) {
-        const alreadySelectedId = slot.patientId || null;
+      const alreadySelectedId = slot.patientId || null;
+      const chartAlreadyPicked = Boolean(
+        alreadySelectedId
+        && existingP
+        && String(existingP.id) === String(alreadySelectedId),
+      );
+
+      // Staff already picked a chart from the list — book against THAT id.
+      // Do not abort because another exact-name duplicate still exists in the directory.
+      if (chartAlreadyPicked) {
+        ensuredPatientId = existingP.id;
+        canonicalPatient = existingP.patient || canonicalPatient;
+        canonicalPhone = existingP.phone || canonicalPhone;
+        canonicalEmail = existingP.email || canonicalEmail;
+        ensuredMeta = { isNew: false, forceCreated: false, linkedExisting: true };
+      } else if (phoneDigits.length === 10) {
         const resolved = await resolveStaffPatientCreate({
           supabase: activeSupabase,
           patients: dbPatients,
@@ -8877,15 +8891,22 @@ export default function AppLayout() {
                 const exact = conflicts.find((c) => c.exact);
                 if (exact) {
                   const keeper = preferUnblockedPatient(conflicts.filter((c) => c.exact)) || exact;
+                  const alreadyLinked = Boolean(selectedSlot?.patientId);
                   return (
-                    <div className="rounded-xl border-2 border-red-400 bg-red-50 px-3 py-2.5">
-                      <p className="text-[10px] font-black uppercase text-red-900">
-                        {locale === 'en' ? 'Patient already exists' : 'Paciente ya existe'}
+                    <div className={`rounded-xl border-2 px-3 py-2.5 ${alreadyLinked ? 'border-amber-400 bg-amber-50' : 'border-red-400 bg-red-50'}`}>
+                      <p className={`text-[10px] font-black uppercase ${alreadyLinked ? 'text-amber-950' : 'text-red-900'}`}>
+                        {alreadyLinked
+                          ? (locale === 'en' ? 'Duplicate chart in directory' : 'Expediente duplicado en el directorio')
+                          : (locale === 'en' ? 'Patient already exists' : 'Paciente ya existe')}
                       </p>
-                      <p className="text-[9px] font-bold text-red-800 mt-1 normal-case leading-snug">
-                        {locale === 'en'
-                          ? `«${exact.patient}» already has this name with the same phone/email. Pick them from the list — do not create a duplicate.`
-                          : `«${exact.patient}» ya está con ese nombre y el mismo teléfono/correo. Selecciónala de la lista; no crees un duplicado.`}
+                      <p className={`text-[9px] font-bold mt-1 normal-case leading-snug ${alreadyLinked ? 'text-amber-900' : 'text-red-800'}`}>
+                        {alreadyLinked
+                          ? (locale === 'en'
+                            ? `Another chart for «${exact.patient}» has the same phone/email. You already selected one — you can schedule. Switch chart below if needed.`
+                            : `Hay otro expediente de «${exact.patient}» con el mismo teléfono/correo. Ya seleccionaste uno — puedes agendar. Cambia de expediente abajo si hace falta.`)
+                          : (locale === 'en'
+                            ? `«${exact.patient}» already has this name with the same phone/email. Pick them from the list — do not create a duplicate.`
+                            : `«${exact.patient}» ya está con ese nombre y el mismo teléfono/correo. Selecciónala de la lista; no crees un duplicado.`)}
                       </p>
                       <button
                         type="button"
@@ -8900,11 +8921,17 @@ export default function AppLayout() {
                             patientId: p.id,
                             protocol: p.protocol || prev?.protocol || 'Wellness',
                             patientNotes: p.notes || prev?.patientNotes || '',
+                            prefers_email: p.prefers_email !== false,
+                            prefers_sms: p.prefers_sms === true,
+                            prefers_sms_reminder: p.prefers_sms_reminder !== false,
+                            is_blocked: !!p.is_blocked,
                           }));
                         }}
-                        className="mt-2 w-full bg-red-700 text-white text-[9px] font-black uppercase py-2 rounded-lg hover:bg-red-800"
+                        className={`mt-2 w-full text-white text-[9px] font-black uppercase py-2 rounded-lg ${alreadyLinked ? 'bg-amber-700 hover:bg-amber-800' : 'bg-red-700 hover:bg-red-800'}`}
                       >
-                        {locale === 'en' ? 'Use existing chart' : 'Usar expediente existente'}
+                        {alreadyLinked
+                          ? (locale === 'en' ? 'Switch to this other chart' : 'Usar el otro expediente')
+                          : (locale === 'en' ? 'Use existing chart' : 'Usar expediente existente')}
                       </button>
                     </div>
                   );
