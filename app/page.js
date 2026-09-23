@@ -8890,8 +8890,14 @@ export default function AppLayout() {
                 if (!conflicts.length) return null;
                 const exact = conflicts.find((c) => c.exact);
                 if (exact) {
-                  const keeper = preferUnblockedPatient(conflicts.filter((c) => c.exact)) || exact;
+                  const exactConflicts = conflicts.filter((c) => c.exact);
                   const alreadyLinked = Boolean(selectedSlot?.patientId);
+                  const otherExact = alreadyLinked
+                    ? exactConflicts.find((c) => String(c.id) !== String(selectedSlot.patientId))
+                    : null;
+                  const keeper = alreadyLinked
+                    ? (otherExact || preferUnblockedPatient(exactConflicts) || exact)
+                    : (preferUnblockedPatient(exactConflicts) || exact);
                   return (
                     <div className={`rounded-xl border-2 px-3 py-2.5 ${alreadyLinked ? 'border-amber-400 bg-amber-50' : 'border-red-400 bg-red-50'}`}>
                       <p className={`text-[10px] font-black uppercase ${alreadyLinked ? 'text-amber-950' : 'text-red-900'}`}>
