@@ -7216,7 +7216,6 @@ export default function AppLayout() {
                           ? 'Separate from the messages above. Asks first-session patients to reply YES or NO before the visit.'
                           : 'Es aparte de los mensajes de arriba. Pide a pacientes de primera sesión que respondan SI o NO antes de la visita.')
                         : (locale === 'en'
-                        : (locale === 'en'
                           ? 'Only for the first visit. Sends ~18h before (or shortly after booking if sooner). When the patient replies SI/NO, the status updates on the appointment card. Staff releases slots at their discretion — no auto-cancel.'
                           : 'Solo para la primera cita. Se envía ~18 h antes (o poco después de agendar si es más pronto). Cuando el paciente responde SI/NO, el estado se actualiza en la cita. El staff libera horarios a discreción — sin cancelación automática.')}
                     </p>
