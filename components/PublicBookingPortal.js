@@ -429,6 +429,21 @@ export default function PublicBookingPortal({
         /* non-blocking */
       }
 
+      if (result.appointment?.id && notifyType === 'first') {
+        try {
+          await fetch('/api/public/queue-confirmation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              clinic: clinicName,
+              appointmentId: result.appointment.id,
+            }),
+          });
+        } catch {
+          /* cron remains fallback */
+        }
+      }
+
       try {
         if (window.parent && window.parent !== window) {
           window.parent.postMessage(

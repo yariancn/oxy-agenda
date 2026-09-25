@@ -1,10 +1,19 @@
 import { NextResponse } from 'next/server';
+import { after } from 'next/server';
 import { buildNotifyContent, toE164Phone } from '../../../lib/appointmentNotify.js';
 import { getResendApiKey, getResendFromAddress } from '../../../lib/resendConfig.js';
 import { sendPatientTextMessage, textChannelLabel } from '../../../lib/clinicMessaging.js';
 import { normalizeClinicId } from '../../../lib/clinicRegistry.js';
 import { readStaffSessionFromRequest } from '../../../lib/staffSession.js';
 import { assertStaffClinicAccess } from '../../../lib/staffDbServer.js';
+import { getSupabaseAdmin } from '../../../lib/supabaseAdmin.js';
+import {
+  maybeSendConfirmationAfterBooking,
+  supportsConfirmationSms,
+} from '../../../lib/appointmentConfirmation.js';
+
+export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 export async function POST(request) {
   try {
@@ -131,6 +140,23 @@ export async function POST(request) {
         const prefix = locale === 'en' ? `${textChannel} error` : `Error ${textChannel}`;
         smsStatus = `${prefix}: ${(result.error || 'unknown').slice(0, 120)}`;
       }
+    }
+
+    // First-session confirmation: if already inside the hours-before window, queue SI/NO ~5 min later.
+    if (appointmentId && supportsConfirmationSms(clinicId) && (notifyType === 'first' || notifyType === 'booking')) {
+      after(async () => {
+        try {
+          const supabase = getSupabaseAdmin(clinicId);
+          await maybeSendConfirmationAfterBooking({
+            supabase,
+            appointmentId,
+            clinicName: clinicId,
+            delayMs: 15 * 1000,
+          });
+        } catch {
+          // Cron remains fallback.
+        }
+      });
     }
 
     return NextResponse.json({

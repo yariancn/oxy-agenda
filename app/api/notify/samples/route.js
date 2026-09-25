@@ -178,26 +178,35 @@ export async function POST(request) {
     }
 
     let confirmationSms = null;
-    if (body.includeConfirmationSms !== false && phone && isShenandoah(clinicName)) {
-      const { buildConfirmationSms } = await import('../../../../lib/appointmentConfirmation.js');
-      const confBody = buildConfirmationSms({
-        patientName,
-        time: sampleTime,
-        clinicDisplayName: cfg.name || 'OxyHyperbaric',
-        hoursBefore: 6,
-        noReplyHours: Number(cfg.confirmation_no_reply_hours) || 1,
-        customBody: cfg.confirmation_sms_body,
-        locale: 'en',
-        clinicPhone: cfg.phone || '7135913379',
-      });
-      const confSend = await sendSms({
-        clinicName,
-        locale: 'en',
-        phone,
-        smsBody: `[SAMPLE CONFIRM] ${confBody}`,
-        notifyType: 'booking',
-      });
-      confirmationSms = { preview: confBody, ...confSend };
+    if (body.includeConfirmationSms !== false && phone) {
+      const {
+        buildConfirmationSms,
+        DEFAULT_GDL_CONFIRMATION_SMS,
+        defaultConfirmationHoursBefore,
+        supportsConfirmationSms,
+      } = await import('../../../../lib/appointmentConfirmation.js');
+      if (supportsConfirmationSms(clinicName)) {
+        const confBody = buildConfirmationSms({
+          patientName,
+          time: sampleTime,
+          clinicDisplayName: cfg.name || (isShenandoah(clinicName) ? 'OxyHyperbaric' : 'OXYGENGDL'),
+          hoursBefore: Number(cfg.confirmation_hours_before) || defaultConfirmationHoursBefore(clinicName),
+          noReplyHours: Number(cfg.confirmation_no_reply_hours) || 1,
+          customBody: cfg.confirmation_sms_body || (isShenandoah(clinicName) ? '' : DEFAULT_GDL_CONFIRMATION_SMS),
+          locale: isShenandoah(clinicName) ? 'en' : 'es',
+          clinicPhone: cfg.phone || (isShenandoah(clinicName) ? '7135913379' : '3321664083'),
+          fullDate: new Date().toISOString().slice(0, 10),
+          timezone: isShenandoah(clinicName) ? 'America/Chicago' : 'America/Mexico_City',
+        });
+        const confSend = await sendSms({
+          clinicName,
+          locale: isShenandoah(clinicName) ? 'en' : 'es',
+          phone,
+          smsBody: `[SAMPLE CONFIRM] ${confBody}`,
+          notifyType: 'booking',
+        });
+        confirmationSms = { preview: confBody, ...confSend };
+      }
     }
 
     let staff = null;

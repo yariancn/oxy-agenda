@@ -214,7 +214,10 @@ import {
   CONFIRMATION_STATUS,
   confirmationStatusClass,
   confirmationStatusLabel,
+  defaultConfirmationHoursBefore,
+  DEFAULT_GDL_CONFIRMATION_SMS,
   explainConfirmationState,
+  supportsConfirmationSms,
 } from '../lib/appointmentConfirmation';
 import {
   CANCEL_REQUEST_STATUS,
@@ -650,11 +653,12 @@ export default function AppLayout() {
     financial_pin: dbCompanyConfig.financial_pin,
     notify_on_booking: dbCompanyConfig.notify_on_booking,
     reminder_hours: dbCompanyConfig.reminder_hours,
-    // Houston-only confirmation SMS columns — omit on GDL so save does not warn.
-    ...(isShenandoah(activeClinic) ? {
+    // Confirmation SMS (Houston + GDL first sessions).
+    ...(supportsConfirmationSms(activeClinic) ? {
       confirmation_sms_enabled: dbCompanyConfig.confirmation_sms_enabled === true,
-      confirmation_hours_before: Number(dbCompanyConfig.confirmation_hours_before) || 6,
+      confirmation_hours_before: Number(dbCompanyConfig.confirmation_hours_before) || defaultConfirmationHoursBefore(activeClinic),
       confirmation_no_reply_hours: Number(dbCompanyConfig.confirmation_no_reply_hours) || 1,
+      confirmation_sms_body: String(dbCompanyConfig.confirmation_sms_body || '').trim(),
     } : {}),
     calendar_feed_enabled: dbCompanyConfig.calendar_feed_enabled === true,
     calendar_feed_token: String(dbCompanyConfig.calendar_feed_token || '').trim(),
@@ -2955,7 +2959,7 @@ export default function AppLayout() {
   }, [selectedSlot, dbServices, dbAppointments]);
 
   const selectedSlotConfirmationInfo = useMemo(() => {
-    if (!selectedSlot || !isShenandoah(activeClinic)) return null;
+    if (!selectedSlot || !supportsConfirmationSms(activeClinic)) return null;
     return explainConfirmationState({
       appointment: selectedSlot,
       allAppointments: dbAppointments,
@@ -7199,15 +7203,22 @@ export default function AppLayout() {
                   />
                 </section>
 
-                {isShenandoah(activeClinic) && (
+                {supportsConfirmationSms(activeClinic) && (
                   <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 sm:p-5 space-y-3">
                     <h4 className="text-sm font-black text-blue-950">
-                      {locale === 'en' ? 'Houston only — YES/NO confirmation SMS' : 'Solo Houston — SMS de confirmación SI/NO'}
+                      {isShenandoah(activeClinic)
+                        ? (locale === 'en' ? 'Houston — YES/NO confirmation SMS' : 'Houston — SMS de confirmación SI/NO')
+                        : (locale === 'en' ? 'GDL — SI/NO confirmation SMS (first session)' : 'GDL — SMS de confirmación SI/NO (primera sesión)')}
                     </h4>
                     <p className="text-xs text-blue-900/90 leading-relaxed">
-                      {locale === 'en'
-                        ? 'Separate from the messages above. Asks first-session patients to reply YES or NO before the visit.'
-                        : 'Es aparte de los mensajes de arriba. Pide a pacientes de primera sesión que respondan SI o NO antes de la visita.'}
+                      {isShenandoah(activeClinic)
+                        ? (locale === 'en'
+                          ? 'Separate from the messages above. Asks first-session patients to reply YES or NO before the visit.'
+                          : 'Es aparte de los mensajes de arriba. Pide a pacientes de primera sesión que respondan SI o NO antes de la visita.')
+                        : (locale === 'en'
+                        : (locale === 'en'
+                          ? 'Only for the first visit. Sends ~18h before (or shortly after booking if sooner). When the patient replies SI/NO, the status updates on the appointment card. Staff releases slots at their discretion — no auto-cancel.'
+                          : 'Solo para la primera cita. Se envía ~18 h antes (o poco después de agendar si es más pronto). Cuando el paciente responde SI/NO, el estado se actualiza en la cita. El staff libera horarios a discreción — sin cancelación automática.')}
                     </p>
                     <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-blue-200 cursor-pointer">
                       <input
@@ -7225,15 +7236,43 @@ export default function AppLayout() {
                         <label className="text-xs font-bold text-blue-900">
                           {locale === 'en' ? 'Hours before visit' : 'Horas antes de la visita'}
                         </label>
-                        <input type="number" min="1" max="24" value={dbCompanyConfig.confirmation_hours_before ?? 6} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_hours_before: Number(e.target.value) })} className="w-full p-2.5 border border-blue-200 rounded-lg font-bold text-sm bg-white mt-1" />
+                        <input
+                          type="number"
+                          min="1"
+                          max="48"
+                          value={dbCompanyConfig.confirmation_hours_before ?? defaultConfirmationHoursBefore(activeClinic)}
+                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_hours_before: Number(e.target.value) })}
+                          className="w-full p-2.5 border border-blue-200 rounded-lg font-bold text-sm bg-white mt-1"
+                        />
                       </div>
                       <div>
                         <label className="text-xs font-bold text-blue-900">
-                          {locale === 'en' ? 'Alert staff if no reply (hours)' : 'Avisar al staff si no responde (horas)'}
+                          {locale === 'en' ? 'Mark “no reply” after (hours)' : 'Marcar “aún no respondió” tras (horas)'}
                         </label>
-                        <input type="number" min="1" max="6" value={dbCompanyConfig.confirmation_no_reply_hours ?? 1} onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_no_reply_hours: Number(e.target.value) })} className="w-full p-2.5 border border-blue-200 rounded-lg font-bold text-sm bg-white mt-1" />
+                        <input
+                          type="number"
+                          min="1"
+                          max="24"
+                          value={dbCompanyConfig.confirmation_no_reply_hours ?? 1}
+                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_no_reply_hours: Number(e.target.value) })}
+                          className="w-full p-2.5 border border-blue-200 rounded-lg font-bold text-sm bg-white mt-1"
+                        />
                       </div>
                     </div>
+                    {!isShenandoah(activeClinic) && (
+                      <div>
+                        <label className="text-xs font-bold text-blue-900">
+                          {locale === 'en' ? 'SMS text (optional). Use {{nombre}} {{hora}} {{cuando}}' : 'Texto SMS (opcional). Usa {{nombre}} {{hora}} {{cuando}}'}
+                        </label>
+                        <textarea
+                          rows={5}
+                          value={dbCompanyConfig.confirmation_sms_body ?? ''}
+                          onChange={(e) => setDbCompanyConfig({ ...dbCompanyConfig, confirmation_sms_body: e.target.value })}
+                          placeholder={DEFAULT_GDL_CONFIRMATION_SMS}
+                          className="w-full p-2.5 border border-blue-200 rounded-lg font-bold text-sm bg-white mt-1 leading-relaxed"
+                        />
+                      </div>
+                    )}
                   </section>
                 )}
 
@@ -8234,7 +8273,7 @@ export default function AppLayout() {
                 <span className="font-black text-slate-800 text-lg uppercase pr-6">{selectedSlot.is_new_patient ? '⭐ ' : ''}{selectedSlot.patient}</span>
                 <span className="text-[10px] text-blue-600 font-black uppercase tracking-widest">{selectedSlot.protocol}</span>
 
-                {isShenandoah(activeClinic) && selectedSlotConfirmationInfo ? (
+                {supportsConfirmationSms(activeClinic) && selectedSlotConfirmationInfo ? (
                   <div className={`mt-3 rounded-xl border-2 p-3 space-y-2 ${
                     selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE
                       ? confirmationStatusClass(selectedSlot.confirmation_status)
@@ -8242,7 +8281,11 @@ export default function AppLayout() {
                   }`}>
                     <p className="text-[10px] font-black uppercase flex flex-wrap items-center gap-1.5">
                       <span aria-hidden>📱</span>
-                      <span>{locale === 'en' ? 'Houston SMS confirmation (YES/NO)' : 'Houston · Confirmación SMS (SI / NO)'}</span>
+                      <span>
+                        {isShenandoah(activeClinic)
+                          ? (locale === 'en' ? 'Houston SMS confirmation (YES/NO)' : 'Houston · Confirmación SMS (SI / NO)')
+                          : (locale === 'en' ? 'GDL SMS confirmation (SI/NO)' : 'GDL · Confirmación SMS (SI / NO)')}
+                      </span>
                       {selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE ? (
                         <span className="inline-flex items-center rounded-full bg-white/80 border px-2 py-0.5 text-[9px] font-black uppercase">
                           {confirmationStatusLabel(selectedSlot.confirmation_status, locale)}
