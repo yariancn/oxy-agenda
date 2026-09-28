@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStaffLocale } from './StaffLocaleContext';
 import { isShenandoah } from '../lib/clinicRegistry';
-import { printThermalHtml } from '../lib/printReceipt';
+import { printAgendaReceipt } from '../lib/printReceipt';
 import {
   buildCashCutDualCopyHtml,
   buildCashCutRecord,
@@ -221,7 +221,7 @@ export default function CashCutModal({
         locale,
         currency,
       });
-      await printThermalHtml(html, es ? 'Corte efectivo (2 copias)' : 'Cash cut (2 copies)');
+      await printAgendaReceipt(html, es ? 'Corte efectivo (2 copias)' : 'Cash cut (2 copies)');
     } catch (err) {
       setError(err?.message || (es ? 'No se pudo guardar el corte.' : 'Could not save cash cut.'));
     } finally {
@@ -238,7 +238,7 @@ export default function CashCutModal({
       locale,
       currency,
     });
-    await printThermalHtml(html, es ? 'Corte efectivo (2 copias)' : 'Cash cut (2 copies)');
+    await printAgendaReceipt(html, es ? 'Corte efectivo (2 copias)' : 'Cash cut (2 copies)');
   };
 
   return (

@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "cap:sync": "npx cap sync",
+    "cap:ios": "npx cap open ios",
     "health-check": "node --env-file=.env.local scripts/health-check.mjs",
     "health-check:db": "node --env-file=.env.local scripts/health-check.mjs --skip-http",
     "seed-demo:gdl": "node --env-file=.env.local scripts/seed-demo-appointments-gdl.mjs",
@@ -25,6 +27,11 @@
     "simulate": "node scripts/simulate-user-flows.mjs"
   },
   "dependencies": {
+    "@capacitor-community/bluetooth-le": "^8.3.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2",
     "@supabase/supabase-js": "^2.105.1",
     "next": "16.2.4",
     "pdfkit": "^0.19.1",

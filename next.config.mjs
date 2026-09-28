@@ -8,6 +8,7 @@ const legacyHosts = (process.env.LEGACY_VERCEL_HOSTS || 'oxy-agenda-houston.verc
 const nextConfig = {
   /** pdfkit reads .afm fonts from disk; must stay external on Vercel/serverless */
   serverExternalPackages: ['pdfkit'],
+  transpilePackages: ['@capacitor/core', '@capacitor-community/bluetooth-le'],
   outputFileTracingIncludes: {
     '/api/cron/appointment-confirmation': ['./node_modules/pdfkit/js/data/**/*'],
     '/api/cron/weekly-sales-report': ['./node_modules/pdfkit/js/data/**/*'],

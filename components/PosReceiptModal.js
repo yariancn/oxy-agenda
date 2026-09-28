@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { buildPosTicketHtml } from '../lib/posTicket';
-import { printThermalHtml } from '../lib/printReceipt';
+import { printAgendaReceipt } from '../lib/printReceipt';
 
 const BUILD_SHA = (process.env.NEXT_PUBLIC_BUILD_SHA || 'dev').slice(0, 7);
 
@@ -46,7 +46,7 @@ export default function PosReceiptModal({
 
   const runPrint = async (tx) => {
     setPrintResult('printing');
-    const result = await printThermalHtml(
+    const result = await printAgendaReceipt(
       buildReceiptHtml(tx),
       locale === 'en' ? 'POS receipt' : 'Ticket POS',
     );

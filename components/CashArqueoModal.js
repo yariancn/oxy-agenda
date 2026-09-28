@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStaffLocale } from './StaffLocaleContext';
 import { isShenandoah } from '../lib/clinicRegistry';
-import { printThermalHtml } from '../lib/printReceipt';
+import { printAgendaReceipt } from '../lib/printReceipt';
 import {
   buildArqueoTicketHtml,
   buildCashDrawerEventPayload,
@@ -160,7 +160,7 @@ export default function CashArqueoModal({
         locale,
         currency,
       });
-      await printThermalHtml(html, es ? 'Arqueo de caja' : 'Cash count');
+      await printAgendaReceipt(html, es ? 'Arqueo de caja' : 'Cash count');
     } catch (err) {
       setError(err?.message || (es ? 'No se pudo guardar el arqueo.' : 'Could not save cash count.'));
     } finally {
@@ -177,7 +177,7 @@ export default function CashArqueoModal({
       locale,
       currency,
     });
-    await printThermalHtml(html, es ? 'Arqueo de caja' : 'Cash count');
+    await printAgendaReceipt(html, es ? 'Arqueo de caja' : 'Cash count');
   };
 
   return (

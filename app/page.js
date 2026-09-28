@@ -68,6 +68,7 @@ import PosReceiptModal from '../components/PosReceiptModal';
 import CashCutModal from '../components/CashCutModal';
 import CashArqueoModal from '../components/CashArqueoModal';
 import PettyCashExpenseModal from '../components/PettyCashExpenseModal';
+import NativePrinterSettings from '../components/NativePrinterSettings';
 import StaffTabErrorBoundary from '../components/StaffTabErrorBoundary';
 import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
 import CalendarAssessmentBand from '../components/CalendarAssessmentBand';
@@ -7372,6 +7373,7 @@ export default function AppLayout() {
 
                 <h3 className="font-black text-slate-800 uppercase text-sm mb-4 pb-2 border-b">Datos del Ticket POS (58mm)</h3>
                 <div className="space-y-4">
+                  <NativePrinterSettings locale={locale} />
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Nombre Comercial</label>
                     <input type="text" value={dbCompanyConfig.name} onChange={e => setDbCompanyConfig({...dbCompanyConfig, name: formatClinicField(e.target.value)})} className="w-full p-2.5 border rounded-lg font-bold uppercase outline-none text-slate-900 bg-white" />

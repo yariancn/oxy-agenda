@@ -1,0 +1,23 @@
+{
+  "appId": "com.oxygengdl.agenda",
+  "appName": "Oxy Agenda",
+  "webDir": "native-shell/www",
+  "server": {
+    "url": "https://oxy-agenda.vercel.app",
+    "cleartext": false
+  },
+  "ios": {
+    "contentInset": "automatic",
+    "allowsLinkPreview": false
+  },
+  "plugins": {
+    "BluetoothLe": {
+      "displayStrings": {
+        "scanning": "Buscando impresoras…",
+        "cancel": "Cancelar",
+        "availableServices": "Servicios",
+        "noDeviceFound": "No se encontró impresora Bluetooth"
+      }
+    }
+  }
+}
