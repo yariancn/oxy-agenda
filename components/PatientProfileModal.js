@@ -1075,7 +1075,7 @@ export default function PatientProfileModal({
                         )}
                       </div>
                       <div className="flex flex-col gap-1 shrink-0">
-                        <button type="button" onClick={() => setReceipt({ ...tx, phone: tx.phone || formData.phone })} className="text-[9px] font-black text-slate-700 uppercase px-2 py-1 border border-slate-200 rounded bg-slate-50">
+                        <button type="button" onClick={() => setReceipt({ ...tx, phone: tx.phone || formData.phone, email: tx.email || formData.email })} className="text-[9px] font-black text-slate-700 uppercase px-2 py-1 border border-slate-200 rounded bg-slate-50">
                           {t.receiptGenerated}
                         </button>
                         {canCancelSales && (
