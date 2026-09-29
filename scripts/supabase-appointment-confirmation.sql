@@ -30,10 +30,10 @@ WHERE confirmation_enabled IS DISTINCT FROM true
   AND confirmation_status <> 'none'
   AND confirmation_status <> '';
 
--- Force clear SMS body with short-link placeholders
+-- Force clear SMS body with short-link placeholders (emoji — SMS has no bold/color)
 UPDATE company_config
 SET
   confirmation_hours_before = COALESCE(confirmation_hours_before, 6),
-  confirmation_sms_body = E'Hola {{nombre}}, confirma tu sesión {{cuando}} {{hora}} en OXYGENGDL.\nDa click en un enlace:\nSI → {{si_url}}\nNO → {{no_url}}\nDudas {{telefono}}'
+  confirmation_sms_body = E'Hola {{nombre}}, confirma tu sesión {{cuando}} {{hora}} en OXYGENGDL.\n\n👉 Da click:\n\n✅ SI → {{si_url}}\n\n❌ NO → {{no_url}}\n\nDudas {{telefono}}'
 WHERE clinic IN ('Oxygengdl', 'Guadalajara');
 
