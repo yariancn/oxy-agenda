@@ -1336,6 +1336,7 @@ export default function PatientProfileModal({
         open={Boolean(receipt)}
         receipt={receipt}
         phone={formData.phone}
+        email={formData.email}
         companyConfig={companyConfig}
         activeClinic={activeClinic}
         locale={locale}

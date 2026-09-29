@@ -409,6 +409,7 @@ export default function AppLayout() {
   const [selectedPatientReport, setSelectedPatientReport] = useState('');
   const [reportReceipt, setReportReceipt] = useState(null);
   const [reportReceiptPhone, setReportReceiptPhone] = useState('');
+  const [reportReceiptEmail, setReportReceiptEmail] = useState('');
   const [showCashCut, setShowCashCut] = useState(false);
   const [showCashArqueo, setShowCashArqueo] = useState(false);
   const [showPettyCashExpense, setShowPettyCashExpense] = useState(false);
@@ -3611,9 +3612,10 @@ export default function AppLayout() {
   const visibleDirectoryPatients = filteredPatients.slice(0, directoryVisibleCount);
   const directoryHasMore = filteredPatients.length > directoryVisibleCount;
 
-  const openSaleReceiptModal = (tx, patientName, patientPhone = '') => {
-    setReportReceipt({ ...tx, patient: patientName || tx.patient });
+  const openSaleReceiptModal = (tx, patientName, patientPhone = '', patientEmail = '') => {
+    setReportReceipt({ ...tx, patient: patientName || tx.patient, email: patientEmail || tx.email || '' });
     setReportReceiptPhone(patientPhone || '');
+    setReportReceiptEmail(patientEmail || '');
   };
 
   const handleCancelGlobalTransaction = async (tx, patientId, patientName) => {
@@ -10661,6 +10663,7 @@ export default function AppLayout() {
       open={Boolean(reportReceipt)}
       receipt={reportReceipt}
       phone={reportReceiptPhone}
+      email={reportReceiptEmail}
       companyConfig={dbCompanyConfig}
       activeClinic={activeClinic}
       locale={locale}
@@ -10668,6 +10671,7 @@ export default function AppLayout() {
       onClose={() => {
         setReportReceipt(null);
         setReportReceiptPhone('');
+        setReportReceiptEmail('');
       }}
     />
     </StaffLocaleProvider>

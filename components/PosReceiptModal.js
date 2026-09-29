@@ -11,6 +11,7 @@ export default function PosReceiptModal({
   open,
   receipt,
   phone = '',
+  email = '',
   companyConfig = {},
   activeClinic = 'Oxygengdl',
   locale = 'es',
@@ -19,24 +20,34 @@ export default function PosReceiptModal({
 }) {
   const [printResult, setPrintResult] = useState(null);
   const [smsResult, setSmsResult] = useState(null);
+  const [emailResult, setEmailResult] = useState(null);
   const [smsBusy, setSmsBusy] = useState(false);
+  const [emailBusy, setEmailBusy] = useState(false);
   const [smsPhone, setSmsPhone] = useState('');
+  const [receiptEmail, setReceiptEmail] = useState('');
 
   useEffect(() => {
     if (!open || !receipt) return;
     setSmsPhone(String(receipt.phone || phone || '').trim());
+    setReceiptEmail(String(receipt.email || email || '').trim());
     setPrintResult(null);
     setSmsResult(null);
-  }, [open, receipt, phone]);
+    setEmailResult(null);
+  }, [open, receipt, phone, email]);
 
   if (!open || !receipt || typeof document === 'undefined') return null;
 
   const currency = activeClinic === 'Shenandoah' ? 'USD' : 'MXN';
   const t = labels;
   const hasSmsPhone = Boolean(String(smsPhone || '').trim());
+  const hasEmail = Boolean(String(receiptEmail || '').trim());
 
   const buildReceiptHtml = (tx) => buildPosTicketHtml({
-    receipt: { ...tx, phone: smsPhone || tx.phone },
+    receipt: {
+      ...tx,
+      phone: smsPhone || tx.phone,
+      email: receiptEmail || tx.email,
+    },
     companyConfig,
     clinicName: activeClinic,
     locale,
@@ -69,7 +80,7 @@ export default function PosReceiptModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           clinic: activeClinic,
-          receipt: { ...tx, phone: toPhone },
+          receipt: { ...tx, phone: toPhone, email: receiptEmail || tx.email },
           companyConfig,
           locale,
           labels: t,
@@ -92,9 +103,49 @@ export default function PosReceiptModal({
     }
   };
 
+  const runEmail = async (tx) => {
+    const toEmail = String(receiptEmail || tx.email || email || '').trim();
+    if (!toEmail) {
+      alert(t.receiptNoEmail || (locale === 'en' ? 'Enter the client email.' : 'Escribe el correo del cliente.'));
+      return { ok: false };
+    }
+    setEmailBusy(true);
+    setEmailResult('sending');
+    try {
+      const res = await fetch('/api/staff/pos-receipt-email', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clinic: activeClinic,
+          receipt: { ...tx, phone: smsPhone || tx.phone, email: toEmail },
+          companyConfig,
+          locale,
+          labels: t,
+          origin: window.location.origin,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setEmailResult('error');
+        alert(t.receiptEmailError || (locale === 'en' ? 'Could not send the email.' : 'No se pudo enviar el correo.'));
+        return { ok: false };
+      }
+      setEmailResult('ok');
+      return { ok: true };
+    } catch {
+      setEmailResult('error');
+      alert(t.receiptEmailError || (locale === 'en' ? 'Could not send the email.' : 'No se pudo enviar el correo.'));
+      return { ok: false };
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
   const handleClose = () => {
     setPrintResult(null);
     setSmsResult(null);
+    setEmailResult(null);
     onClose?.();
   };
 
@@ -117,15 +168,10 @@ export default function PosReceiptModal({
           {t.receiptChooseDelivery || 'Elige cómo entregar el ticket:'}
         </p>
 
-        <div className="mb-4 rounded-xl border border-blue-200 bg-white p-3">
+        <div className="mb-3 rounded-xl border border-blue-200 bg-white p-3">
           <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">
             {t.receiptSmsPhoneLabel || (locale === 'en' ? 'Mobile for SMS' : 'Celular para SMS')}
           </label>
-          <p className="text-[9px] font-bold text-slate-500 mb-2 normal-case leading-snug">
-            {t.receiptSmsPhoneEditable || (locale === 'en'
-              ? 'Pre-filled from the chart. Edit if you want to send to another number.'
-              : 'Se llena con el celular del expediente. Edítalo si quieres enviar a otro número.')}
-          </p>
           <input
             type="tel"
             value={smsPhone}
@@ -143,6 +189,34 @@ export default function PosReceiptModal({
           )}
         </div>
 
+        <div className="mb-4 rounded-xl border border-emerald-200 bg-white p-3">
+          <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">
+            {t.receiptEmailLabel || (locale === 'en' ? 'Email for receipt' : 'Correo para el ticket')}
+          </label>
+          <p className="text-[9px] font-bold text-slate-500 mb-2 normal-case leading-snug">
+            {t.receiptEmailEditable || (locale === 'en'
+              ? 'Pre-filled from the chart. Edit if needed.'
+              : 'Se llena con el correo del expediente. Edítalo si hace falta.')}
+          </p>
+          <input
+            type="email"
+            value={receiptEmail}
+            onChange={(e) => {
+              setReceiptEmail(e.target.value);
+              setEmailResult(null);
+            }}
+            placeholder={t.receiptEmailPlaceholder || (locale === 'en' ? 'name@email.com' : 'nombre@correo.com')}
+            className="w-full p-2.5 border-2 border-emerald-300 rounded-lg text-sm font-bold text-slate-900"
+          />
+          {!hasEmail && (
+            <p className="text-[9px] font-bold text-amber-700 mt-2 normal-case leading-snug">
+              {t.receiptEmailHint || (locale === 'en'
+                ? 'Enter an email and tap Send by email.'
+                : 'Escribe un correo y pulsa Enviar por correo.')}
+            </p>
+          )}
+        </div>
+
         <div className="flex flex-col gap-2.5 mb-4">
           <button
             type="button"
@@ -150,6 +224,14 @@ export default function PosReceiptModal({
             className="w-full bg-slate-900 text-white font-black py-4 rounded-xl uppercase text-xs shadow-lg"
           >
             {t.printTicket || '🖨 Imprimir ticket'}
+          </button>
+          <button
+            type="button"
+            disabled={emailBusy}
+            onClick={() => runEmail(receipt)}
+            className="w-full bg-emerald-600 text-white font-black py-4 rounded-xl uppercase text-xs shadow-lg ring-2 ring-emerald-300 disabled:opacity-60"
+          >
+            {t.receiptSendEmail || '✉️ Enviar por correo'}
           </button>
           <button
             type="button"
@@ -170,6 +252,15 @@ export default function PosReceiptModal({
         {printResult === 'error' && (
           <p className="text-center text-[10px] font-black text-red-700 mb-2 normal-case">{t.receiptPrintError}</p>
         )}
+        {emailResult === 'sending' && (
+          <p className="text-center text-[10px] font-black text-slate-500 mb-2 uppercase">{t.receiptEmailSending}</p>
+        )}
+        {emailResult === 'ok' && (
+          <p className="text-center text-[10px] font-black text-emerald-700 mb-2 uppercase">{t.receiptEmailSent}</p>
+        )}
+        {emailResult === 'error' && (
+          <p className="text-center text-[10px] font-black text-red-700 mb-2 normal-case">{t.receiptEmailError}</p>
+        )}
         {smsResult === 'sending' && (
           <p className="text-center text-[10px] font-black text-slate-500 mb-2 uppercase">{t.receiptSmsSending}</p>
         )}
@@ -188,7 +279,7 @@ export default function PosReceiptModal({
         <button
           type="button"
           onClick={handleClose}
-          className="w-full bg-emerald-600 text-white font-black py-3 rounded-xl uppercase text-xs"
+          className="w-full bg-slate-700 text-white font-black py-3 rounded-xl uppercase text-xs"
         >
           {t.receiptPrintAccept || t.receiptSkipDelivery || t.close || 'Continuar sin enviar'}
         </button>
