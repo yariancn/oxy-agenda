@@ -4,7 +4,8 @@ ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS confirmation_sent_at timestamptz,
   ADD COLUMN IF NOT EXISTS confirmation_replied_at timestamptz,
   ADD COLUMN IF NOT EXISTS confirmation_reply text,
-  ADD COLUMN IF NOT EXISTS confirmation_enabled boolean DEFAULT false;
+  ADD COLUMN IF NOT EXISTS confirmation_enabled boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS confirmation_code text;
 
 ALTER TABLE company_config
   ADD COLUMN IF NOT EXISTS confirmation_sms_enabled boolean DEFAULT false,
@@ -14,7 +15,12 @@ ALTER TABLE company_config
 
 COMMENT ON COLUMN appointments.confirmation_status IS 'none | pending | confirmed | declined | no_response_likely';
 COMMENT ON COLUMN appointments.confirmation_enabled IS 'Staff opt-in: show/send SI/NO confirmation for this appointment';
+COMMENT ON COLUMN appointments.confirmation_code IS 'Short code for SMS links /c/{code}/si|/no';
 COMMENT ON COLUMN company_config.confirmation_sms_enabled IS 'Clinic-wide switch for confirmation SMS feature (Houston + GDL)';
+
+CREATE UNIQUE INDEX IF NOT EXISTS appointments_confirmation_code_uidx
+  ON appointments (confirmation_code)
+  WHERE confirmation_code IS NOT NULL AND confirmation_code <> '';
 
 -- Keep confirmation UI for appointments already in the flow
 UPDATE appointments
@@ -24,14 +30,10 @@ WHERE confirmation_enabled IS DISTINCT FROM true
   AND confirmation_status <> 'none'
   AND confirmation_status <> '';
 
--- Force GDL confirmation body to one-tap links (old “responde SI/NO” bodies cannot receive SMS replies)
+-- Force clear SMS body with short-link placeholders
 UPDATE company_config
 SET
   confirmation_hours_before = COALESCE(confirmation_hours_before, 6),
-  confirmation_sms_body = E'Hola {{nombre}}, confirma tu sesión {{cuando}} {{hora}} OXYGENGDL.\nSI: {{si_url}}\nNO: {{no_url}}\nDudas {{telefono}}'
-WHERE clinic IN ('Oxygengdl', 'Guadalajara')
-  AND (
-    confirmation_sms_body IS NULL
-    OR TRIM(confirmation_sms_body) = ''
-    OR confirmation_sms_body NOT ILIKE '%{{si_url}}%'
-  );
+  confirmation_sms_body = E'Hola {{nombre}}, confirma tu sesión {{cuando}} {{hora}} en OXYGENGDL.\nDa click en un enlace:\nSI → {{si_url}}\nNO → {{no_url}}\nDudas {{telefono}}'
+WHERE clinic IN ('Oxygengdl', 'Guadalajara');
+
