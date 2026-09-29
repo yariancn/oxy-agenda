@@ -24,12 +24,14 @@ WHERE confirmation_enabled IS DISTINCT FROM true
   AND confirmation_status <> 'none'
   AND confirmation_status <> '';
 
--- Defaults: 6h before; Spanish body with one-tap SI/NO links
+-- Force GDL confirmation body to one-tap links (old “responde SI/NO” bodies cannot receive SMS replies)
 UPDATE company_config
 SET
   confirmation_hours_before = COALESCE(confirmation_hours_before, 6),
-  confirmation_sms_body = COALESCE(
-    NULLIF(TRIM(confirmation_sms_body), ''),
-    E'Hola {{nombre}}, confirma tu sesión {{cuando}} {{hora}} OXYGENGDL.\nSI: {{si_url}}\nNO: {{no_url}}\nDudas {{telefono}}'
-  )
-WHERE clinic IN ('Oxygengdl', 'Guadalajara');
+  confirmation_sms_body = E'Hola {{nombre}}, confirma tu sesión {{cuando}} {{hora}} OXYGENGDL.\nSI: {{si_url}}\nNO: {{no_url}}\nDudas {{telefono}}'
+WHERE clinic IN ('Oxygengdl', 'Guadalajara')
+  AND (
+    confirmation_sms_body IS NULL
+    OR TRIM(confirmation_sms_body) = ''
+    OR confirmation_sms_body NOT ILIKE '%{{si_url}}%'
+  );
