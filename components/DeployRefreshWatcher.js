@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
+import { isPublicPatientPath } from '../lib/installContext';
 
 const POLL_MS = 15 * 60 * 1000; // 15 min — deploy checks must not burn cellular
 const CLIENT_BUILD = String(process.env.NEXT_PUBLIC_BUILD_SHA || 'dev').trim();
@@ -17,10 +19,13 @@ function normalizeSha(value) {
  * Checks on mount, when the tab becomes visible, and every 15 minutes while visible.
  */
 export default function DeployRefreshWatcher() {
+  const pathname = usePathname();
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [serverSha, setServerSha] = useState('');
 
   useEffect(() => {
+    if (isPublicPatientPath(pathname)) return undefined;
+
     let cancelled = false;
     let intervalId = null;
 
@@ -69,9 +74,9 @@ export default function DeployRefreshWatcher() {
       if (intervalId) clearInterval(intervalId);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, []);
+  }, [pathname]);
 
-  if (!updateAvailable) return null;
+  if (isPublicPatientPath(pathname) || !updateAvailable) return null;
 
   return (
     <div className="fixed top-0 inset-x-0 z-[30000] p-2 sm:p-3 pointer-events-none">

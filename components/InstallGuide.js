@@ -9,6 +9,7 @@ import {
   INSTALL_DISMISS_KEY,
   INSTALL_GUIDE_EVENT,
   INSTALL_SESSION_KEY,
+  isPublicPatientPath,
   shouldAutoShowInstallGuide,
 } from '../lib/installContext';
 import { INSTALL_GUIDE_COPY, localeFromPathname } from '../lib/i18n';
@@ -22,7 +23,8 @@ function readContext() {
 
 function isStaffInstallPath(pathname) {
   if (!pathname) return false;
-  return !pathname.startsWith('/booking');
+  if (isPublicPatientPath(pathname)) return false;
+  return true;
 }
 
 export default function InstallGuide() {
