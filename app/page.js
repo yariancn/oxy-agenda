@@ -7278,8 +7278,8 @@ export default function AppLayout() {
                           ? 'Separate from the messages above. Asks first-session patients to reply YES or NO before the visit.'
                           : 'Es aparte de los mensajes de arriba. Pide a pacientes de primera sesión que respondan SI o NO antes de la visita.')
                         : (locale === 'en'
-                          ? 'Only for the first visit. Sends ~18h before (or shortly after booking if sooner). When the patient replies SI/NO, the status updates on the appointment card. Staff releases slots at their discretion — no auto-cancel.'
-                          : 'Solo para la primera cita. Se envía ~18 h antes (o poco después de agendar si es más pronto). Cuando el paciente responde SI/NO, el estado se actualiza en la cita. El staff libera horarios a discreción — sin cancelación automática.')}
+                          ? 'First visit only. ~18h before (or soon after booking if sooner). SMS includes one-tap SI/NO links — patient opens a link and done (no SMS reply needed). Staff still releases slots manually.'
+                          : 'Solo primera cita. ~18 h antes (o poco después de agendar si es más pronto). El SMS lleva enlaces SI/NO de un toque: el paciente abre el enlace y listo (no hace falta responder el SMS). El staff libera horarios a discreción.')}
                     </p>
                     <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-blue-200 cursor-pointer">
                       <input
@@ -7323,7 +7323,9 @@ export default function AppLayout() {
                     {!isShenandoah(activeClinic) && (
                       <div>
                         <label className="text-xs font-bold text-blue-900">
-                          {locale === 'en' ? 'SMS text (optional). Use {{nombre}} {{hora}} {{cuando}}' : 'Texto SMS (opcional). Usa {{nombre}} {{hora}} {{cuando}}'}
+                          {locale === 'en'
+                            ? 'SMS text (optional). {{nombre}} {{hora}} {{cuando}} {{confirm_url}}'
+                            : 'Texto SMS (opcional). {{nombre}} {{hora}} {{cuando}} {{confirm_url}}'}
                         </label>
                         <textarea
                           rows={5}
