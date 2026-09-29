@@ -3,11 +3,16 @@ import { CLINIC_OXYGENDGL } from '../../../../lib/clinicRegistry.js';
 import { processConfirmationInboundReply } from '../../../../lib/processConfirmationInbound.js';
 
 /**
- * LabsMobile (or similar MX SMS) inbound MO webhook for GDL SI/NO confirmations.
- * Accepts JSON or form/query with common field names: msisdn/phone/from + message/text/body.
+ * LabsMobile inbound MO webhook for GDL SI/NO confirmations.
  *
- * Configure in LabsMobile to POST/GET:
- *   https://<host>/api/sms/inbound-mx
+ * LabsMobile Account API Settings → "URL for receiving messages":
+ *   https://oxy-agenda.vercel.app/api/sms/inbound-mx
+ *
+ * Official payload (HTTP POST JSON):
+ *   { inbound_number, service_number, msisdn, message, timestamp }
+ *
+ * Requires a contracted LabsMobile virtual number — alphanumeric sender OXYGENDL
+ * cannot receive replies. Until then, staff can mark SI/NO in the appointment panel.
  */
 function pickField(source, keys) {
   for (const key of keys) {
@@ -26,7 +31,11 @@ async function readPayload(request) {
     const json = await request.json().catch(() => ({}));
     return { ...query, ...json };
   }
-  if (contentType.includes('form')) {
+  if (
+    contentType.includes('application/x-www-form-urlencoded')
+    || contentType.includes('multipart/form-data')
+    || contentType.includes('form')
+  ) {
     const form = await request.formData().catch(() => null);
     const obj = { ...query };
     if (form) {
@@ -34,7 +43,17 @@ async function readPayload(request) {
     }
     return obj;
   }
-  // GET or unknown — query only
+  // POST with empty/unknown content-type: try JSON body, fall back to query
+  if (request.method === 'POST') {
+    const raw = await request.text().catch(() => '');
+    if (raw) {
+      try {
+        return { ...query, ...JSON.parse(raw) };
+      } catch {
+        // ignore
+      }
+    }
+  }
   return query;
 }
 
@@ -49,7 +68,11 @@ async function handle(request) {
     ]);
 
     if (!from || !body) {
-      return NextResponse.json({ ok: false, error: 'missing_from_or_body' }, { status: 400 });
+      return NextResponse.json({
+        ok: false,
+        error: 'missing_from_or_body',
+        hint: 'Expected LabsMobile JSON: { msisdn, message }',
+      }, { status: 400 });
     }
 
     const result = await processConfirmationInboundReply({
@@ -58,22 +81,17 @@ async function handle(request) {
       bodyText: body,
     });
 
-    if (!result.ok) {
-      return NextResponse.json({
-        ok: false,
-        error: result.error,
-        // Still 200 for provider retries when reply text isn't SI/NO.
-        acknowledged: result.error === 'unrecognized_reply',
-      }, { status: result.error === 'unrecognized_reply' ? 200 : 200 });
-    }
-
+    // Always 200 so LabsMobile does not retry forever on no_pending / unrecognized.
     return NextResponse.json({
-      ok: true,
-      reply: result.reply,
-      appointmentId: result.appointment?.id,
-      status: result.nextStatus,
+      ok: Boolean(result.ok),
+      error: result.ok ? undefined : result.error,
+      reply: result.reply || null,
+      appointmentId: result.appointment?.id || null,
+      status: result.nextStatus || null,
+      acknowledged: true,
     });
   } catch (error) {
+    console.error('[inbound-mx]', error);
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
 }

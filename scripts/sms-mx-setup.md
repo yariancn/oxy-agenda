@@ -78,6 +78,37 @@ LabsMobile publica precios por volumen en su web (~$0.22–0.30 MXN/SMS a volúm
 | Twilio → MX | ~$3.50 MXN/msg ❌ |
 | Solo correo | $0 (ya activo) |
 
-## 7. Diagnóstico
+## 7. Recibir respuestas SI/NO (imprescindible)
+
+El remitente alfanumérico `OXYGENDL` **no puede recibir** respuestas. Para que SI/NO del paciente lleguen a la agenda hace falta:
+
+1. Contratar un **número virtual** LabsMobile (envío + recepción).
+2. En **Mi cuenta → Configuración API → URL for receiving messages**, poner:
+
+```
+https://oxy-agenda.vercel.app/api/sms/inbound-mx
+```
+
+3. LabsMobile enviará POST JSON:
+
+```json
+{
+  "inbound_number": "...",
+  "service_number": "...",
+  "msisdn": "5233XXXXXXXX",
+  "message": "SI",
+  "timestamp": "2026-03-29 18:00:00"
+}
+```
+
+4. Probar el webhook (sin gastar SMS):
+
+```bash
+node scripts/test-confirmation-inbound.mjs
+```
+
+**Mientras no haya número virtual:** en la ficha de la cita (estado Esperando SI/NO) usa **Marcar SI** / **Marcar NO** cuando el paciente confirme por teléfono o WhatsApp.
+
+## 8. Diagnóstico
 
 `GET /api/health/notify` → `smsMxProvider: "labsmobile"`, `smsMxPartial.labsmobile`

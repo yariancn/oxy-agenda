@@ -3299,6 +3299,65 @@ export default function AppLayout() {
     }
   };
 
+  /** Staff marks SI/NO when the patient replied by phone/WhatsApp (or LabsMobile MO is unavailable). */
+  const handleMarkConfirmationReply = async (reply) => {
+    if (!selectedSlot?.id || confirmationSending) return;
+    if (reply !== 'confirmed' && reply !== 'declined') return;
+    const label = reply === 'confirmed'
+      ? (locale === 'en' ? 'YES (will attend)' : 'SI (sí asiste)')
+      : (locale === 'en' ? 'NO (will not attend)' : 'NO (no asiste)');
+    const ok = window.confirm(
+      locale === 'en'
+        ? `Mark this confirmation as ${label}?`
+        : `¿Marcar esta confirmación como ${label}?`,
+    );
+    if (!ok) return;
+    setConfirmationSending(true);
+    try {
+      const res = await fetch('/api/staff/confirmation-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          appointmentId: selectedSlot.id,
+          clinic: activeClinic,
+          reply,
+          replyText: reply === 'confirmed' ? 'SI' : 'NO',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        alert(data.message || data.error || (locale === 'en' ? 'Could not save reply.' : 'No se pudo guardar la respuesta.'));
+        return;
+      }
+      const nextStatus = data.status || (reply === 'confirmed' ? CONFIRMATION_STATUS.CONFIRMED : CONFIRMATION_STATUS.DECLINED);
+      const repliedAt = new Date().toISOString();
+      const replyText = `${reply === 'confirmed' ? 'SI' : 'NO'} (staff)`;
+      setSelectedSlot((prev) => (prev ? {
+        ...prev,
+        confirmation_status: nextStatus,
+        confirmation_replied_at: repliedAt,
+        confirmation_reply: replyText,
+        ...(reply === 'declined' ? { check_in_status: CANCEL_REQUEST_STATUS } : {}),
+      } : prev));
+      setDbAppointments((prev) => prev.map((row) => (
+        String(row.id) === String(selectedSlot.id)
+          ? {
+            ...row,
+            confirmation_status: nextStatus,
+            confirmation_replied_at: repliedAt,
+            confirmation_reply: replyText,
+            ...(reply === 'declined' ? { check_in_status: CANCEL_REQUEST_STATUS } : {}),
+          }
+          : row
+      )));
+    } catch (err) {
+      alert(err?.message || (locale === 'en' ? 'Could not save reply.' : 'No se pudo guardar la respuesta.'));
+    } finally {
+      setConfirmationSending(false);
+    }
+  };
+
   const handleResendFirstVisitMessage = async () => {
     if (!selectedSlot?.id) return;
     const ok = window.confirm(
@@ -6795,7 +6854,7 @@ export default function AppLayout() {
                                    <div className="flex flex-col gap-1 items-center">
                                      <button type="button" onClick={() => {
                                        const pat = dbPatients.find((p) => String(p.id) === String(tx.patientId));
-                                       openSaleReceiptModal(tx, tx.patientName, pat?.phone || '');
+                                       openSaleReceiptModal(tx, tx.patientName, pat?.phone || '', pat?.email || '');
                                      }} className="bg-slate-100 border border-slate-300 text-slate-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-slate-200 transition shadow-sm w-full max-w-[8rem]">
                                        {L.modals.patient.receiptGenerated}
                                      </button>
@@ -8318,12 +8377,37 @@ export default function AppLayout() {
                         </p>
                       </div>
                     ) : null}
-                    {selectedSlot.confirmation_status === CONFIRMATION_STATUS.PENDING ? (
-                      <p className="text-[10px] font-black uppercase text-slate-700 bg-white/70 border border-slate-200 rounded-lg px-2 py-1.5">
-                        {locale === 'en'
-                          ? 'Waiting for patient reply: YES to confirm · NO to cancel'
-                          : 'Esperando respuesta del paciente: SI para confirmar · NO para cancelar'}
-                      </p>
+                    {(selectedSlot.confirmation_status === CONFIRMATION_STATUS.PENDING
+                      || selectedSlot.confirmation_status === CONFIRMATION_STATUS.NO_RESPONSE) && !isRescheduling ? (
+                      <div className="space-y-2">
+                        <p className="text-[10px] font-black uppercase text-slate-700 bg-white/70 border border-slate-200 rounded-lg px-2 py-1.5">
+                          {selectedSlot.confirmation_status === CONFIRMATION_STATUS.NO_RESPONSE
+                            ? (locale === 'en'
+                              ? 'No SMS reply yet — mark SI/NO if the patient confirmed by phone/WhatsApp'
+                              : 'Sin respuesta SMS — marca SI/NO si el paciente confirmó por teléfono/WhatsApp')
+                            : (locale === 'en'
+                              ? 'Waiting for patient reply: YES to confirm · NO to cancel'
+                              : 'Esperando respuesta del paciente: SI para confirmar · NO para cancelar')}
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleMarkConfirmationReply('confirmed')}
+                            disabled={confirmationSending}
+                            className="flex-1 bg-emerald-600 text-white py-2 rounded-xl font-black uppercase text-[10px] hover:bg-emerald-700 transition disabled:opacity-60"
+                          >
+                            {locale === 'en' ? 'Mark YES' : 'Marcar SI'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMarkConfirmationReply('declined')}
+                            disabled={confirmationSending}
+                            className="flex-1 bg-red-600 text-white py-2 rounded-xl font-black uppercase text-[10px] hover:bg-red-700 transition disabled:opacity-60"
+                          >
+                            {locale === 'en' ? 'Mark NO' : 'Marcar NO'}
+                          </button>
+                        </div>
+                      </div>
                     ) : null}
                     {selectedSlot.confirmation_reply && (
                       <p className="text-xs font-bold normal-case">
