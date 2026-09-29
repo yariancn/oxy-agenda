@@ -7278,8 +7278,8 @@ export default function AppLayout() {
                           ? 'Separate from the messages above. Asks first-session patients to reply YES or NO before the visit.'
                           : 'Es aparte de los mensajes de arriba. Pide a pacientes de primera sesión que respondan SI o NO antes de la visita.')
                         : (locale === 'en'
-                          ? 'First visit only. ~18h before (or soon after booking if sooner). SMS has SI and NO links — one tap confirms (no typing). Staff still releases slots manually.'
-                          : 'Solo primera cita. ~18 h antes (o poco después de agendar si es más pronto). El SMS lleva enlaces SI y NO: un toque confirma (sin escribir). El staff libera horarios a discreción.')}
+                          ? 'First visit only. Auto-sends ~6h before (or right after booking if sooner). You can always tap “Send confirmation now” earlier. SMS has one-tap SI/NO links.'
+                          : 'Solo primera cita. Se envía solo ~6 h antes (o al agendar si ya estás en esa ventana). Siempre puedes usar «Enviar confirmación SMS ahora» antes. El SMS lleva enlaces SI/NO de un toque.')}
                     </p>
                     <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-blue-200 cursor-pointer">
                       <input
@@ -8363,6 +8363,20 @@ export default function AppLayout() {
                     <p className="text-[10px] font-bold normal-case leading-relaxed">
                       {locale === 'en' ? selectedSlotConfirmationInfo.summaryEn : selectedSlotConfirmationInfo.summaryEs}
                     </p>
+                    {selectedSlotConfirmationInfo.canSendManually && !isRescheduling ? (
+                      <button
+                        type="button"
+                        onClick={handleSendConfirmationNow}
+                        disabled={confirmationSending}
+                        className="w-full bg-sky-600 text-white py-2.5 rounded-xl font-black uppercase text-[10px] hover:bg-sky-700 transition disabled:opacity-60"
+                      >
+                        {confirmationSending
+                          ? (locale === 'en' ? 'Sending…' : 'Enviando…')
+                          : selectedSlotConfirmationInfo.isResend
+                            ? (locale === 'en' ? 'Resend confirmation SMS (YES/NO)' : 'Reenviar SMS confirmación (SI/NO)')
+                            : (locale === 'en' ? 'Send confirmation SMS now' : 'Enviar confirmación SMS ahora')}
+                      </button>
+                    ) : null}
                     {(appointmentHasSmsOptOut(selectedSlot) || patientHasSmsOptOut({
                       notes: selectedSlot.notes,
                       patientNotes: selectedSlot.patientNotes,
@@ -8426,20 +8440,6 @@ export default function AppLayout() {
                         {locale === 'en' ? 'Sent' : 'Enviado'}: {new Date(selectedSlot.confirmation_sent_at).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX')}
                       </p>
                     )}
-                    {selectedSlotConfirmationInfo.canSendManually && !isRescheduling ? (
-                      <button
-                        type="button"
-                        onClick={handleSendConfirmationNow}
-                        disabled={confirmationSending}
-                        className="w-full mt-1 bg-sky-600 text-white py-2.5 rounded-xl font-black uppercase text-[10px] hover:bg-sky-700 transition disabled:opacity-60"
-                      >
-                        {confirmationSending
-                          ? (locale === 'en' ? 'Sending…' : 'Enviando…')
-                          : selectedSlotConfirmationInfo.isResend
-                            ? (locale === 'en' ? 'Resend confirmation SMS (YES/NO)' : 'Reenviar SMS confirmación (SI/NO)')
-                            : (locale === 'en' ? 'Send confirmation SMS now' : 'Enviar confirmación SMS ahora')}
-                      </button>
-                    ) : null}
                   </div>
                 ) : null}
 
