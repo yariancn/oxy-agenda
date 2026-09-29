@@ -1,9 +1,10 @@
--- SMS confirmation for first sessions (run on BOTH Supabase TX / Shenandoah AND GDL)
+-- SMS confirmation (run on BOTH Supabase TX / Shenandoah AND GDL)
 ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS confirmation_status text DEFAULT 'none',
   ADD COLUMN IF NOT EXISTS confirmation_sent_at timestamptz,
   ADD COLUMN IF NOT EXISTS confirmation_replied_at timestamptz,
-  ADD COLUMN IF NOT EXISTS confirmation_reply text;
+  ADD COLUMN IF NOT EXISTS confirmation_reply text,
+  ADD COLUMN IF NOT EXISTS confirmation_enabled boolean DEFAULT false;
 
 ALTER TABLE company_config
   ADD COLUMN IF NOT EXISTS confirmation_sms_enabled boolean DEFAULT false,
@@ -12,12 +13,21 @@ ALTER TABLE company_config
   ADD COLUMN IF NOT EXISTS confirmation_sms_body text;
 
 COMMENT ON COLUMN appointments.confirmation_status IS 'none | pending | confirmed | declined | no_response_likely';
-COMMENT ON COLUMN company_config.confirmation_sms_enabled IS 'SMS YES/NO (SI/NO) confirmation for first sessions only (Houston + GDL)';
+COMMENT ON COLUMN appointments.confirmation_enabled IS 'Staff opt-in: show/send SI/NO confirmation for this appointment';
+COMMENT ON COLUMN company_config.confirmation_sms_enabled IS 'Clinic-wide switch for confirmation SMS feature (Houston + GDL)';
 
--- GDL/Houston defaults: 6h before; Spanish body with one-tap SI/NO links
+-- Keep confirmation UI for appointments already in the flow
+UPDATE appointments
+SET confirmation_enabled = true
+WHERE confirmation_enabled IS DISTINCT FROM true
+  AND confirmation_status IS NOT NULL
+  AND confirmation_status <> 'none'
+  AND confirmation_status <> '';
+
+-- Defaults: 6h before; Spanish body with one-tap SI/NO links
 UPDATE company_config
 SET
-  confirmation_hours_before = 6,
+  confirmation_hours_before = COALESCE(confirmation_hours_before, 6),
   confirmation_sms_body = COALESCE(
     NULLIF(TRIM(confirmation_sms_body), ''),
     E'Hola {{nombre}}, confirma tu sesión {{cuando}} {{hora}} OXYGENGDL.\nSI: {{si_url}}\nNO: {{no_url}}\nDudas {{telefono}}'

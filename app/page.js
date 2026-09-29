@@ -218,6 +218,7 @@ import {
   defaultConfirmationHoursBefore,
   DEFAULT_GDL_CONFIRMATION_SMS,
   explainConfirmationState,
+  isAppointmentConfirmationEnabled,
   supportsConfirmationSms,
 } from '../lib/appointmentConfirmation';
 import {
@@ -1806,6 +1807,7 @@ export default function AppLayout() {
         confirmation_sent_at: fresh.confirmation_sent_at ?? prev.confirmation_sent_at,
         confirmation_replied_at: fresh.confirmation_replied_at ?? prev.confirmation_replied_at,
         confirmation_reply: fresh.confirmation_reply ?? prev.confirmation_reply,
+        confirmation_enabled: fresh.confirmation_enabled ?? prev.confirmation_enabled,
       };
     });
   }, [dbAppointments, dbPatients, selectedSlot?.id]);
@@ -3277,6 +3279,7 @@ export default function AppLayout() {
         confirmation_sent_at: sentAt,
         confirmation_replied_at: null,
         confirmation_reply: null,
+        confirmation_enabled: true,
       } : prev));
       setDbAppointments((prev) => prev.map((row) => (
         String(row.id) === String(selectedSlot.id)
@@ -3286,6 +3289,7 @@ export default function AppLayout() {
             confirmation_sent_at: sentAt,
             confirmation_replied_at: null,
             confirmation_reply: null,
+            confirmation_enabled: true,
           }
           : row
       )));
@@ -3294,6 +3298,45 @@ export default function AppLayout() {
         : (isResend ? 'SMS de confirmación reenviado. El estado debe pasar a Esperando SI/NO.' : 'SMS de confirmación enviado. El estado debe pasar a Esperando SI/NO.'));
     } catch (err) {
       alert(err?.message || (locale === 'en' ? 'Could not send confirmation SMS.' : 'No se pudo enviar la confirmación SMS.'));
+    } finally {
+      setConfirmationSending(false);
+    }
+  };
+
+  const handleToggleConfirmationEnabled = async (enabled) => {
+    if (!selectedSlot?.id || confirmationSending) return;
+    const next = enabled === true;
+    const status = selectedSlot.confirmation_status || CONFIRMATION_STATUS.NONE;
+    if (!next && status !== CONFIRMATION_STATUS.NONE && status !== CONFIRMATION_STATUS.PENDING && status !== CONFIRMATION_STATUS.NO_RESPONSE) {
+      alert(locale === 'en'
+        ? 'This appointment already has a YES/NO reply — leave confirmation on.'
+        : 'Esta cita ya tiene respuesta SI/NO — deja la confirmación activada.');
+      return;
+    }
+    setConfirmationSending(true);
+    try {
+      const { error } = await activeSupabase
+        .from('appointments')
+        .update({ confirmation_enabled: next })
+        .eq('id', selectedSlot.id);
+      if (error) {
+        if (/confirmation_enabled|column|schema cache/i.test(error.message || '')) {
+          alert(locale === 'en'
+            ? 'Database needs column confirmation_enabled. Run scripts/supabase-appointment-confirmation.sql'
+            : 'Falta la columna confirmation_enabled. Ejecuta scripts/supabase-appointment-confirmation.sql en Supabase.');
+        } else {
+          alert(error.message || (locale === 'en' ? 'Could not save.' : 'No se pudo guardar.'));
+        }
+        return;
+      }
+      setSelectedSlot((prev) => (prev ? { ...prev, confirmation_enabled: next } : prev));
+      setDbAppointments((prev) => prev.map((row) => (
+        String(row.id) === String(selectedSlot.id)
+          ? { ...row, confirmation_enabled: next }
+          : row
+      )));
+    } catch (err) {
+      alert(err?.message || (locale === 'en' ? 'Could not save.' : 'No se pudo guardar.'));
     } finally {
       setConfirmationSending(false);
     }
@@ -7270,16 +7313,12 @@ export default function AppLayout() {
                     <h4 className="text-sm font-black text-blue-950">
                       {isShenandoah(activeClinic)
                         ? (locale === 'en' ? 'Houston — YES/NO confirmation SMS' : 'Houston — SMS de confirmación SI/NO')
-                        : (locale === 'en' ? 'GDL — SI/NO confirmation SMS (first session)' : 'GDL — SMS de confirmación SI/NO (primera sesión)')}
+                        : (locale === 'en' ? 'GDL — SI/NO confirmation SMS' : 'GDL — SMS de confirmación SI/NO')}
                     </h4>
                     <p className="text-xs text-blue-900/90 leading-relaxed">
-                      {isShenandoah(activeClinic)
-                        ? (locale === 'en'
-                          ? 'Separate from the messages above. Asks first-session patients to reply YES or NO before the visit.'
-                          : 'Es aparte de los mensajes de arriba. Pide a pacientes de primera sesión que respondan SI o NO antes de la visita.')
-                        : (locale === 'en'
-                          ? 'First visit only. Auto-sends ~6h before (or right after booking if sooner). You can always tap “Send confirmation now” earlier. SMS has one-tap SI/NO links.'
-                          : 'Solo primera cita. Se envía solo ~6 h antes (o al agendar si ya estás en esa ventana). Siempre puedes usar «Enviar confirmación SMS ahora» antes. El SMS lleva enlaces SI/NO de un toque.')}
+                      {locale === 'en'
+                        ? 'Clinic-wide switch. On each appointment, staff must check “Enable confirmation” to show send/SI-NO controls. Auto-sends ~6h before (or on booking if sooner) only for opted-in appointments.'
+                        : 'Interruptor de la clínica. En cada cita el staff debe marcar «Habilitar confirmación» para ver envío/SI-NO. El envío automático (~6 h antes, o al agendar si es más pronto) solo aplica a citas habilitadas.'}
                     </p>
                     <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-blue-200 cursor-pointer">
                       <input
@@ -7289,7 +7328,7 @@ export default function AppLayout() {
                         className="w-5 h-5 mt-0.5 shrink-0"
                       />
                       <span className="text-sm font-bold text-blue-950">
-                        {locale === 'en' ? 'Ask for YES/NO before first sessions' : 'Pedir SI/NO antes de primeras sesiones'}
+                        {locale === 'en' ? 'Allow confirmation SMS feature' : 'Permitir función de confirmación SMS'}
                       </span>
                     </label>
                     <div className="grid grid-cols-2 gap-3">
@@ -8337,12 +8376,31 @@ export default function AppLayout() {
                 <span className="font-black text-slate-800 text-lg uppercase pr-6">{selectedSlot.is_new_patient ? '⭐ ' : ''}{selectedSlot.patient}</span>
                 <span className="text-[10px] text-blue-600 font-black uppercase tracking-widest">{selectedSlot.protocol}</span>
 
-                {supportsConfirmationSms(activeClinic) && selectedSlotConfirmationInfo ? (
+                {supportsConfirmationSms(activeClinic) ? (
                   <div className={`mt-3 rounded-xl border-2 p-3 space-y-2 ${
-                    selectedSlot.confirmation_status && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE
+                    isAppointmentConfirmationEnabled(selectedSlot)
+                      && selectedSlot.confirmation_status
+                      && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE
                       ? confirmationStatusClass(selectedSlot.confirmation_status)
                       : 'bg-sky-50 text-sky-900 border-sky-400'
                   }`}>
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 mt-0.5 shrink-0"
+                        checked={isAppointmentConfirmationEnabled(selectedSlot)}
+                        disabled={confirmationSending || isRescheduling}
+                        onChange={(e) => handleToggleConfirmationEnabled(e.target.checked)}
+                      />
+                      <span className="text-[10px] font-black uppercase leading-snug">
+                        {locale === 'en'
+                          ? 'Enable YES/NO confirmation SMS for this appointment'
+                          : 'Habilitar confirmación SMS SI/NO en esta cita'}
+                      </span>
+                    </label>
+
+                    {isAppointmentConfirmationEnabled(selectedSlot) && selectedSlotConfirmationInfo ? (
+                      <>
                     <p className="text-[10px] font-black uppercase flex flex-wrap items-center gap-1.5">
                       <span aria-hidden>📱</span>
                       <span>
@@ -8438,6 +8496,14 @@ export default function AppLayout() {
                     {selectedSlot.confirmation_sent_at && (
                       <p className="text-[9px] font-bold opacity-80 normal-case">
                         {locale === 'en' ? 'Sent' : 'Enviado'}: {new Date(selectedSlot.confirmation_sent_at).toLocaleString(locale === 'en' ? 'en-US' : 'es-MX')}
+                      </p>
+                    )}
+                      </>
+                    ) : (
+                      <p className="text-[10px] font-bold normal-case leading-relaxed opacity-80">
+                        {locale === 'en'
+                          ? 'Check the box above to enable confirmation on this visit (any appointment).'
+                          : 'Marca el checkbox para habilitar la confirmación en esta cita (cualquier visita).'}
                       </p>
                     )}
                   </div>
