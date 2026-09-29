@@ -25,6 +25,10 @@ const nextConfig = {
       permanent: true,
     }));
   },
+  async rewrites() {
+    // Short SMS links: /c?t=…&r=si|no → same as /confirmar
+    return [{ source: '/c', destination: '/confirmar' }];
+  },
   async headers() {
     return [
       {

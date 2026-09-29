@@ -11,10 +11,8 @@ export const metadata = {
 };
 
 /**
- * Max 2 taps from SMS:
- * 1) Open /confirmar?t=TOKEN
- * 2) Tap SI or NO
- * (If ?r=si|no is present, applies immediately — 1 tap.)
+ * One-tap from SMS when ?r=si|no is present.
+ * Without r: two big buttons (fallback).
  */
 export default async function ConfirmarPage({ searchParams }) {
   const params = typeof searchParams?.then === 'function' ? await searchParams : (searchParams || {});
@@ -95,13 +93,13 @@ export default async function ConfirmarPage({ searchParams }) {
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Link
-              href={`/confirmar?t=${t}&r=si`}
+              href={`/c?t=${t}&r=si`}
               style={btnStyle('#059669', '#fff')}
             >
               SI, voy a asistir
             </Link>
             <Link
-              href={`/confirmar?t=${t}&r=no`}
+              href={`/c?t=${t}&r=no`}
               style={btnStyle('#dc2626', '#fff')}
             >
               NO, no podré ir

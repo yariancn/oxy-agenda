@@ -107,7 +107,7 @@ https://oxy-agenda.vercel.app/api/sms/inbound-mx
 node scripts/test-confirmation-inbound.mjs
 ```
 
-**Mientras no haya número virtual:** el SMS usa un **enlace de un toque** (`{{confirm_url}}`): el paciente abre el link, toca SI o NO (máx. 2 toques) y la agenda se actualiza. También puedes usar **Marcar SI** / **Marcar NO** en la ficha de la cita.
+**Mientras no haya número virtual:** el SMS lleva enlaces directos **SI:** y **NO:** (`{{si_url}}` / `{{no_url}}`). Un toque confirma al instante. También puedes **Marcar SI / NO** en la ficha de la cita.
 
 ## 8. Diagnóstico
 

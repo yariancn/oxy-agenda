@@ -7278,8 +7278,8 @@ export default function AppLayout() {
                           ? 'Separate from the messages above. Asks first-session patients to reply YES or NO before the visit.'
                           : 'Es aparte de los mensajes de arriba. Pide a pacientes de primera sesión que respondan SI o NO antes de la visita.')
                         : (locale === 'en'
-                          ? 'First visit only. ~18h before (or soon after booking if sooner). SMS includes one-tap SI/NO links — patient opens a link and done (no SMS reply needed). Staff still releases slots manually.'
-                          : 'Solo primera cita. ~18 h antes (o poco después de agendar si es más pronto). El SMS lleva enlaces SI/NO de un toque: el paciente abre el enlace y listo (no hace falta responder el SMS). El staff libera horarios a discreción.')}
+                          ? 'First visit only. ~18h before (or soon after booking if sooner). SMS has SI and NO links — one tap confirms (no typing). Staff still releases slots manually.'
+                          : 'Solo primera cita. ~18 h antes (o poco después de agendar si es más pronto). El SMS lleva enlaces SI y NO: un toque confirma (sin escribir). El staff libera horarios a discreción.')}
                     </p>
                     <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-blue-200 cursor-pointer">
                       <input
@@ -7324,8 +7324,8 @@ export default function AppLayout() {
                       <div>
                         <label className="text-xs font-bold text-blue-900">
                           {locale === 'en'
-                            ? 'SMS text (optional). {{nombre}} {{hora}} {{cuando}} {{confirm_url}}'
-                            : 'Texto SMS (opcional). {{nombre}} {{hora}} {{cuando}} {{confirm_url}}'}
+                            ? 'SMS text (optional). {{nombre}} {{hora}} {{cuando}} {{si_url}} {{no_url}}'
+                            : 'Texto SMS (opcional). {{nombre}} {{hora}} {{cuando}} {{si_url}} {{no_url}}'}
                         </label>
                         <textarea
                           rows={5}
