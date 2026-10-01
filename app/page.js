@@ -8385,24 +8385,28 @@ export default function AppLayout() {
                       ? confirmationStatusClass(selectedSlot.confirmation_status)
                       : 'bg-sky-50 text-sky-900 border-sky-400'
                   }`}>
-                    <label className="flex items-start gap-2.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="w-4 h-4 mt-0.5 shrink-0"
-                        checked={isConfirmationTargetAppointment(selectedSlot, dbAppointments)}
-                        disabled={confirmationSending || isRescheduling || !!selectedSlotConfirmationInfo?.autoFirstSession}
-                        onChange={(e) => handleToggleConfirmationEnabled(e.target.checked)}
-                      />
-                      <span className="text-[10px] font-black uppercase leading-snug">
-                        {selectedSlotConfirmationInfo?.autoFirstSession
-                          ? (locale === 'en'
-                            ? 'First visit — YES/NO confirmation SMS (automatic)'
-                            : 'Primera cita — confirmación SMS SI/NO (automática)')
-                          : (locale === 'en'
+                    {selectedSlotConfirmationInfo?.autoFirstSession ? (
+                      <p className="text-[10px] font-black uppercase leading-snug">
+                        {locale === 'en'
+                          ? 'First visit — YES/NO confirmation SMS (automatic)'
+                          : 'Primera cita — confirmación SMS SI/NO (automática)'}
+                      </p>
+                    ) : (
+                      <label className="flex items-start gap-2.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 mt-0.5 shrink-0"
+                          checked={isAppointmentConfirmationEnabled(selectedSlot)}
+                          disabled={confirmationSending || isRescheduling}
+                          onChange={(e) => handleToggleConfirmationEnabled(e.target.checked)}
+                        />
+                        <span className="text-[10px] font-black uppercase leading-snug">
+                          {locale === 'en'
                             ? 'Enable YES/NO confirmation SMS for this appointment'
-                            : 'Habilitar confirmación SMS SI/NO en esta cita')}
-                      </span>
-                    </label>
+                            : 'Habilitar confirmación SMS SI/NO en esta cita'}
+                        </span>
+                      </label>
+                    )}
 
                     {isConfirmationTargetAppointment(selectedSlot, dbAppointments) && selectedSlotConfirmationInfo ? (
                       <>
