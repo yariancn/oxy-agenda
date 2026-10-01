@@ -30,9 +30,10 @@ WHERE confirmation_enabled IS DISTINCT FROM true
   AND confirmation_status <> 'none'
   AND confirmation_status <> '';
 
--- Force clear SMS body with short-link placeholders (emoji — SMS has no bold/color)
+-- Enable automatic first-visit confirmation SMS for GDL (6h before / ~5 min if booked inside window)
 UPDATE company_config
 SET
+  confirmation_sms_enabled = true,
   confirmation_hours_before = COALESCE(confirmation_hours_before, 6),
   confirmation_sms_body = E'Hola {{nombre}}, confirma tu sesión {{cuando}} {{hora}} en OXYGENGDL.\n\n👉 Da click:\n\n✅ SI → {{si_url}}\n\n❌ NO → {{no_url}}\n\nDudas {{telefono}}'
 WHERE clinic IN ('Oxygengdl', 'Guadalajara');

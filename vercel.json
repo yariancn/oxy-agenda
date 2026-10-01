@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/confirmation-sms",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/appointment-confirmation",
       "schedule": "0 12 * * *"
     }

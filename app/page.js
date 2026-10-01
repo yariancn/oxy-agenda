@@ -219,6 +219,7 @@ import {
   DEFAULT_GDL_CONFIRMATION_SMS,
   explainConfirmationState,
   isAppointmentConfirmationEnabled,
+  isConfirmationTargetAppointment,
   supportsConfirmationSms,
 } from '../lib/appointmentConfirmation';
 import {
@@ -7317,8 +7318,8 @@ export default function AppLayout() {
                     </h4>
                     <p className="text-xs text-blue-900/90 leading-relaxed">
                       {locale === 'en'
-                        ? 'Clinic-wide switch. On each appointment, staff must check “Enable confirmation” to show send/SI-NO controls. Auto-sends ~6h before (or on booking if sooner) only for opted-in appointments.'
-                        : 'Interruptor de la clínica. En cada cita el staff debe marcar «Habilitar confirmación» para ver envío/SI-NO. El envío automático (~6 h antes, o al agendar si es más pronto) solo aplica a citas habilitadas.'}
+                        ? 'Clinic-wide switch. First visits send SI/NO automatically ~6h before (or ~5 min after booking if already inside that window). For other visits, staff can check “Enable confirmation” on the appointment.'
+                        : 'Interruptor de la clínica. En primeras citas el SI/NO se envía solo ~6 h antes (o ~5 min después de agendar si ya está en esa ventana). En otras visitas el staff puede marcar «Habilitar confirmación» en la cita.'}
                     </p>
                     <label className="flex items-start gap-3 bg-white p-3 rounded-xl border border-blue-200 cursor-pointer">
                       <input
@@ -8378,7 +8379,7 @@ export default function AppLayout() {
 
                 {supportsConfirmationSms(activeClinic) ? (
                   <div className={`mt-3 rounded-xl border-2 p-3 space-y-2 ${
-                    isAppointmentConfirmationEnabled(selectedSlot)
+                    isConfirmationTargetAppointment(selectedSlot, dbAppointments)
                       && selectedSlot.confirmation_status
                       && selectedSlot.confirmation_status !== CONFIRMATION_STATUS.NONE
                       ? confirmationStatusClass(selectedSlot.confirmation_status)
@@ -8388,18 +8389,22 @@ export default function AppLayout() {
                       <input
                         type="checkbox"
                         className="w-4 h-4 mt-0.5 shrink-0"
-                        checked={isAppointmentConfirmationEnabled(selectedSlot)}
-                        disabled={confirmationSending || isRescheduling}
+                        checked={isConfirmationTargetAppointment(selectedSlot, dbAppointments)}
+                        disabled={confirmationSending || isRescheduling || !!selectedSlotConfirmationInfo?.autoFirstSession}
                         onChange={(e) => handleToggleConfirmationEnabled(e.target.checked)}
                       />
                       <span className="text-[10px] font-black uppercase leading-snug">
-                        {locale === 'en'
-                          ? 'Enable YES/NO confirmation SMS for this appointment'
-                          : 'Habilitar confirmación SMS SI/NO en esta cita'}
+                        {selectedSlotConfirmationInfo?.autoFirstSession
+                          ? (locale === 'en'
+                            ? 'First visit — YES/NO confirmation SMS (automatic)'
+                            : 'Primera cita — confirmación SMS SI/NO (automática)')
+                          : (locale === 'en'
+                            ? 'Enable YES/NO confirmation SMS for this appointment'
+                            : 'Habilitar confirmación SMS SI/NO en esta cita')}
                       </span>
                     </label>
 
-                    {isAppointmentConfirmationEnabled(selectedSlot) && selectedSlotConfirmationInfo ? (
+                    {isConfirmationTargetAppointment(selectedSlot, dbAppointments) && selectedSlotConfirmationInfo ? (
                       <>
                     <p className="text-[10px] font-black uppercase flex flex-wrap items-center gap-1.5">
                       <span aria-hidden>📱</span>
@@ -8502,8 +8507,8 @@ export default function AppLayout() {
                     ) : (
                       <p className="text-[10px] font-bold normal-case leading-relaxed opacity-80">
                         {locale === 'en'
-                          ? 'Check the box above to enable confirmation on this visit (any appointment).'
-                          : 'Marca el checkbox para habilitar la confirmación en esta cita (cualquier visita).'}
+                          ? 'First visits confirm automatically. For return visits, check the box above to enable SI/NO on this appointment.'
+                          : 'Las primeras citas se confirman solas. En visitas de regreso, marca el checkbox para habilitar SI/NO en esta cita.'}
                       </p>
                     )}
                   </div>
