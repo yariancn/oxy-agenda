@@ -72,6 +72,8 @@ import NativePrinterSettings from '../components/NativePrinterSettings';
 import StaffTabErrorBoundary from '../components/StaffTabErrorBoundary';
 import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
 import CalendarAssessmentBand from '../components/CalendarAssessmentBand';
+import CalendarCapacitacionBand from '../components/CalendarCapacitacionBand';
+import CapacitacionModal from '../components/CapacitacionModal';
 
 const STAFF_TAB_PANEL = 'flex-1 min-h-0 overflow-y-auto overscroll-y-contain flex flex-col z-10 p-3 pb-20 lg:p-6 lg:pb-6';
 import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
@@ -123,6 +125,13 @@ import {
   ASSESSMENT_BAND_HEIGHT_PX,
   CALENDAR_PIXELS_PER_MINUTE,
 } from '../lib/calendarDisplay';
+import {
+  CAPACITACION_BAND_HEIGHT_PX,
+  CAPACITACION_LIST_COLUMNS,
+  capacitacionesForDay,
+  emptyCapacitacionDraft,
+  normalizeCapacitacion,
+} from '../lib/capacitaciones';
 import { getWeekScrollLeftForToday } from '../lib/calendarScroll';
 import { defaultEquipmentForClinic } from '../lib/screenshotEquipment';
 import { getMissingAppointmentFields, resolveAppointmentDraft } from '../lib/appointmentFormValidation';
@@ -317,6 +326,11 @@ export default function AppLayout() {
   const [dbUsers, setDbUsers] = useState([]);
   const [dbRoles, setDbRoles] = useState([]);
   const [dbBlockedSlots, setDbBlockedSlots] = useState([]);
+  const [dbCapacitaciones, setDbCapacitaciones] = useState([]);
+  const [showCapacitacionModal, setShowCapacitacionModal] = useState(false);
+  const [capacitacionDraft, setCapacitacionDraft] = useState(null);
+  const [capacitacionSaving, setCapacitacionSaving] = useState(false);
+  const [capacitacionNotifying, setCapacitacionNotifying] = useState(false);
   const [dbProtocols, setDbProtocols] = useState([]);
   const [dbCompanyConfig, setDbCompanyConfig] = useState({ 
     id: null, 
@@ -1304,7 +1318,7 @@ export default function AppLayout() {
 
       if (liveOnly) {
         const { from: liveFrom, to: liveTo } = liveSyncDateRange(activeClinic);
-        const [appointmentsData, resB] = await Promise.all([
+        const [appointmentsData, resB, resCap] = await Promise.all([
           fetchPaginated('appointments', {
             clinicScoped: shouldScopeTableByClinic(clinicId),
             dateCol: 'full_date',
@@ -1316,6 +1330,9 @@ export default function AppLayout() {
           shouldScopeTableByClinic(clinicId)
             ? staffDbSelectByClinic(clinicDb, 'blocked_slots', clinicId, (q) => q)
             : clinicDb.from('blocked_slots').select('*'),
+          shouldScopeTableByClinic(clinicId)
+            ? staffDbSelectByClinic(clinicDb, 'capacitaciones', clinicId, (q) => q.select(CAPACITACION_LIST_COLUMNS).gte('full_date', liveFrom).lte('full_date', liveTo))
+            : clinicDb.from('capacitaciones').select(CAPACITACION_LIST_COLUMNS).gte('full_date', liveFrom).lte('full_date', liveTo),
         ]);
 
         if (fetchGen !== fetchGenRef.current) return;
@@ -1323,6 +1340,11 @@ export default function AppLayout() {
         assertDbResult('blocked_slots', resB);
 
         setDbBlockedSlots(await ensureBlockedSlotsEndDates(clinicDb, resB.data || []));
+        if (resCap?.error && /capacitaciones|relation|schema cache/i.test(resCap.error.message || '')) {
+          setDbCapacitaciones([]);
+        } else if (!resCap?.error) {
+          setDbCapacitaciones((resCap.data || []).map(normalizeCapacitacion).filter(Boolean));
+        }
         setDbAppointments((prev) => {
           const fresh = appointmentsData || [];
           const freshIds = new Set(fresh.map((a) => a.id));
@@ -1364,7 +1386,7 @@ export default function AppLayout() {
 
       const { from: agendaFrom, to: agendaTo } = liveSyncDateRange(activeClinic);
 
-      const [patientsData, appointmentsData, resS, resU, resB, resC, resProt, resRoles, resPromo] = await Promise.all([
+      const [patientsData, appointmentsData, resS, resU, resB, resC, resProt, resRoles, resPromo, resCap] = await Promise.all([
         fetchPaginated('patients', { select: patientListColumnsForClinic(clinicId) }),
         // Fast path: agenda window only (−21…+120 days). History merges in after UI is ready.
         fetchPaginated('appointments', {
@@ -1386,6 +1408,9 @@ export default function AppLayout() {
         clinicDb.from('protocols').select('*'),
         clinicDb.from('user_roles').select('*'),
         fetchPromotersWithFallback(),
+        shouldScopeTableByClinic(clinicId)
+          ? staffDbSelectByClinic(clinicDb, 'capacitaciones', clinicId, (q) => q.select(CAPACITACION_LIST_COLUMNS).gte('full_date', agendaFrom).lte('full_date', agendaTo))
+          : clinicDb.from('capacitaciones').select(CAPACITACION_LIST_COLUMNS).gte('full_date', agendaFrom).lte('full_date', agendaTo),
       ]);
 
       if (fetchGen !== fetchGenRef.current) {
@@ -1495,6 +1520,14 @@ export default function AppLayout() {
       setDbServices(safeServices.sort((a, b) => (a.name || '').localeCompare(b.name || '')));
       setDbUsers(resU.data || []);
       setDbBlockedSlots(await ensureBlockedSlotsEndDates(clinicDb, resB.data || []));
+      if (resCap?.error && /capacitaciones|relation|schema cache/i.test(resCap.error.message || '')) {
+        setDbCapacitaciones([]);
+      } else if (resCap?.error) {
+        console.warn('capacitaciones load', resCap.error.message);
+        setDbCapacitaciones([]);
+      } else {
+        setDbCapacitaciones((resCap.data || []).map(normalizeCapacitacion).filter(Boolean));
+      }
       setDbProtocols(resProt.data || []);
       setDbRoles(resRoles.data || []);
       if (resPromo.error) {
@@ -2144,9 +2177,9 @@ export default function AppLayout() {
   const showAssessmentBand = Boolean(
     assessmentService && equipmentFilter === 'Todos',
   );
-  const weekStickyHeaderPx = showAssessmentBand
-    ? WEEK_STICKY_HEADER_PX + ASSESSMENT_BAND_HEIGHT_PX
-    : WEEK_STICKY_HEADER_PX;
+  const weekStickyHeaderPx = WEEK_STICKY_HEADER_PX
+    + (showAssessmentBand ? ASSESSMENT_BAND_HEIGHT_PX : 0)
+    + CAPACITACION_BAND_HEIGHT_PX;
   const displayedEquipments = assessmentOnlyMode
     ? [assessmentService]
     : (equipmentFilter === 'Todos' ? dynamicColumns : [equipmentFilter]);
@@ -2706,6 +2739,124 @@ export default function AppLayout() {
     const match = raw.match(/^(\d{1,2}):(\d{2})/);
     if (!match) return fallback;
     return `${String(match[1]).padStart(2, '0')}:${match[2]}`;
+  };
+
+  const openCapacitacionModal = (itemOrDate = null) => {
+    if (itemOrDate && typeof itemOrDate === 'object' && itemOrDate.id) {
+      setCapacitacionDraft(normalizeCapacitacion(itemOrDate));
+    } else {
+      const fullDate = typeof itemOrDate === 'string'
+        ? itemOrDate
+        : (currentDayInfo?.fullDate || formatClinicDateIso(activeClinic, new Date()));
+      setCapacitacionDraft(emptyCapacitacionDraft({ clinic: activeClinic, fullDate }));
+    }
+    setShowCapacitacionModal(true);
+  };
+
+  const saveCapacitacion = async (draft) => {
+    if (!activeSupabase || !draft) return;
+    setCapacitacionSaving(true);
+    try {
+      const payload = {
+        clinic: activeClinic,
+        full_date: draft.full_date,
+        title: String(draft.title || '').trim(),
+        start_time: draft.start_time || '9:00 AM',
+        end_time: draft.end_time || '5:00 PM',
+        location: String(draft.location || '').trim(),
+        notes: String(draft.notes || '').trim(),
+        attendees: Array.isArray(draft.attendees) ? draft.attendees : [],
+        updated_at: new Date().toISOString(),
+      };
+      let saved;
+      if (draft.id) {
+        const { data, error } = await activeSupabase
+          .from('capacitaciones')
+          .update(payload)
+          .eq('id', draft.id)
+          .select(CAPACITACION_LIST_COLUMNS)
+          .maybeSingle();
+        if (error) throw error;
+        saved = normalizeCapacitacion(data);
+        setDbCapacitaciones((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
+      } else {
+        const { data, error } = await activeSupabase
+          .from('capacitaciones')
+          .insert([{ ...payload, created_at: new Date().toISOString() }])
+          .select(CAPACITACION_LIST_COLUMNS)
+          .maybeSingle();
+        if (error) throw error;
+        saved = normalizeCapacitacion(data);
+        setDbCapacitaciones((prev) => [...prev, saved]);
+      }
+      setCapacitacionDraft(saved);
+      setShowCapacitacionModal(false);
+      await logAudit(null, saved.title, draft.id ? 'EDITAR CAPACITACIÓN' : 'CREAR CAPACITACIÓN', `${saved.full_date} · ${saved.start_time}-${saved.end_time}`);
+    } catch (err) {
+      const msg = err?.message || '';
+      alert(/capacitaciones|relation|schema cache/i.test(msg)
+        ? (locale === 'en'
+          ? 'Run scripts/supabase-capacitaciones.sql in Supabase first.'
+          : 'Ejecuta scripts/supabase-capacitaciones.sql en Supabase primero.')
+        : msg);
+    } finally {
+      setCapacitacionSaving(false);
+    }
+  };
+
+  const deleteCapacitacion = async (draft) => {
+    if (!draft?.id || !activeSupabase) return;
+    const ok = window.confirm(locale === 'en'
+      ? `Delete training “${draft.title}”?`
+      : `¿Eliminar la capacitación «${draft.title}»?`);
+    if (!ok) return;
+    setCapacitacionSaving(true);
+    try {
+      const { error } = await activeSupabase.from('capacitaciones').delete().eq('id', draft.id);
+      if (error) throw error;
+      setDbCapacitaciones((prev) => prev.filter((c) => c.id !== draft.id));
+      setShowCapacitacionModal(false);
+      setCapacitacionDraft(null);
+      await logAudit(null, draft.title, 'ELIMINAR CAPACITACIÓN', draft.full_date);
+    } catch (err) {
+      alert(err?.message || 'Error');
+    } finally {
+      setCapacitacionSaving(false);
+    }
+  };
+
+  const notifyCapacitacion = async (kind, draft) => {
+    if (!draft?.id) {
+      alert(locale === 'en' ? 'Save the training first.' : 'Guarda la capacitación primero.');
+      return;
+    }
+    setCapacitacionNotifying(true);
+    try {
+      const res = await fetch('/api/staff/capacitacion-notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clinic: activeClinic, capacitacionId: draft.id, kind }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        throw new Error(data.message || data.error || 'notify_failed');
+      }
+      const next = normalizeCapacitacion({ ...draft, attendees: data.attendees || draft.attendees });
+      setDbCapacitaciones((prev) => prev.map((c) => (c.id === next.id ? next : c)));
+      setCapacitacionDraft(next);
+      alert(locale === 'en'
+        ? `Sent ${data.sent || 0} SMS${data.skipped ? ` · skipped ${data.skipped}` : ''}.`
+        : `Enviados ${data.sent || 0} SMS${data.skipped ? ` · omitidos ${data.skipped}` : ''}.`);
+    } catch (err) {
+      const msg = err?.message || '';
+      alert(msg === 'missing_table'
+        ? (locale === 'en'
+          ? 'Run scripts/supabase-capacitaciones.sql in Supabase first.'
+          : 'Ejecuta scripts/supabase-capacitaciones.sql en Supabase primero.')
+        : msg);
+    } finally {
+      setCapacitacionNotifying(false);
+    }
   };
 
   const openBlockSlotModal = () => {
@@ -5812,6 +5963,14 @@ export default function AppLayout() {
                   v{buildSha}
                 </span>
                 <div className="flex-1 min-w-[0.5rem]" />
+                <button
+                  type="button"
+                  onClick={() => openCapacitacionModal(currentDayInfo?.fullDate)}
+                  className="bg-teal-100 text-teal-800 border border-teal-300 px-2 py-1 text-[9px] font-black rounded-lg hover:bg-teal-200 transition uppercase shrink-0 flex items-center gap-1"
+                  title={locale === 'en' ? 'Training / course (does not block equipment)' : 'Capacitación / curso (no bloquea equipos)'}
+                >
+                  {locale === 'en' ? '+ Training' : '+ Capacitación'}
+                </button>
                 {currentUserLevel <= 2 && (
                   <button onClick={openBlockSlotModal} className="bg-red-100 text-red-700 border border-red-300 px-2 py-1 text-[9px] font-black rounded-lg hover:bg-red-200 transition uppercase shrink-0 flex items-center gap-1" title={L.blockSlot}>
                     <span>🚫</span>
@@ -5927,6 +6086,12 @@ export default function AppLayout() {
                 <div className="flex-1 flex">
                   {viewMode === 'Día' ? (
                     <div className="flex min-w-full flex-col">
+                      <CalendarCapacitacionBand
+                        items={capacitacionesForDay(dbCapacitaciones, currentDayInfo.fullDate)}
+                        locale={locale}
+                        onSelect={openCapacitacionModal}
+                        onAdd={() => openCapacitacionModal(currentDayInfo.fullDate)}
+                      />
                       {showAssessmentBand && getAssessmentAppsForDay(currentDayInfo.fullDate).length > 0 && (
                         <CalendarAssessmentBand
                           appointments={getAssessmentAppsForDay(currentDayInfo.fullDate)}
@@ -6071,6 +6236,13 @@ export default function AppLayout() {
                                 reserveWhenEmpty
                               />
                             )}
+                            <CalendarCapacitacionBand
+                              items={capacitacionesForDay(dbCapacitaciones, dayInfo.fullDate)}
+                              locale={locale}
+                              onSelect={openCapacitacionModal}
+                              onAdd={() => openCapacitacionModal(dayInfo.fullDate)}
+                              reserveWhenEmpty
+                            />
                           </div>
                           <div className="flex w-full relative" style={{ height: `${CALENDAR_HEIGHT}px` }}>
                             {displayedEquipments.map(eqName => {
@@ -8508,11 +8680,11 @@ export default function AppLayout() {
                       </p>
                     )}
                       </>
-                    ) : (
+                    ) : selectedSlotConfirmationInfo?.autoFirstSession ? null : (
                       <p className="text-[10px] font-bold normal-case leading-relaxed opacity-80">
                         {locale === 'en'
-                          ? 'First visits confirm automatically. For return visits, check the box above to enable SI/NO on this appointment.'
-                          : 'Las primeras citas se confirman solas. En visitas de regreso, marca el checkbox para habilitar SI/NO en esta cita.'}
+                          ? 'Check the box above to enable SI/NO confirmation on this return visit.'
+                          : 'Marca el checkbox para habilitar confirmación SI/NO en esta visita de regreso.'}
                       </p>
                     )}
                   </div>
@@ -9602,6 +9774,23 @@ export default function AppLayout() {
           </div>
         </div>
       )}
+
+      <CapacitacionModal
+        open={showCapacitacionModal}
+        initial={capacitacionDraft}
+        clinicName={activeClinic}
+        locale={locale}
+        clinicPhone={dbCompanyConfig?.phone || ''}
+        saving={capacitacionSaving}
+        notifying={capacitacionNotifying}
+        onClose={() => {
+          setShowCapacitacionModal(false);
+          setCapacitacionDraft(null);
+        }}
+        onSave={saveCapacitacion}
+        onDelete={deleteCapacitacion}
+        onNotify={notifyCapacitacion}
+      />
 
       {showOOOModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" style={{ zIndex: 9999 }}>
