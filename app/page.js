@@ -5966,7 +5966,7 @@ export default function AppLayout() {
                 <button
                   type="button"
                   onClick={() => openCapacitacionModal(currentDayInfo?.fullDate)}
-                  className="bg-teal-100 text-teal-800 border border-teal-300 px-2 py-1 text-[9px] font-black rounded-lg hover:bg-teal-200 transition uppercase shrink-0 flex items-center gap-1"
+                  className="bg-teal-600 text-white border border-teal-700 px-2.5 py-1.5 text-[10px] font-black rounded-lg hover:bg-teal-700 transition uppercase shrink-0 shadow-sm"
                   title={locale === 'en' ? 'Training / course (does not block equipment)' : 'Capacitación / curso (no bloquea equipos)'}
                 >
                   {locale === 'en' ? '+ Training' : '+ Capacitación'}

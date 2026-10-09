@@ -21,8 +21,8 @@ export default function CalendarCapacitacionBand({
       role="list"
       aria-label={locale === 'en' ? 'Trainings' : 'Capacitaciones'}
     >
-      <span className="text-[7px] font-black uppercase text-teal-800 self-center shrink-0 px-0.5 leading-none">
-        {locale === 'en' ? 'TR' : 'CAP'}
+      <span className="text-[8px] font-black uppercase text-teal-900 self-center shrink-0 px-1 leading-none">
+        {locale === 'en' ? 'Training' : 'Capacitación'}
       </span>
       {items.map((item) => {
         const stats = attendeeConfirmStats(item.attendees);
@@ -54,10 +54,10 @@ export default function CalendarCapacitacionBand({
         <button
           type="button"
           onClick={onAdd}
-          className="shrink-0 self-center text-[8px] font-black uppercase text-teal-800 hover:text-teal-950 px-1.5 py-0.5 rounded border border-teal-200 bg-white/70"
+          className="shrink-0 self-center text-[8px] font-black uppercase text-white bg-teal-700 hover:bg-teal-800 px-2 py-0.5 rounded border border-teal-800"
           title={locale === 'en' ? 'Add training' : 'Agregar capacitación'}
         >
-          +
+          {locale === 'en' ? '+ Add' : '+ Agregar'}
         </button>
       ) : null}
       {!items.length && reserveWhenEmpty && !onAdd ? (
