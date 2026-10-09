@@ -9108,8 +9108,8 @@ export default function AppLayout() {
                 </p>
                 <p className="text-[9px] font-bold text-violet-800/90 leading-relaxed">
                   {locale === 'en'
-                    ? 'Uses clinic-branded transactional templates (STOP footer). Keep custom notes short and appointment-related to stay carrier-compliant.'
-                    : 'Usa plantillas transaccionales con nombre de la clínica (incluye STOP). Mantén notas cortas y relacionadas con la cita para cumplir políticas de carriers.'}
+                    ? 'Custom notes always send (staff-initiated). Waiting/reminder still follow the patient’s SMS prefs. Keep notes short and appointment-related.'
+                    : 'La nota personalizada siempre se puede enviar (iniciada por staff). Esperando/recordatorio sí respetan las preferencias SMS del paciente. Mantén notas cortas y relacionadas con la cita.'}
                 </p>
                 <select
                   value={staffSmsPreset}

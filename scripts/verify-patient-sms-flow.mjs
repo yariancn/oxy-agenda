@@ -198,8 +198,9 @@ const mockConfig = { name: 'Oxygengdl', phone: '3311111111' };
   assert.equal(result.body.ok, true);
 }
 
-// prefers_sms off on patient blocks send
+// Custom staff SMS ignores prefers_sms (always allowed)
 {
+  let sent = false;
   const result = await runStaffPatientSms({
     supabase: createMockSupabase({
       appointment: mockAppt,
@@ -211,6 +212,29 @@ const mockConfig = { name: 'Oxygengdl', phone: '3311111111' };
     appointmentId: 'appt-1',
     preset: 'custom',
     customNote: 'Nota',
+    locale: 'es',
+    sendSms: async () => {
+      sent = true;
+      return { ok: true, body: 'ok', preset: 'custom', channel: 'sms' };
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal(sent, true);
+}
+
+// Waiting/reminder still respect patient SMS prefs
+{
+  const result = await runStaffPatientSms({
+    supabase: createMockSupabase({
+      appointment: mockAppt,
+      patient: { ...mockPatient, prefers_sms: false, prefers_sms_reminder: false },
+      config: mockConfig,
+    }),
+    user: { name: 'Staff' },
+    clinicName: 'Oxygengdl',
+    appointmentId: 'appt-1',
+    preset: 'waiting',
     locale: 'es',
     sendSms: async () => {
       throw new Error('should not send');
