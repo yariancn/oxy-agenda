@@ -3,16 +3,15 @@
 import { CAPACITACION_BAND_HEIGHT_PX, attendeeConfirmStats } from '../lib/capacitaciones';
 
 /**
- * Franja del día para capacitaciones — no ocupa columna de equipo ni bloquea slots.
+ * Franja del día para capacitaciones — solo si hay al menos una programada.
+ * No ocupa columna de equipo ni bloquea slots.
  */
 export default function CalendarCapacitacionBand({
   items = [],
   locale = 'es',
   onSelect,
-  onAdd,
-  reserveWhenEmpty = false,
 }) {
-  if (!items.length && !reserveWhenEmpty && !onAdd) return null;
+  if (!items.length) return null;
 
   return (
     <div
@@ -50,19 +49,6 @@ export default function CalendarCapacitacionBand({
           </button>
         );
       })}
-      {onAdd ? (
-        <button
-          type="button"
-          onClick={onAdd}
-          className="shrink-0 self-center text-[8px] font-black uppercase text-white bg-teal-700 hover:bg-teal-800 px-2 py-0.5 rounded border border-teal-800"
-          title={locale === 'en' ? 'Add training' : 'Agregar capacitación'}
-        >
-          {locale === 'en' ? '+ Add' : '+ Agregar'}
-        </button>
-      ) : null}
-      {!items.length && reserveWhenEmpty && !onAdd ? (
-        <span className="text-[7px] font-bold text-teal-300/80 uppercase self-center px-1 leading-none">—</span>
-      ) : null}
     </div>
   );
 }

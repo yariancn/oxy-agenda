@@ -2177,9 +2177,12 @@ export default function AppLayout() {
   const showAssessmentBand = Boolean(
     assessmentService && equipmentFilter === 'Todos',
   );
+  const weekHasCapacitaciones = weekDays.some(
+    (d) => capacitacionesForDay(dbCapacitaciones, d.fullDate).length > 0,
+  );
   const weekStickyHeaderPx = WEEK_STICKY_HEADER_PX
     + (showAssessmentBand ? ASSESSMENT_BAND_HEIGHT_PX : 0)
-    + CAPACITACION_BAND_HEIGHT_PX;
+    + (weekHasCapacitaciones ? CAPACITACION_BAND_HEIGHT_PX : 0);
   const displayedEquipments = assessmentOnlyMode
     ? [assessmentService]
     : (equipmentFilter === 'Todos' ? dynamicColumns : [equipmentFilter]);
@@ -6099,7 +6102,6 @@ export default function AppLayout() {
                         items={capacitacionesForDay(dbCapacitaciones, currentDayInfo.fullDate)}
                         locale={locale}
                         onSelect={openCapacitacionModal}
-                        onAdd={() => openCapacitacionModal(currentDayInfo.fullDate)}
                       />
                       {showAssessmentBand && getAssessmentAppsForDay(currentDayInfo.fullDate).length > 0 && (
                         <CalendarAssessmentBand
