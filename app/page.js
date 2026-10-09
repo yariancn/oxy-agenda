@@ -2794,11 +2794,14 @@ export default function AppLayout() {
       await logAudit(null, saved.title, draft.id ? 'EDITAR CAPACITACIÓN' : 'CREAR CAPACITACIÓN', `${saved.full_date} · ${saved.start_time}-${saved.end_time}`);
     } catch (err) {
       const msg = err?.message || '';
-      alert(/capacitaciones|relation|schema cache/i.test(msg)
-        ? (locale === 'en'
-          ? 'Run scripts/supabase-capacitaciones.sql in Supabase first.'
-          : 'Ejecuta scripts/supabase-capacitaciones.sql en Supabase primero.')
-        : msg);
+      if (/capacitaciones|relation|schema cache|PGRST205/i.test(msg)) {
+        const clinicLabel = isShenandoah(activeClinic) ? 'Houston (TX)' : 'Guadalajara (GDL)';
+        alert(locale === 'en'
+          ? `Missing capacitaciones table in ${clinicLabel} Supabase. Run scripts/supabase-capacitaciones.sql in that project (GDL and Houston are separate databases).`
+          : `Falta la tabla capacitaciones en Supabase de ${clinicLabel}. Ejecuta scripts/supabase-capacitaciones.sql en ese proyecto (GDL y Houston son bases distintas).`);
+      } else {
+        alert(msg);
+      }
     } finally {
       setCapacitacionSaving(false);
     }
