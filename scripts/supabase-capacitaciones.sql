@@ -21,3 +21,7 @@ CREATE INDEX IF NOT EXISTS capacitaciones_clinic_date_idx
 
 COMMENT ON TABLE capacitaciones IS 'Cursos/capacitaciones de día completo: visibles en agenda como franja, sin bloquear equipos.';
 COMMENT ON COLUMN capacitaciones.attendees IS 'JSON array de asistentes con teléfono para confirmación/recordatorio SMS.';
+
+-- Staff API uses service_role (bypasses RLS). Keep grants explicit for tooling/admin.
+GRANT ALL ON TABLE capacitaciones TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE capacitaciones TO authenticated;

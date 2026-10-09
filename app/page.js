@@ -2794,11 +2794,15 @@ export default function AppLayout() {
       await logAudit(null, saved.title, draft.id ? 'EDITAR CAPACITACIÓN' : 'CREAR CAPACITACIÓN', `${saved.full_date} · ${saved.start_time}-${saved.end_time}`);
     } catch (err) {
       const msg = err?.message || '';
-      if (/capacitaciones|relation|schema cache|PGRST205/i.test(msg)) {
+      if (/Table not allowed:\s*capacitaciones/i.test(msg)) {
+        alert(locale === 'en'
+          ? 'App update required to save trainings. Hard-refresh after the latest deploy.'
+          : 'Falta actualizar la app para guardar capacitaciones. Haz hard refresh tras el último deploy.');
+      } else if (/relation|schema cache|PGRST205|Could not find the table/i.test(msg)) {
         const clinicLabel = isShenandoah(activeClinic) ? 'Houston (TX)' : 'Guadalajara (GDL)';
         alert(locale === 'en'
-          ? `Missing capacitaciones table in ${clinicLabel} Supabase. Run scripts/supabase-capacitaciones.sql in that project (GDL and Houston are separate databases).`
-          : `Falta la tabla capacitaciones en Supabase de ${clinicLabel}. Ejecuta scripts/supabase-capacitaciones.sql en ese proyecto (GDL y Houston son bases distintas).`);
+          ? `Missing capacitaciones table in ${clinicLabel} Supabase. Run scripts/supabase-capacitaciones.sql in that project.`
+          : `Falta la tabla capacitaciones en Supabase de ${clinicLabel}. Ejecuta scripts/supabase-capacitaciones.sql en ese proyecto.`);
       } else {
         alert(msg);
       }
@@ -5733,7 +5737,9 @@ export default function AppLayout() {
       <aside className="hidden lg:flex w-52 xl:w-60 bg-slate-900 text-slate-300 flex-col shadow-2xl z-30 shrink-0">
         <div className="p-3 xl:p-4 border-b border-slate-800 bg-slate-950 flex flex-col items-center">
           <img src="/1c3300f3-f5e7-4682-b627-257e868ed467.jpg" alt="Logo" className="h-11 xl:h-14 w-auto object-contain mb-1.5 xl:mb-2 bg-white rounded p-1" />
-          <h1 className="text-sm xl:text-base font-black text-white uppercase tracking-widest text-center">OxyHyperbaric</h1>
+          <h1 className="text-sm xl:text-base font-black text-white uppercase tracking-widest text-center">
+            {activeClinicDisplayName || 'OXY Agenda'}
+          </h1>
         </div>
         
         {currentUser && (
