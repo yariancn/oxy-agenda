@@ -118,6 +118,7 @@ ALTER TABLE users_staff
 ALTER TABLE services
   ADD COLUMN IF NOT EXISTS start_time text,
   ADD COLUMN IF NOT EXISTS end_time text,
+  ADD COLUMN IF NOT EXISTS weekly_schedule jsonb,
   ADD COLUMN IF NOT EXISTS first_session_notes text,
   ADD COLUMN IF NOT EXISTS use_custom_notes boolean DEFAULT false;
 

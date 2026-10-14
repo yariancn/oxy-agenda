@@ -77,13 +77,22 @@ import CapacitacionModal from '../components/CapacitacionModal';
 import CapacitacionOverviewModal from '../components/CapacitacionOverviewModal';
 
 const STAFF_TAB_PANEL = 'flex-1 min-h-0 overflow-y-auto overscroll-y-contain flex flex-col z-10 p-3 pb-20 lg:p-6 lg:pb-6';
-import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
+import {
+  getServiceScheduleBounds,
+  buildAvailabilitySlotTimes,
+  buildStaffAppointmentTimeOptions,
+  normalizeTimeInput,
+  lastSessionFromEndTime,
+  endTimeFromLastSession,
+  serviceHasDayOverrides,
+} from '../lib/serviceSchedule';
 import {
   buildDefaultWeeklySchedule,
   getClinicCalendarGridBounds,
   getDaySchedule,
   getWeekdayLabels,
   normalizeWeeklySchedule,
+  normalizeServiceWeeklySchedule,
   WEEKDAY_KEYS,
 } from '../lib/clinicWeeklySchedule';
 import { insertStaffAppointment, updateStaffAppointment, updateAppointmentNotesAndContact } from '../lib/staffAppointmentSave';
@@ -381,7 +390,23 @@ export default function AppLayout() {
   const slotNotesDirtyRef = useRef(false);
 
   // --- FORMULARIOS GLOBALES ---
-  const [newSrv, setNewSrv] = useState({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '', use_custom_notes: false });
+  const emptyNewSrv = () => ({
+    id: null,
+    name: '',
+    duration: 60,
+    buffer: 30,
+    price: 100,
+    color: 'blue',
+    is_active: true,
+    equipment: 'Cámara 1',
+    start_time: '',
+    last_session_time: '',
+    end_time: '',
+    weekly_schedule: null,
+    first_session_notes: '',
+    use_custom_notes: false,
+  });
+  const [newSrv, setNewSrv] = useState(emptyNewSrv);
   const [isEditingSrv, setIsEditingSrv] = useState(false);
   const [editingSrvOriginalName, setEditingSrvOriginalName] = useState('');
   const [editingSrvOriginalSchedule, setEditingSrvOriginalSchedule] = useState({ duration: 60, buffer: 30 });
@@ -2141,6 +2166,37 @@ export default function AppLayout() {
         end_time: normalizeTimeInput(prev.end_time) || '20:00',
       };
       const schedule = normalizeWeeklySchedule(prev.weekly_schedule, defaults);
+      return {
+        ...prev,
+        weekly_schedule: {
+          ...schedule,
+          [key]: {
+            ...schedule[key],
+            ...patch,
+          },
+        },
+      };
+    });
+  };
+
+  const resolveSrvWindowEnd = (srv) => {
+    const last = normalizeTimeInput(srv?.last_session_time);
+    if (last) return endTimeFromLastSession(last, srv.duration, srv.buffer);
+    return normalizeTimeInput(srv?.end_time) || '';
+  };
+
+  const updateSrvWeeklyDay = (key, patch) => {
+    setNewSrv((prev) => {
+      const baseStart = normalizeTimeInput(prev.start_time)
+        || normalizeTimeInput(dbCompanyConfig.start_time)
+        || '07:00';
+      const baseEnd = resolveSrvWindowEnd(prev)
+        || normalizeTimeInput(dbCompanyConfig.end_time)
+        || '20:00';
+      const schedule = normalizeServiceWeeklySchedule(prev.weekly_schedule, {
+        start_time: baseStart,
+        end_time: baseEnd,
+      });
       return {
         ...prev,
         weekly_schedule: {
@@ -6513,6 +6569,71 @@ export default function AppLayout() {
                     </div>
                   </div>
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                    <p className="text-[9px] font-black text-slate-500 uppercase">{L.p.services.sessionDuration} / {L.p.services.bufferTime}</p>
+                    <p className="text-[8px] font-bold text-slate-500">{L.p.services.totalBlockHint}</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.services.sessionDuration}</label>
+                        <input
+                          type="number"
+                          min="5"
+                          step="5"
+                          className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none text-slate-900 bg-white"
+                          value={newSrv.duration}
+                          onChange={(e) => {
+                            const duration = Number(e.target.value);
+                            setNewSrv((prev) => {
+                              const next = { ...prev, duration };
+                              if (!prev.weekly_schedule) return next;
+                              const schedule = { ...prev.weekly_schedule };
+                              for (const key of WEEKDAY_KEYS) {
+                                const day = schedule[key];
+                                if (!day?.custom_hours) continue;
+                                const last = lastSessionFromEndTime(day.end_time, prev.duration, prev.buffer);
+                                schedule[key] = {
+                                  ...day,
+                                  end_time: endTimeFromLastSession(last, duration, prev.buffer),
+                                };
+                              }
+                              return { ...next, weekly_schedule: schedule };
+                            });
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.services.bufferTime}</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="5"
+                          className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none text-slate-900 bg-white"
+                          value={newSrv.buffer}
+                          onChange={(e) => {
+                            const buffer = Number(e.target.value);
+                            setNewSrv((prev) => {
+                              const next = { ...prev, buffer };
+                              if (!prev.weekly_schedule) return next;
+                              const schedule = { ...prev.weekly_schedule };
+                              for (const key of WEEKDAY_KEYS) {
+                                const day = schedule[key];
+                                if (!day?.custom_hours) continue;
+                                const last = lastSessionFromEndTime(day.end_time, prev.duration, prev.buffer);
+                                schedule[key] = {
+                                  ...day,
+                                  end_time: endTimeFromLastSession(last, prev.duration, buffer),
+                                };
+                              }
+                              return { ...next, weekly_schedule: schedule };
+                            });
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[10px] font-black text-blue-700 uppercase">
+                      {L.p.services.totalBlock}: {(Number(newSrv.duration) || 60) + (Number(newSrv.buffer) ?? 30)} min
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
                     <p className="text-[9px] font-black text-slate-500 uppercase">{L.p.appt.workHours}</p>
                     <p className="text-[8px] font-bold text-slate-500">{L.p.appt.workHoursHint}</p>
                     <div className="grid grid-cols-2 gap-3">
@@ -6522,26 +6643,93 @@ export default function AppLayout() {
                       </div>
                       <div>
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.appt.workEnd}</label>
-                        <input type="time" className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none text-slate-900 bg-white" value={newSrv.end_time || ''} onChange={e => setNewSrv({...newSrv, end_time: e.target.value})} />
+                        <input type="time" className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none text-slate-900 bg-white" value={newSrv.last_session_time || ''} onChange={e => setNewSrv({...newSrv, last_session_time: e.target.value})} />
                       </div>
                     </div>
                   </div>
-                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
-                    <p className="text-[9px] font-black text-slate-500 uppercase">{L.p.services.sessionDuration} / {L.p.services.bufferTime}</p>
-                    <p className="text-[8px] font-bold text-slate-500">{L.p.services.totalBlockHint}</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.services.sessionDuration}</label>
-                        <input type="number" min="5" step="5" className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none text-slate-900 bg-white" value={newSrv.duration} onChange={e => setNewSrv({...newSrv, duration: Number(e.target.value)})} />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{L.p.services.bufferTime}</label>
-                        <input type="number" min="0" step="5" className="w-full p-3 rounded-xl border border-slate-300 font-bold text-sm outline-none text-slate-900 bg-white" value={newSrv.buffer} onChange={e => setNewSrv({...newSrv, buffer: Number(e.target.value)})} />
-                      </div>
+                  <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="px-3 py-2 bg-slate-50 border-b border-slate-100">
+                      <p className="text-[9px] font-black text-slate-500 uppercase">{L.p.services.weeklyTitle}</p>
+                      <p className="text-[8px] font-bold text-slate-500 mt-0.5 leading-relaxed">{L.p.services.weeklyHint}</p>
                     </div>
-                    <p className="text-[10px] font-black text-blue-700 uppercase">
-                      {L.p.services.totalBlock}: {(Number(newSrv.duration) || 60) + (Number(newSrv.buffer) ?? 30)} min
-                    </p>
+                    <div className="hidden sm:grid grid-cols-[1fr_auto_auto_7.5rem_7.5rem] gap-2 px-3 py-1.5 bg-slate-50/80 border-b border-slate-100 text-[8px] font-black text-slate-400 uppercase">
+                      <span>{L.p.admin.weeklyDayCol}</span>
+                      <span className="text-center">{L.p.services.weeklyOpenCol}</span>
+                      <span className="text-center">{L.p.services.weeklyCustomCol}</span>
+                      <span>{L.p.appt.workStart}</span>
+                      <span>{L.p.appt.workEnd}</span>
+                    </div>
+                    {WEEKDAY_KEYS.map((key) => {
+                      const baseStart = normalizeTimeInput(newSrv.start_time)
+                        || normalizeTimeInput(dbCompanyConfig.start_time)
+                        || '07:00';
+                      const baseEnd = resolveSrvWindowEnd(newSrv)
+                        || normalizeTimeInput(dbCompanyConfig.end_time)
+                        || '20:00';
+                      const schedule = normalizeServiceWeeklySchedule(newSrv.weekly_schedule, {
+                        start_time: baseStart,
+                        end_time: baseEnd,
+                      });
+                      const day = schedule[key];
+                      const dayLast = day.custom_hours
+                        ? lastSessionFromEndTime(day.end_time, newSrv.duration, newSrv.buffer)
+                        : (normalizeTimeInput(newSrv.last_session_time) || lastSessionFromEndTime(baseEnd, newSrv.duration, newSrv.buffer));
+                      const dayFirst = day.custom_hours
+                        ? (normalizeTimeInput(day.start_time) || baseStart)
+                        : baseStart;
+                      return (
+                        <div key={key} className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_7.5rem_7.5rem] gap-2 sm:gap-2 items-center px-3 py-2 border-b border-slate-100 last:border-b-0">
+                          <span className="text-[11px] font-black text-slate-800 uppercase">{weekdayLabels[key]}</span>
+                          <label className="flex items-center justify-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={day.open !== false}
+                              onChange={(e) => updateSrvWeeklyDay(key, { open: e.target.checked })}
+                              className="w-3.5 h-3.5"
+                            />
+                            <span className="text-[9px] font-bold text-slate-600 uppercase sm:hidden">{L.p.services.weeklyOpenCol}</span>
+                          </label>
+                          <label className={`flex items-center justify-center gap-1.5 cursor-pointer ${!day.open ? 'opacity-40 pointer-events-none' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={day.custom_hours === true}
+                              onChange={(e) => updateSrvWeeklyDay(key, {
+                                custom_hours: e.target.checked,
+                                ...(e.target.checked ? {
+                                  start_time: dayFirst,
+                                  end_time: endTimeFromLastSession(dayLast || dayFirst, newSrv.duration, newSrv.buffer),
+                                } : {}),
+                              })}
+                              className="w-3.5 h-3.5"
+                              disabled={!day.open}
+                            />
+                            <span className="text-[9px] font-bold text-slate-600 uppercase sm:hidden">{L.p.services.weeklyCustomCol}</span>
+                          </label>
+                          <input
+                            type="time"
+                            disabled={!day.open || !day.custom_hours}
+                            value={dayFirst}
+                            onChange={(e) => updateSrvWeeklyDay(key, {
+                              start_time: e.target.value,
+                              custom_hours: true,
+                              end_time: endTimeFromLastSession(dayLast || e.target.value, newSrv.duration, newSrv.buffer),
+                            })}
+                            className="w-full p-2 border rounded-lg font-bold text-xs text-slate-900 bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                          />
+                          <input
+                            type="time"
+                            disabled={!day.open || !day.custom_hours}
+                            value={dayLast}
+                            onChange={(e) => updateSrvWeeklyDay(key, {
+                              end_time: endTimeFromLastSession(e.target.value, newSrv.duration, newSrv.buffer),
+                              custom_hours: true,
+                              start_time: dayFirst,
+                            })}
+                            className="w-full p-2 border rounded-lg font-bold text-xs text-slate-900 bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
                   <label className="flex items-center gap-2 bg-white p-3 rounded-xl border border-slate-200 cursor-pointer">
                     <input type="checkbox" checked={newSrv.is_active} onChange={e => setNewSrv({...newSrv, is_active: e.target.checked})} className="w-4 h-4" />
@@ -6568,15 +6756,50 @@ export default function AppLayout() {
                     />
                   </div>
                   <div className="flex gap-2 pt-1">
-                    {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setEditingSrvOriginalName(''); setEditingSrvOriginalSchedule({ duration: 60, buffer: 30 }); setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '', use_custom_notes: false });}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
+                    {isEditingSrv && <button onClick={() => {setIsEditingSrv(false); setEditingSrvOriginalName(''); setEditingSrvOriginalSchedule({ duration: 60, buffer: 30 }); setNewSrv(emptyNewSrv());}} className="px-4 bg-slate-100 text-slate-700 font-black py-3 rounded-xl uppercase text-xs hover:bg-slate-200">Cancelar</button>}
                     <button onClick={async () => {
                       if(!newSrv.name) return alert(L.p.services.missingName);
                       const duration = Math.max(5, Number(newSrv.duration) || 60);
                       const buffer = Math.max(0, Number(newSrv.buffer) ?? 30);
                       const startTrim = normalizeTimeInput(newSrv.start_time);
-                      const endTrim = normalizeTimeInput(newSrv.end_time);
-                      if ((startTrim && !endTrim) || (!startTrim && endTrim)) {
-                        return alert('Define horario de inicio y fin, o déjalos ambos vacíos para usar el de la clínica.');
+                      const lastTrim = normalizeTimeInput(newSrv.last_session_time);
+                      if ((startTrim && !lastTrim) || (!startTrim && lastTrim)) {
+                        return alert('Define primera y última sesión, o déjalas ambas vacías para usar el de la clínica.');
+                      }
+                      if (startTrim && lastTrim && getMinutes(lastTrim) < getMinutes(startTrim)) {
+                        return alert(L.p.services.invalidLastBeforeFirst);
+                      }
+                      const endTrim = lastTrim ? endTimeFromLastSession(lastTrim, duration, buffer) : '';
+                      const baseStart = startTrim || normalizeTimeInput(dbCompanyConfig.start_time) || '07:00';
+                      const baseEnd = endTrim || normalizeTimeInput(dbCompanyConfig.end_time) || '20:00';
+                      const normalizedWeekly = normalizeServiceWeeklySchedule(newSrv.weekly_schedule, {
+                        start_time: baseStart,
+                        end_time: baseEnd,
+                      });
+                      // Solo guardar días con override (evita cerrar domingo por defaults de clínica)
+                      let weeklyPayload = null;
+                      if (serviceHasDayOverrides(normalizedWeekly)) {
+                        weeklyPayload = {};
+                        for (const key of WEEKDAY_KEYS) {
+                          const day = normalizedWeekly[key];
+                          if (!day || (day.open !== false && !day.custom_hours)) continue;
+                          if (day.open === false) {
+                            weeklyPayload[key] = { open: false, custom_hours: false, start_time: baseStart, end_time: baseEnd };
+                            continue;
+                          }
+                          const dayStart = normalizeTimeInput(day.start_time) || baseStart;
+                          const dayLast = lastSessionFromEndTime(day.end_time, duration, buffer) || lastTrim || baseStart;
+                          if (getMinutes(dayLast) < getMinutes(dayStart)) {
+                            return alert(`${weekdayLabels[key]}: ${L.p.services.invalidLastBeforeFirst}`);
+                          }
+                          weeklyPayload[key] = {
+                            open: true,
+                            custom_hours: true,
+                            start_time: dayStart,
+                            end_time: endTimeFromLastSession(dayLast, duration, buffer),
+                          };
+                        }
+                        if (!Object.keys(weeklyPayload).length) weeklyPayload = null;
                       }
                       const p = {
                         name: newSrv.name.trim(),
@@ -6587,22 +6810,37 @@ export default function AppLayout() {
                         is_active: newSrv.is_active,
                         start_time: startTrim || null,
                         end_time: endTrim || null,
+                        weekly_schedule: weeklyPayload,
                         clinic: normalizeClinicId(activeClinic),
                         first_session_notes: String(newSrv.first_session_notes || '').trim() || null,
                         use_custom_notes: !!newSrv.use_custom_notes,
                       };
                       const saveServiceRow = async (payload, id) => {
                         let row = { ...payload };
-                        for (let attempt = 0; attempt < 3; attempt += 1) {
+                        for (let attempt = 0; attempt < 4; attempt += 1) {
                           const res = id
                             ? await activeSupabase.from('services').update(row).eq('id', id)
                             : await activeSupabase.from('services').insert([row]);
                           if (!res.error) return res;
-                          if (!/first_session_notes|use_custom_notes|column|schema cache/i.test(res.error.message || '')) {
+                          const msg = res.error.message || '';
+                          if (!/first_session_notes|use_custom_notes|weekly_schedule|column|schema cache/i.test(msg)) {
                             return res;
                           }
-                          const { first_session_notes, use_custom_notes, ...rest } = row;
+                          if (/weekly_schedule/i.test(msg) && row.weekly_schedule !== undefined) {
+                            const { weekly_schedule, ...rest } = row;
+                            row = rest;
+                            continue;
+                          }
+                          if (/first_session_notes|use_custom_notes/i.test(msg)) {
+                            const { first_session_notes, use_custom_notes, ...rest } = row;
+                            row = rest;
+                            continue;
+                          }
+                          const { first_session_notes, use_custom_notes, weekly_schedule, ...rest } = row;
                           row = rest;
+                        }
+                        if (payload.weekly_schedule) {
+                          return { error: { message: L.p.services.weeklyColumnMissing } };
                         }
                         return { error: { message: 'Ejecuta scripts/supabase-service-first-session-notes.sql en Supabase.' } };
                       };
@@ -6632,7 +6870,7 @@ export default function AppLayout() {
                         setIsEditingSrv(false);
                         setEditingSrvOriginalName('');
                         setEditingSrvOriginalSchedule({ duration: 60, buffer: 30 });
-                        setNewSrv({ id: null, name: '', duration: 60, buffer: 30, price: 100, color: 'blue', is_active: true, equipment: 'Cámara 1', start_time: '', end_time: '', first_session_notes: '', use_custom_notes: false });
+                        setNewSrv(emptyNewSrv());
                         await fetchAllData();
                       } catch (e) {
                         alert(`${L.p.services.saveError}: ${e.message}`);
@@ -6661,7 +6899,12 @@ export default function AppLayout() {
                             </div>
                           </td>
                           <td className="px-5 py-4 font-bold text-slate-500 text-[10px] whitespace-nowrap uppercase">
-                            {s.start_time && s.end_time ? `${normalizeTimeInput(s.start_time)} – ${normalizeTimeInput(s.end_time)}` : 'Clínica'}
+                            {s.start_time && s.end_time
+                              ? `${normalizeTimeInput(s.start_time)} – ${lastSessionFromEndTime(s.end_time, s.duration, s.buffer) || normalizeTimeInput(s.end_time)}`
+                              : 'Clínica'}
+                            {serviceHasDayOverrides(s.weekly_schedule) ? (
+                              <span className="block text-[8px] text-blue-600 normal-case">{L.p.services.weeklyOverrides}</span>
+                            ) : null}
                           </td>
                           <td className="px-5 py-4 font-bold text-slate-600 text-[10px] whitespace-nowrap">
                             {(Number(s.duration) || 60)} + {(Number(s.buffer) ?? 30)} min
@@ -6683,18 +6926,23 @@ export default function AppLayout() {
                           <td className="px-5 py-4">
                             <div className="flex justify-end gap-2">
                               <button onClick={() => {
+                                const duration = Number(s.duration) || 60;
+                                const buffer = Number(s.buffer ?? 30);
+                                const start_time = normalizeTimeInput(s.start_time);
+                                const end_time = normalizeTimeInput(s.end_time);
                                 setNewSrv({
                                   ...s,
-                                  duration: Number(s.duration) || 60,
-                                  buffer: Number(s.buffer ?? 30),
-                                  start_time: normalizeTimeInput(s.start_time),
-                                  end_time: normalizeTimeInput(s.end_time),
+                                  duration,
+                                  buffer,
+                                  start_time,
+                                  end_time,
+                                  last_session_time: end_time ? lastSessionFromEndTime(end_time, duration, buffer) : '',
+                                  weekly_schedule: s.weekly_schedule || null,
+                                  first_session_notes: s.first_session_notes || '',
+                                  use_custom_notes: !!s.use_custom_notes,
                                 });
                                 setEditingSrvOriginalName(s.name);
-                                setEditingSrvOriginalSchedule({
-                                  duration: Number(s.duration) || 60,
-                                  buffer: Number(s.buffer ?? 30),
-                                });
+                                setEditingSrvOriginalSchedule({ duration, buffer });
                                 setIsEditingSrv(true);
                               }} className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-blue-100 border border-blue-100">Editar</button>
                               <button onClick={async () => {
