@@ -85,6 +85,7 @@ import {
   lastSessionFromEndTime,
   endTimeFromLastSession,
   serviceHasDayOverrides,
+  formatServiceDayOverrides,
 } from '../lib/serviceSchedule';
 import {
   buildDefaultWeeklySchedule,
@@ -6532,6 +6533,11 @@ export default function AppLayout() {
             <div className="mb-6">
               <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">{L.p.services.title}</h2>
               <p className="text-xs font-bold text-slate-500 mt-1">{L.p.services.subtitle}</p>
+              {dbServices.length > 0 && !Object.prototype.hasOwnProperty.call(dbServices[0] || {}, 'weekly_schedule') ? (
+                <p className="mt-3 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 leading-relaxed">
+                  {L.p.services.weeklySchemaHint}
+                </p>
+              ) : null}
             </div>
             <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 mb-10">
               
@@ -6818,34 +6824,44 @@ export default function AppLayout() {
                       const saveServiceRow = async (payload, id) => {
                         let row = { ...payload };
                         for (let attempt = 0; attempt < 4; attempt += 1) {
-                          const res = id
-                            ? await activeSupabase.from('services').update(row).eq('id', id)
-                            : await activeSupabase.from('services').insert([row]);
-                          if (!res.error) return res;
-                          const msg = res.error.message || '';
-                          if (!/first_session_notes|use_custom_notes|weekly_schedule|column|schema cache/i.test(msg)) {
+                          const query = id
+                            ? activeSupabase.from('services').update(row).eq('id', id)
+                            : activeSupabase.from('services').insert([row]);
+                          const res = await query
+                            .select('id, name, start_time, end_time, weekly_schedule')
+                            .maybeSingle();
+                          if (!res.error) {
+                            // Nunca dar por bueno un save que pidió weekly_schedule y no lo persistió
+                            if (payload.weekly_schedule && !res.data?.weekly_schedule) {
+                              return { error: { message: L.p.services.weeklyColumnMissing } };
+                            }
                             return res;
                           }
-                          if (/weekly_schedule/i.test(msg) && row.weekly_schedule !== undefined) {
-                            const { weekly_schedule, ...rest } = row;
-                            row = rest;
-                            continue;
+                          const msg = res.error.message || '';
+                          // Columna weekly_schedule ausente: error explícito (antes se omitía en silencio)
+                          if (/weekly_schedule/i.test(msg)) {
+                            return { error: { message: L.p.services.weeklyColumnMissing } };
                           }
                           if (/first_session_notes|use_custom_notes/i.test(msg)) {
                             const { first_session_notes, use_custom_notes, ...rest } = row;
                             row = rest;
                             continue;
                           }
-                          const { first_session_notes, use_custom_notes, weekly_schedule, ...rest } = row;
-                          row = rest;
-                        }
-                        if (payload.weekly_schedule) {
-                          return { error: { message: L.p.services.weeklyColumnMissing } };
+                          if (/column|schema cache/i.test(msg)) {
+                            // Otros columnas opcionales; no quitar weekly_schedule
+                            if (row.first_session_notes !== undefined || row.use_custom_notes !== undefined) {
+                              const { first_session_notes, use_custom_notes, ...rest } = row;
+                              row = rest;
+                              continue;
+                            }
+                          }
+                          return res;
                         }
                         return { error: { message: 'Ejecuta scripts/supabase-service-first-session-notes.sql en Supabase.' } };
                       };
                       try {
                         let error;
+                        let savedRow = null;
                         if (isEditingSrv && newSrv.id) {
                           const oldName = editingSrvOriginalName || newSrv.name;
                           const newName = p.name;
@@ -6862,16 +6878,27 @@ export default function AppLayout() {
                               await logAudit(null, oldName, 'RENOMBRAR EQUIPO', `«${oldName}» → «${newName}». Citas: ${renamed.appointments}, bloqueos: ${renamed.blockedSlots}, pacientes: ${renamed.patients}`);
                             }
                           }
-                          ({ error } = await saveServiceRow(p, newSrv.id));
+                          ({ error, data: savedRow } = await saveServiceRow(p, newSrv.id));
                         } else {
-                          ({ error } = await saveServiceRow(p));
+                          ({ error, data: savedRow } = await saveServiceRow(p));
                         }
                         if (error) return alert(`${L.p.services.saveError}: ${error.message}`);
+                        const overrideSummary = formatServiceDayOverrides(
+                          savedRow?.weekly_schedule || weeklyPayload,
+                          duration,
+                          buffer,
+                          locale,
+                        );
                         setIsEditingSrv(false);
                         setEditingSrvOriginalName('');
                         setEditingSrvOriginalSchedule({ duration: 60, buffer: 30 });
                         setNewSrv(emptyNewSrv());
                         await fetchAllData();
+                        if (overrideSummary) {
+                          alert(L.p.services.weeklySaved(overrideSummary));
+                        } else {
+                          alert(L.p.services.saved);
+                        }
                       } catch (e) {
                         alert(`${L.p.services.saveError}: ${e.message}`);
                       }
@@ -6903,7 +6930,9 @@ export default function AppLayout() {
                               ? `${normalizeTimeInput(s.start_time)} – ${lastSessionFromEndTime(s.end_time, s.duration, s.buffer) || normalizeTimeInput(s.end_time)}`
                               : 'Clínica'}
                             {serviceHasDayOverrides(s.weekly_schedule) ? (
-                              <span className="block text-[8px] text-blue-600 normal-case">{L.p.services.weeklyOverrides}</span>
+                              <span className="block text-[8px] text-blue-600 normal-case font-black">
+                                {formatServiceDayOverrides(s.weekly_schedule, s.duration, s.buffer, locale) || L.p.services.weeklyOverrides}
+                              </span>
                             ) : null}
                           </td>
                           <td className="px-5 py-4 font-bold text-slate-600 text-[10px] whitespace-nowrap">
