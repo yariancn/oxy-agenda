@@ -74,6 +74,7 @@ import CalendarAppointmentBlock from '../components/CalendarAppointmentBlock';
 import CalendarAssessmentBand from '../components/CalendarAssessmentBand';
 import CalendarCapacitacionBand from '../components/CalendarCapacitacionBand';
 import CapacitacionModal from '../components/CapacitacionModal';
+import CapacitacionOverviewModal from '../components/CapacitacionOverviewModal';
 
 const STAFF_TAB_PANEL = 'flex-1 min-h-0 overflow-y-auto overscroll-y-contain flex flex-col z-10 p-3 pb-20 lg:p-6 lg:pb-6';
 import { getServiceScheduleBounds, buildAvailabilitySlotTimes, buildStaffAppointmentTimeOptions, normalizeTimeInput } from '../lib/serviceSchedule';
@@ -328,6 +329,7 @@ export default function AppLayout() {
   const [dbBlockedSlots, setDbBlockedSlots] = useState([]);
   const [dbCapacitaciones, setDbCapacitaciones] = useState([]);
   const [showCapacitacionModal, setShowCapacitacionModal] = useState(false);
+  const [showCapacitacionOverview, setShowCapacitacionOverview] = useState(false);
   const [capacitacionDraft, setCapacitacionDraft] = useState(null);
   const [capacitacionSaving, setCapacitacionSaving] = useState(false);
   const [capacitacionNotifying, setCapacitacionNotifying] = useState(false);
@@ -2753,7 +2755,16 @@ export default function AppLayout() {
         : (currentDayInfo?.fullDate || formatClinicDateIso(activeClinic, new Date()));
       setCapacitacionDraft(emptyCapacitacionDraft({ clinic: activeClinic, fullDate }));
     }
+    setShowCapacitacionOverview(false);
     setShowCapacitacionModal(true);
+  };
+
+  const goToCapacitacionDate = (ymd) => {
+    const day = String(ymd || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+    setCurrentDate(new Date(`${day}T12:00:00`));
+    setShowCapacitacionOverview(false);
+    pendingScrollToNowRef.current = true;
   };
 
   const saveCapacitacion = async (draft) => {
@@ -5977,6 +5988,16 @@ export default function AppLayout() {
                 <div className="flex-1 min-w-[0.5rem]" />
                 <button
                   type="button"
+                  onClick={() => setShowCapacitacionOverview(true)}
+                  className="bg-teal-50 text-teal-900 border border-teal-300 px-2.5 py-1.5 text-[10px] font-black rounded-lg hover:bg-teal-100 transition uppercase shrink-0 shadow-sm"
+                  title={locale === 'en' ? 'See all training dates' : 'Ver todas las fechas de capacitación'}
+                >
+                  {locale === 'en'
+                    ? `Trainings${dbCapacitaciones.length ? ` (${dbCapacitaciones.length})` : ''}`
+                    : `Capacitaciones${dbCapacitaciones.length ? ` (${dbCapacitaciones.length})` : ''}`}
+                </button>
+                <button
+                  type="button"
                   onClick={() => openCapacitacionModal(currentDayInfo?.fullDate)}
                   className="bg-teal-600 text-white border border-teal-700 px-2.5 py-1.5 text-[10px] font-black rounded-lg hover:bg-teal-700 transition uppercase shrink-0 shadow-sm"
                   title={locale === 'en' ? 'Training / course (does not block equipment)' : 'Capacitación / curso (no bloquea equipos)'}
@@ -6251,8 +6272,6 @@ export default function AppLayout() {
                               items={capacitacionesForDay(dbCapacitaciones, dayInfo.fullDate)}
                               locale={locale}
                               onSelect={openCapacitacionModal}
-                              onAdd={() => openCapacitacionModal(dayInfo.fullDate)}
-                              reserveWhenEmpty
                             />
                           </div>
                           <div className="flex w-full relative" style={{ height: `${CALENDAR_HEIGHT}px` }}>
@@ -9785,6 +9804,17 @@ export default function AppLayout() {
           </div>
         </div>
       )}
+
+      <CapacitacionOverviewModal
+        open={showCapacitacionOverview}
+        items={dbCapacitaciones}
+        locale={locale}
+        todayYmd={clinicNow.dateStr}
+        onClose={() => setShowCapacitacionOverview(false)}
+        onSelectItem={(item) => openCapacitacionModal(item)}
+        onGoToDate={goToCapacitacionDate}
+        onAdd={(ymd) => openCapacitacionModal(ymd || currentDayInfo?.fullDate)}
+      />
 
       <CapacitacionModal
         open={showCapacitacionModal}
