@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   attendeeConfirmStats,
+  buildCapacitacionConfirmationSms,
+  buildCapacitacionReminderSms,
   emptyCapacitacionDraft,
   newAttendeeId,
   normalizeAttendees,
@@ -12,6 +14,30 @@ const TIME_PRESETS = [
   '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM', '12:00 PM',
   '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM',
 ];
+
+function mergePendingAttendee(attendees, nameRaw, phoneRaw) {
+  const name = String(nameRaw || '').trim();
+  const phone = String(phoneRaw || '').trim();
+  const list = normalizeAttendees(attendees);
+  if (!name && !phone) return list;
+  const phoneKey = phone.replace(/\D/g, '').slice(-10);
+  const dup = list.some((a) => {
+    const aPhone = String(a.phone || '').replace(/\D/g, '').slice(-10);
+    return (phoneKey && aPhone && aPhone === phoneKey)
+      || (name && String(a.name || '').toLowerCase() === name.toLowerCase() && (!phoneKey || aPhone === phoneKey));
+  });
+  if (dup) return list;
+  return [
+    ...list,
+    {
+      id: newAttendeeId(),
+      name: name || phone,
+      phone,
+      email: '',
+      confirmation_status: 'none',
+    },
+  ];
+}
 
 export default function CapacitacionModal({
   open,
@@ -31,13 +57,15 @@ export default function CapacitacionModal({
   const [attendeeName, setAttendeeName] = useState('');
   const [attendeePhone, setAttendeePhone] = useState('');
   const [error, setError] = useState('');
+  const [savedFlash, setSavedFlash] = useState('');
 
   useEffect(() => {
     if (!open) return;
     setError('');
+    setSavedFlash('');
     setAttendeeName('');
     setAttendeePhone('');
-    if (initial?.id) {
+    if (initial?.id || initial?.title || initial?.full_date) {
       setDraft({
         ...emptyCapacitacionDraft({ clinic: clinicName, fullDate: initial.full_date }),
         ...initial,
@@ -49,22 +77,45 @@ export default function CapacitacionModal({
         fullDate: initial?.full_date || '',
       }));
     }
-  }, [open, initial, clinicName]);
+  }, [open, initial?.id, initial?.full_date, initial?.updated_at, clinicName]);
 
-  const stats = useMemo(() => attendeeConfirmStats(draft.attendees), [draft.attendees]);
+  const attendees = useMemo(
+    () => normalizeAttendees(draft.attendees),
+    [draft.attendees],
+  );
+  const stats = useMemo(() => attendeeConfirmStats(attendees), [attendees]);
+
+  const smsPreviewName = attendees[0]?.name || (en ? 'Name' : 'Nombre');
+  const confirmationPreview = buildCapacitacionConfirmationSms({
+    attendeeName: smsPreviewName,
+    title: draft.title || (en ? 'Training title' : 'Título del curso'),
+    fullDate: draft.full_date,
+    startTime: draft.start_time,
+    endTime: draft.end_time,
+    location: draft.location,
+    clinicPhone,
+    locale: en ? 'en' : 'es',
+  });
+  const reminderPreview = buildCapacitacionReminderSms({
+    attendeeName: smsPreviewName,
+    title: draft.title || (en ? 'Training title' : 'Título del curso'),
+    fullDate: draft.full_date,
+    startTime: draft.start_time,
+    endTime: draft.end_time,
+    location: draft.location,
+    locale: en ? 'en' : 'es',
+  });
+
   if (!open) return null;
 
   const addAttendee = () => {
-    const name = attendeeName.trim();
-    const phone = attendeePhone.trim();
-    if (!name && !phone) return;
-    setDraft((prev) => ({
-      ...prev,
-      attendees: [
-        ...normalizeAttendees(prev.attendees),
-        { id: newAttendeeId(), name: name || phone, phone, email: '', confirmation_status: 'none' },
-      ],
-    }));
+    const next = mergePendingAttendee(draft.attendees, attendeeName, attendeePhone);
+    if (next.length === normalizeAttendees(draft.attendees).length
+      && !String(attendeeName || '').trim()
+      && !String(attendeePhone || '').trim()) {
+      return;
+    }
+    setDraft((prev) => ({ ...prev, attendees: next }));
     setAttendeeName('');
     setAttendeePhone('');
   };
@@ -78,6 +129,7 @@ export default function CapacitacionModal({
 
   const handleSave = async () => {
     setError('');
+    setSavedFlash('');
     const title = String(draft.title || '').trim();
     const fullDate = String(draft.full_date || '').slice(0, 10);
     if (!title) {
@@ -88,13 +140,34 @@ export default function CapacitacionModal({
       setError(en ? 'Pick a date.' : 'Elige una fecha.');
       return;
     }
+    // Always flush the name/phone fields into attendees on save (common miss: typing without +).
+    const nextAttendees = mergePendingAttendee(draft.attendees, attendeeName, attendeePhone);
+    setDraft((prev) => ({ ...prev, attendees: nextAttendees }));
+    setAttendeeName('');
+    setAttendeePhone('');
+    if (nextAttendees.length === 0) {
+      setError(en
+        ? 'Add at least one attendee (name + phone) before saving.'
+        : 'Agrega al menos un asistente (nombre + teléfono) antes de guardar.');
+      return;
+    }
+    const missingPhone = nextAttendees.some((a) => !String(a.phone || '').trim());
+    if (missingPhone) {
+      setError(en
+        ? 'Every attendee needs a phone number to receive SMS.'
+        : 'Cada asistente necesita teléfono para recibir SMS.');
+      return;
+    }
     await onSave?.({
       ...draft,
       title,
       full_date: fullDate,
-      attendees: normalizeAttendees(draft.attendees),
+      attendees: nextAttendees,
       clinic: clinicName,
     });
+    setSavedFlash(en
+      ? `Saved with ${nextAttendees.length} attendee(s). You can send confirmation SMS below.`
+      : `Guardado con ${nextAttendees.length} asistente(s). Ya puedes enviar el SMS de confirmación abajo.`);
   };
 
   return (
@@ -194,22 +267,39 @@ export default function CapacitacionModal({
           <div className="rounded-xl border border-teal-200 bg-teal-50/60 p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] font-black uppercase text-teal-900">
-                {en ? 'Attendees' : 'Asistentes'}
+                {en ? 'Who receives the training' : 'A quién se le da la capacitación'}
               </p>
               <p className="text-[10px] font-bold text-teal-800">
-                {stats.total} · {en ? 'confirmed SMS' : 'SMS conf.'}: {stats.sent} · {en ? 'reminded' : 'recordatorio'}: {stats.reminded}
+                {stats.total} · {en ? 'SMS conf.' : 'SMS conf.'}: {stats.sent} · {en ? 'reminded' : 'recordatorio'}: {stats.reminded}
               </p>
             </div>
+            <p className="text-[10px] font-bold text-teal-800/90 leading-snug">
+              {en
+                ? 'Type name + phone, then + (or Save — pending fields are added automatically).'
+                : 'Escribe nombre + teléfono y pulsa + (o Guardar: también los agrega solo).'}
+            </p>
             <div className="flex gap-2">
               <input
                 value={attendeeName}
                 onChange={(e) => setAttendeeName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addAttendee();
+                  }
+                }}
                 placeholder={en ? 'Name' : 'Nombre'}
                 className="flex-1 border border-teal-200 rounded-lg px-2 py-2 text-xs font-bold bg-white"
               />
               <input
                 value={attendeePhone}
                 onChange={(e) => setAttendeePhone(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addAttendee();
+                  }
+                }}
                 placeholder={en ? 'Phone' : 'Teléfono'}
                 className="w-[38%] border border-teal-200 rounded-lg px-2 py-2 text-xs font-bold bg-white"
               />
@@ -222,7 +312,7 @@ export default function CapacitacionModal({
               </button>
             </div>
             <ul className="space-y-1 max-h-36 overflow-y-auto">
-              {normalizeAttendees(draft.attendees).map((a) => (
+              {attendees.map((a) => (
                 <li key={a.id} className="flex items-center gap-2 bg-white rounded-lg border border-teal-100 px-2 py-1.5">
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-black text-slate-800 truncate">{a.name}</p>
@@ -245,18 +335,41 @@ export default function CapacitacionModal({
               {!stats.total ? (
                 <li className="text-[11px] text-teal-800/80 font-medium px-1">
                   {en
-                    ? 'Add phones to send confirmation / reminder SMS.'
-                    : 'Agrega teléfonos para enviar confirmación / recordatorio por SMS.'}
+                    ? 'No attendees yet — they will not receive SMS until listed here.'
+                    : 'Aún no hay asistentes — no recibirán SMS hasta que aparezcan aquí.'}
                 </li>
               ) : null}
             </ul>
+          </div>
+
+          <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-3 space-y-2">
+            <p className="text-[10px] font-black uppercase text-sky-900">
+              {en ? 'SMS text that will be sent' : 'Texto del SMS que se envía'}
+            </p>
+            <div>
+              <p className="text-[9px] font-black uppercase text-sky-800 mb-1">
+                {en ? 'Confirmation' : 'Confirmación'}
+              </p>
+              <p className="text-[11px] font-medium text-slate-800 leading-relaxed bg-white border border-sky-100 rounded-lg px-2.5 py-2 whitespace-pre-wrap">
+                {confirmationPreview}
+              </p>
+            </div>
+            <div>
+              <p className="text-[9px] font-black uppercase text-amber-800 mb-1">
+                {en ? 'Reminder' : 'Recordatorio'}
+              </p>
+              <p className="text-[11px] font-medium text-slate-800 leading-relaxed bg-white border border-amber-100 rounded-lg px-2.5 py-2 whitespace-pre-wrap">
+                {reminderPreview}
+              </p>
+            </div>
             {clinicPhone ? (
-              <p className="text-[9px] text-teal-800/70 font-medium">
-                {en ? 'Clinic phone in SMS:' : 'Teléfono clínica en SMS:'} {clinicPhone}
+              <p className="text-[9px] text-sky-800/80 font-medium">
+                {en ? 'Clinic phone in confirmation SMS:' : 'Teléfono clínica en SMS de confirmación:'} {clinicPhone}
               </p>
             ) : null}
           </div>
 
+          {savedFlash ? <p className="text-xs font-bold text-emerald-700">{savedFlash}</p> : null}
           {error ? <p className="text-xs font-bold text-red-600">{error}</p> : null}
         </div>
 
@@ -266,7 +379,7 @@ export default function CapacitacionModal({
               <button
                 type="button"
                 disabled={notifying || saving}
-                onClick={() => onNotify?.('confirmation', draft)}
+                onClick={() => onNotify?.('confirmation', { ...draft, attendees })}
                 className="bg-sky-600 hover:bg-sky-700 text-white rounded-xl py-2.5 text-[10px] font-black uppercase disabled:opacity-60"
               >
                 {notifying ? (en ? 'Sending…' : 'Enviando…') : (en ? 'Send confirmations' : 'Enviar confirmaciones')}
@@ -274,7 +387,7 @@ export default function CapacitacionModal({
               <button
                 type="button"
                 disabled={notifying || saving}
-                onClick={() => onNotify?.('reminder', draft)}
+                onClick={() => onNotify?.('reminder', { ...draft, attendees })}
                 className="bg-amber-500 hover:bg-amber-600 text-white rounded-xl py-2.5 text-[10px] font-black uppercase disabled:opacity-60"
               >
                 {notifying ? (en ? 'Sending…' : 'Enviando…') : (en ? 'Send reminders' : 'Enviar recordatorios')}
@@ -297,7 +410,7 @@ export default function CapacitacionModal({
               onClick={onClose}
               className="flex-1 rounded-xl border border-slate-200 text-slate-700 py-2.5 text-[10px] font-black uppercase"
             >
-              {en ? 'Cancel' : 'Cancelar'}
+              {en ? 'Close' : 'Cerrar'}
             </button>
             <button
               type="button"

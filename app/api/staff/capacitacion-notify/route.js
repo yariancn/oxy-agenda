@@ -72,6 +72,7 @@ export async function POST(request) {
     const stamp = new Date().toISOString();
     let sent = 0;
     let skipped = 0;
+    let sampleBody = '';
     const errors = [];
 
     const nextAttendees = [];
@@ -117,6 +118,7 @@ export async function POST(request) {
       }
 
       sent += 1;
+      if (!sampleBody) sampleBody = smsBody;
       nextAttendees.push({
         ...att,
         ...(kind === 'reminder'
@@ -145,6 +147,7 @@ export async function POST(request) {
       skipped,
       errors,
       attendees: nextAttendees,
+      sampleBody,
     });
   } catch (err) {
     const status = err?.status || 500;

@@ -2791,7 +2791,11 @@ export default function AppLayout() {
           .select(CAPACITACION_LIST_COLUMNS)
           .maybeSingle();
         if (error) throw error;
-        saved = normalizeCapacitacion(data);
+        saved = normalizeCapacitacion(data) || normalizeCapacitacion({ ...payload, id: draft.id });
+        // Prefer local attendees if the API/select drops jsonb unexpectedly.
+        if ((!saved.attendees || saved.attendees.length === 0) && payload.attendees?.length) {
+          saved = { ...saved, attendees: payload.attendees };
+        }
         setDbCapacitaciones((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
       } else {
         const { data, error } = await activeSupabase
@@ -2800,12 +2804,21 @@ export default function AppLayout() {
           .select(CAPACITACION_LIST_COLUMNS)
           .maybeSingle();
         if (error) throw error;
-        saved = normalizeCapacitacion(data);
-        setDbCapacitaciones((prev) => [...prev, saved]);
+        saved = normalizeCapacitacion(data) || normalizeCapacitacion({ ...payload, id: data?.id });
+        if ((!saved.attendees || saved.attendees.length === 0) && payload.attendees?.length) {
+          saved = { ...saved, attendees: payload.attendees };
+        }
+        if (!saved?.id) throw new Error(locale === 'en' ? 'Save failed — no id returned.' : 'No se pudo guardar — sin id.');
+        setDbCapacitaciones((prev) => [...prev.filter((c) => c.id !== saved.id), saved]);
       }
+      // Keep modal open so staff can send confirmation SMS after saving attendees.
       setCapacitacionDraft(saved);
-      setShowCapacitacionModal(false);
-      await logAudit(null, saved.title, draft.id ? 'EDITAR CAPACITACIÓN' : 'CREAR CAPACITACIÓN', `${saved.full_date} · ${saved.start_time}-${saved.end_time}`);
+      await logAudit(
+        null,
+        saved.title,
+        draft.id ? 'EDITAR CAPACITACIÓN' : 'CREAR CAPACITACIÓN',
+        `${saved.full_date} · ${saved.start_time}-${saved.end_time} · ${saved.attendees?.length || 0} asist.`,
+      );
     } catch (err) {
       const msg = err?.message || '';
       if (/Table not allowed:\s*capacitaciones/i.test(msg)) {
@@ -2865,9 +2878,10 @@ export default function AppLayout() {
       const next = normalizeCapacitacion({ ...draft, attendees: data.attendees || draft.attendees });
       setDbCapacitaciones((prev) => prev.map((c) => (c.id === next.id ? next : c)));
       setCapacitacionDraft(next);
+      const sample = data.sampleBody || data.preview || '';
       alert(locale === 'en'
-        ? `Sent ${data.sent || 0} SMS${data.skipped ? ` · skipped ${data.skipped}` : ''}.`
-        : `Enviados ${data.sent || 0} SMS${data.skipped ? ` · omitidos ${data.skipped}` : ''}.`);
+        ? `Sent ${data.sent || 0} SMS${data.skipped ? ` · skipped ${data.skipped}` : ''}.${sample ? `\n\nExample text:\n${sample}` : ''}`
+        : `Enviados ${data.sent || 0} SMS${data.skipped ? ` · omitidos ${data.skipped}` : ''}.${sample ? `\n\nEjemplo del texto:\n${sample}` : ''}`);
     } catch (err) {
       const msg = err?.message || '';
       alert(msg === 'missing_table'
