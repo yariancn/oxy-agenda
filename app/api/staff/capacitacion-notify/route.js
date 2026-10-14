@@ -4,10 +4,13 @@ import { assertStaffClinicAccess } from '../../../../lib/staffDbServer.js';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
 import { localeForClinic, normalizeClinicId } from '../../../../lib/clinicRegistry.js';
 import { sendPatientTextMessage } from '../../../../lib/clinicMessaging.js';
+import { getResendApiKey, getResendFromAddress } from '../../../../lib/resendConfig.js';
 import {
   buildCapacitacionConfirmationSms,
+  buildCapacitacionEmail,
   buildCapacitacionReminderSms,
   CAPACITACION_LIST_COLUMNS,
+  normalizeAttendeeEmail,
   normalizeAttendees,
   normalizeCapacitacion,
 } from '../../../../lib/capacitaciones.js';
@@ -16,9 +19,40 @@ import { bumpAgendaLiveRev } from '../../../../lib/agendaLiveRev.js';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+async function sendCapacitacionEmail({
+  clinicName,
+  to,
+  subject,
+  html,
+  text,
+}) {
+  const resendKey = getResendApiKey();
+  if (!resendKey) return { ok: false, error: 'missing_resend_api_key' };
+  const from = getResendFromAddress(clinicName);
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${resendKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from,
+      to: [to],
+      subject,
+      html,
+      text,
+    }),
+  });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    return { ok: false, error: errBody.slice(0, 200) || 'resend_error' };
+  }
+  return { ok: true };
+}
+
 /**
  * POST { capacitacionId, kind: 'confirmation'|'reminder', clinic }
- * Sends SMS to attendees with a phone; stamps sent timestamps on the row.
+ * Sends SMS (if phone) and/or email (if address) to each attendee.
  */
 export async function POST(request) {
   try {
@@ -67,64 +101,115 @@ export async function POST(request) {
       .eq('clinic', clinicName)
       .maybeSingle();
     const clinicPhone = String(config?.phone || '').trim();
+    const clinicDisplayName = String(config?.name || '').trim() || clinicName;
 
     const attendees = normalizeAttendees(cap.attendees);
     const stamp = new Date().toISOString();
-    let sent = 0;
+    let smsSent = 0;
+    let emailSent = 0;
     let skipped = 0;
     let sampleBody = '';
+    let sampleEmailSubject = '';
     const errors = [];
 
     const nextAttendees = [];
     for (const att of attendees) {
-      if (!att.phone) {
+      const phone = String(att.phone || '').trim();
+      const email = normalizeAttendeeEmail(att.email);
+      if (!phone && !email) {
         skipped += 1;
         nextAttendees.push(att);
         continue;
       }
-      const smsBody = kind === 'reminder'
-        ? buildCapacitacionReminderSms({
-          attendeeName: att.name,
-          title: cap.title,
-          fullDate: cap.full_date,
-          startTime: cap.start_time,
-          endTime: cap.end_time,
-          location: cap.location,
-          locale,
-        })
-        : buildCapacitacionConfirmationSms({
-          attendeeName: att.name,
-          title: cap.title,
-          fullDate: cap.full_date,
-          startTime: cap.start_time,
-          endTime: cap.end_time,
-          location: cap.location,
-          clinicPhone,
+
+      let next = { ...att };
+      let anyOk = false;
+
+      if (phone) {
+        const smsBody = kind === 'reminder'
+          ? buildCapacitacionReminderSms({
+            attendeeName: att.name,
+            title: cap.title,
+            fullDate: cap.full_date,
+            startTime: cap.start_time,
+            endTime: cap.end_time,
+            location: cap.location,
+            locale,
+          })
+          : buildCapacitacionConfirmationSms({
+            attendeeName: att.name,
+            title: cap.title,
+            fullDate: cap.full_date,
+            startTime: cap.start_time,
+            endTime: cap.end_time,
+            location: cap.location,
+            clinicPhone,
+            locale,
+          });
+
+        const smsResult = await sendPatientTextMessage({
+          clinicName,
+          phone,
+          smsBody,
+          notifyType: kind === 'reminder' ? 'reminder' : 'booking',
           locale,
         });
 
-      const result = await sendPatientTextMessage({
-        clinicName,
-        phone: att.phone,
-        smsBody,
-        notifyType: kind === 'reminder' ? 'reminder' : 'booking',
-        locale,
-      });
-
-      if (!result.ok) {
-        errors.push({ attendeeId: att.id, error: result.error || 'sms_failed' });
-        nextAttendees.push(att);
-        continue;
+        if (smsResult.ok) {
+          anyOk = true;
+          smsSent += 1;
+          if (!sampleBody) sampleBody = smsBody;
+          next = {
+            ...next,
+            ...(kind === 'reminder'
+              ? { reminder_sent_at: stamp }
+              : { confirmation_sent_at: stamp, confirmation_status: 'pending' }),
+          };
+        } else {
+          errors.push({ attendeeId: att.id, channel: 'sms', error: smsResult.error || 'sms_failed' });
+        }
       }
 
-      sent += 1;
-      if (!sampleBody) sampleBody = smsBody;
-      nextAttendees.push({
-        ...att,
-        ...(kind === 'reminder'
-          ? { reminder_sent_at: stamp }
-          : { confirmation_sent_at: stamp, confirmation_status: 'pending' }),
-      });
+      if (email) {
+        const mail = buildCapacitacionEmail({
+          kind,
+          attendeeName: att.name,
+          title: cap.title,
+          fullDate: cap.full_date,
+          startTime: cap.start_time,
+          endTime: cap.end_time,
+          location: cap.location,
+          clinicDisplayName,
+          clinicPhone,
+          locale,
+        });
+        const emailResult = await sendCapacitacionEmail({
+          clinicName,
+          to: email,
+          subject: mail.subject,
+          html: mail.html,
+          text: mail.text,
+        });
+        if (emailResult.ok) {
+          anyOk = true;
+          emailSent += 1;
+          if (!sampleEmailSubject) sampleEmailSubject = mail.subject;
+          if (!sampleBody) sampleBody = mail.text;
+          next = {
+            ...next,
+            ...(kind === 'reminder'
+              ? { reminder_email_sent_at: stamp }
+              : { confirmation_email_sent_at: stamp, confirmation_status: next.confirmation_status || 'pending' }),
+          };
+        } else {
+          errors.push({ attendeeId: att.id, channel: 'email', error: emailResult.error || 'email_failed' });
+        }
+      }
+
+      if (!anyOk && (phone || email)) {
+        // kept errors above
+      }
+      nextAttendees.push(next);
     }
 
     const { error: updErr } = await supabase
@@ -135,7 +220,13 @@ export async function POST(request) {
       })
       .eq('id', capacitacionId);
     if (updErr) {
-      return NextResponse.json({ ok: false, error: updErr.message, sent, skipped }, { status: 500 });
+      return NextResponse.json({
+        ok: false,
+        error: updErr.message,
+        smsSent,
+        emailSent,
+        skipped,
+      }, { status: 500 });
     }
 
     await bumpAgendaLiveRev(supabase, clinicName).catch(() => {});
@@ -143,11 +234,14 @@ export async function POST(request) {
     return NextResponse.json({
       ok: true,
       kind,
-      sent,
+      sent: smsSent + emailSent,
+      smsSent,
+      emailSent,
       skipped,
       errors,
       attendees: nextAttendees,
       sampleBody,
+      sampleEmailSubject,
     });
   } catch (err) {
     const status = err?.status || 500;

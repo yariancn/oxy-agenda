@@ -2879,9 +2879,11 @@ export default function AppLayout() {
       setDbCapacitaciones((prev) => prev.map((c) => (c.id === next.id ? next : c)));
       setCapacitacionDraft(next);
       const sample = data.sampleBody || data.preview || '';
+      const smsN = Number(data.smsSent || 0);
+      const emailN = Number(data.emailSent || 0);
       alert(locale === 'en'
-        ? `Sent ${data.sent || 0} SMS${data.skipped ? ` · skipped ${data.skipped}` : ''}.${sample ? `\n\nExample text:\n${sample}` : ''}`
-        : `Enviados ${data.sent || 0} SMS${data.skipped ? ` · omitidos ${data.skipped}` : ''}.${sample ? `\n\nEjemplo del texto:\n${sample}` : ''}`);
+        ? `Sent SMS: ${smsN} · Email: ${emailN}${data.skipped ? ` · skipped ${data.skipped}` : ''}.${data.sampleEmailSubject ? `\n\nEmail subject: ${data.sampleEmailSubject}` : ''}${sample ? `\n\nExample text:\n${sample}` : ''}`
+        : `Enviados SMS: ${smsN} · Correo: ${emailN}${data.skipped ? ` · omitidos ${data.skipped}` : ''}.${data.sampleEmailSubject ? `\n\nAsunto correo: ${data.sampleEmailSubject}` : ''}${sample ? `\n\nEjemplo del texto:\n${sample}` : ''}`);
     } catch (err) {
       const msg = err?.message || '';
       alert(msg === 'missing_table'
@@ -9836,6 +9838,7 @@ export default function AppLayout() {
         clinicName={activeClinic}
         locale={locale}
         clinicPhone={dbCompanyConfig?.phone || ''}
+        clinicDisplayName={dbCompanyConfig?.name || activeClinicDisplayName || ''}
         saving={capacitacionSaving}
         notifying={capacitacionNotifying}
         onClose={() => {
