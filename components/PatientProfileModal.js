@@ -494,9 +494,9 @@ export default function PatientProfileModal({
                   <input type="checkbox" checked={formData.prefers_email} onChange={(e) => handleChange('prefers_email', e.target.checked)} className="w-4 h-4 shrink-0" />
                   {t.receiveEmail}
                 </label>
-                <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900">
-                  <input type="checkbox" checked={formData.prefers_sms_reminder} onChange={(e) => handleChange('prefers_sms_reminder', e.target.checked)} className="w-4 h-4 shrink-0" />
-                  {t.receiveSmsReminder}
+                <label className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2.5 text-[10px] font-black uppercase text-emerald-900">
+                  <input type="checkbox" checked readOnly className="w-4 h-4 shrink-0 opacity-70" />
+                  {t.receiveSmsReminderAlways || t.receiveSmsReminder}
                 </label>
                 <label className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2.5 text-[10px] font-black uppercase text-indigo-900">
                   <input type="checkbox" checked={formData.prefers_sms} onChange={(e) => handleChange('prefers_sms', e.target.checked)} className="w-4 h-4 shrink-0" />
@@ -1318,7 +1318,7 @@ export default function PatientProfileModal({
               }
               setSavingProfile(true);
               try {
-                await onSave?.(formData);
+                await onSave?.({ ...formData, prefers_sms_reminder: true });
               } catch (err) {
                 alert(err?.message || String(err));
               } finally {

@@ -9986,8 +9986,8 @@ export default function AppLayout() {
                   <label className="text-[10px] font-black uppercase text-slate-700">{L.modals.patient.receiveEmail}</label>
                 </div>
                 <div className="flex items-center gap-2">
-                  <input type="checkbox" checked={newPatientData.prefers_sms_reminder} onChange={e => setNewPatientData({...newPatientData, prefers_sms_reminder: e.target.checked})} className="w-4 h-4" />
-                  <label className="text-[10px] font-black uppercase text-slate-700">{L.modals.patient.receiveSmsReminder}</label>
+                  <input type="checkbox" checked readOnly className="w-4 h-4 opacity-70" />
+                  <label className="text-[10px] font-black uppercase text-emerald-800">{L.modals.patient.receiveSmsReminderAlways || L.modals.patient.receiveSmsReminder}</label>
                 </div>
                 <div className="flex items-center gap-2">
                   <input type="checkbox" checked={newPatientData.prefers_sms} onChange={e => setNewPatientData({...newPatientData, prefers_sms: e.target.checked})} className="w-4 h-4" />

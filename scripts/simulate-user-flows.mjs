@@ -652,13 +652,21 @@ test('mensajes: primera cita siempre correo + SMS', () => {
 });
 
 test('recordatorio: ventana diaria según horas antes', () => {
-  const now = new Date('2026-07-16T15:00:00');
-  const inWindow = {
-    full_date: '2026-07-17',
-    time: '15:00',
-  };
-  assert.equal(isAppointmentInReminderWindow(inWindow, 24, now), true);
-  assert.equal(isAppointmentInReminderWindow({ full_date: '2026-07-20', time: '15:00' }, 24, now), false);
+  // 06:00 Mexico = cron Hobby; cita hoy 16:00 y mañana 10:00 deben entrar (AM/PM + TZ)
+  const now = new Date('2026-07-16T12:00:00.000Z'); // 06:00 America/Mexico_City
+  const tz = 'America/Mexico_City';
+  assert.equal(
+    isAppointmentInReminderWindow({ full_date: '2026-07-16', time: '04:00 PM' }, 12, now, tz),
+    true,
+  );
+  assert.equal(
+    isAppointmentInReminderWindow({ full_date: '2026-07-17', time: '10:00 AM' }, 12, now, tz),
+    true,
+  );
+  assert.equal(
+    isAppointmentInReminderWindow({ full_date: '2026-07-20', time: '03:00 PM' }, 12, now, tz),
+    false,
+  );
 });
 
 test('reporte semanal GDL: semana anterior lun-dom', () => {

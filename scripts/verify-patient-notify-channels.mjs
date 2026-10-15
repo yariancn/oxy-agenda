@@ -76,30 +76,29 @@ const rescheduleSms = resolveNotifyChannelsForPatient(clinicAllOn, 'reschedule',
 });
 assert.equal(rescheduleSms.sendSms, true);
 
-// Patient opted out of reminder SMS
+// Reminder SMS ignores per-patient checkbox (always on if clinic allows)
 const reminderOptOut = resolveNotifyChannelsForPatient(clinicAllOn, 'reminder', {
   prefers_email: true,
   prefers_sms_reminder: false,
 });
 assert.equal(reminderOptOut.sendEmail, true);
-assert.equal(reminderOptOut.sendSms, false);
+assert.equal(reminderOptOut.sendSms, true);
 
-// Email-only patient for reminders
 const emailOnlyReminder = resolveNotifyChannelsForPatient(clinicAllOn, 'reminder', {
   prefers_email: true,
   prefers_sms_reminder: false,
   prefers_sms: false,
 });
 assert.equal(emailOnlyReminder.sendEmail, true);
-assert.equal(emailOnlyReminder.sendSms, false);
+assert.equal(emailOnlyReminder.sendSms, true);
 
-// Patient opted out of both email and reminder SMS — email still goes out (booking/changes/reminders)
+// Checkbox off still gets reminder SMS (STOP is handled via opt-out marker, not prefs)
 const optedOut = resolveNotifyChannelsForPatient(clinicAllOn, 'reminder', {
   prefers_email: false,
   prefers_sms_reminder: false,
 });
 assert.equal(optedOut.sendEmail, true);
-assert.equal(optedOut.sendSms, false);
+assert.equal(optedOut.sendSms, true);
 
 // Clinic-wide SMS kill switch still blocks
 const clinicSmsOff = resolveNotifyChannelsForPatient({

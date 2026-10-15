@@ -223,8 +223,9 @@ const mockConfig = { name: 'Oxygengdl', phone: '3311111111' };
   assert.equal(sent, true);
 }
 
-// Waiting/reminder still respect patient SMS prefs
+// Waiting/reminder ignore patient checkbox (always send if phone present)
 {
+  let sent = false;
   const result = await runStaffPatientSms({
     supabase: createMockSupabase({
       appointment: mockAppt,
@@ -237,11 +238,13 @@ const mockConfig = { name: 'Oxygengdl', phone: '3311111111' };
     preset: 'waiting',
     locale: 'es',
     sendSms: async () => {
-      throw new Error('should not send');
+      sent = true;
+      return { ok: true, body: 'x', preset: 'waiting', channel: 'sms' };
     },
   });
-  assert.equal(result.status, 400);
-  assert.equal(result.body.error, 'prefers_sms_off');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal(sent, true);
 }
 
 // Appointment not found
