@@ -67,6 +67,7 @@ import AppSymbolLegend from '../components/AppSymbolLegend';
 import PosReceiptModal from '../components/PosReceiptModal';
 import CashCutModal from '../components/CashCutModal';
 import CashArqueoModal from '../components/CashArqueoModal';
+import CashBalanceModal from '../components/CashBalanceModal';
 import PettyCashExpenseModal from '../components/PettyCashExpenseModal';
 import NativePrinterSettings from '../components/NativePrinterSettings';
 import StaffTabErrorBoundary from '../components/StaffTabErrorBoundary';
@@ -456,6 +457,7 @@ export default function AppLayout() {
   const [reportReceiptEmail, setReportReceiptEmail] = useState('');
   const [showCashCut, setShowCashCut] = useState(false);
   const [showCashArqueo, setShowCashArqueo] = useState(false);
+  const [showCashBalance, setShowCashBalance] = useState(false);
   const [showPettyCashExpense, setShowPettyCashExpense] = useState(false);
 
   const locale = localeForClinic(activeClinic);
@@ -5699,6 +5701,9 @@ export default function AppLayout() {
     { id: 'PettyCash', icon: '🧾', label: locale === 'en' ? 'Expense' : 'Gasto' },
     { id: 'CashArqueo', icon: '🧮', label: locale === 'en' ? 'Count' : 'Arqueo' },
     { id: 'CashCut', icon: '💵', label: locale === 'en' ? 'Withdraw' : 'Retiro' },
+    ...(currentUserLevel <= 1
+      ? [{ id: 'CashBalance', icon: '👁', label: locale === 'en' ? 'Cash' : 'Saldo' }]
+      : []),
   ];
 
   const mobileMoreActive = [...mobileAdminTabs, ...mobileStaffExtraTabs].some(t => t.id === activeTab);
@@ -5931,6 +5936,15 @@ export default function AppLayout() {
           >
             💵 {locale === 'en' ? 'Cash withdrawal' : 'Corte / retiro'}
           </button>
+          {currentUserLevel <= 1 && (
+            <button
+              type="button"
+              onClick={() => setShowCashBalance(true)}
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg font-bold transition text-sm text-violet-300 hover:bg-slate-800"
+            >
+              👁 {locale === 'en' ? 'Cash on hand' : 'Saldo en caja'}
+            </button>
+          )}
           
           {currentUserLevel <= 2 && (
             <>
@@ -11241,11 +11255,13 @@ export default function AppLayout() {
                     if (tab.id === 'PettyCash') setShowPettyCashExpense(true);
                     if (tab.id === 'CashArqueo') setShowCashArqueo(true);
                     if (tab.id === 'CashCut') setShowCashCut(true);
+                    if (tab.id === 'CashBalance') setShowCashBalance(true);
                   }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold ${
                     tab.id === 'PettyCash' ? 'text-amber-300'
                       : tab.id === 'CashArqueo' ? 'text-sky-300'
-                        : 'text-emerald-300'
+                        : tab.id === 'CashBalance' ? 'text-violet-300'
+                          : 'text-emerald-300'
                   }`}
                 >
                   <span className="text-lg">{tab.icon}</span>
@@ -11332,6 +11348,14 @@ export default function AppLayout() {
       companyConfig={dbCompanyConfig}
       activeClinic={activeClinic}
       currentUserName={currentUser?.name || ''}
+      activeSupabase={activeSupabase}
+    />
+    <CashBalanceModal
+      open={showCashBalance}
+      onClose={() => setShowCashBalance(false)}
+      patients={dbPatients}
+      sessionGroups={dbSessionGroups || []}
+      activeClinic={activeClinic}
       activeSupabase={activeSupabase}
     />
     <CashCutModal
