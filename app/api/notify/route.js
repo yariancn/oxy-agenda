@@ -119,6 +119,7 @@ export async function POST(request) {
 
     let smsTo = null;
 
+    // Client resolves channels (first/reminder ignore scheduling opt-in; cancel/booking require it).
     if (phone && prefers_sms === true && (type === 'both' || type === 'sms')) {
       smsTo = toE164Phone(phone, clinicId);
       const result = await sendPatientTextMessage({
@@ -142,7 +143,8 @@ export async function POST(request) {
       }
     }
 
-    // First-session confirmation: if already inside the hours-before window, queue SI/NO ~5 min later.
+    // First-session confirmation: if already inside the hours-before window, send SI/NO now.
+    // (No artificial delay — serverless after() was killing the 15s wait.)
     if (appointmentId && supportsConfirmationSms(clinicId) && (notifyType === 'first' || notifyType === 'booking')) {
       after(async () => {
         try {
@@ -151,10 +153,10 @@ export async function POST(request) {
             supabase,
             appointmentId,
             clinicName: clinicId,
-            delayMs: 15 * 1000,
+            delayMs: 0,
           });
         } catch {
-          // Cron remains fallback.
+          // Cron remains fallback for the 6h-before window.
         }
       });
     }

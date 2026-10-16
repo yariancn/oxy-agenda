@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { applyConfirmationReplyFromToken } from '../../../../lib/processConfirmationInbound.js';
 
 /**
- * POST-only confirmation (form from /c/{code}/si|no).
+ * POST-only confirmation (form from /n/{code}; AutoConfirmSi for /s/{code}).
  * GET must never mutate — SMS/WhatsApp link previews were auto-hitting NO.
  */
 export async function GET(request) {
@@ -21,7 +21,14 @@ export async function GET(request) {
   );
 }
 
+function wantsJson(request) {
+  const accept = request.headers.get('accept') || '';
+  const contentType = request.headers.get('content-type') || '';
+  return accept.includes('application/json') || contentType.includes('application/json');
+}
+
 export async function POST(request) {
+  const json = wantsJson(request);
   try {
     const contentType = request.headers.get('content-type') || '';
     let token = '';
@@ -38,6 +45,7 @@ export async function POST(request) {
     }
 
     if (!token || !replyRaw) {
+      if (json) return NextResponse.json({ ok: false, error: 'missing' }, { status: 400 });
       return NextResponse.redirect(new URL('/c?error=missing', request.url), 303);
     }
 
@@ -46,6 +54,20 @@ export async function POST(request) {
     const base = isShort
       ? `/c/${encodeURIComponent(token)}`
       : `/confirmar?t=${encodeURIComponent(token)}`;
+
+    if (json) {
+      if (!result?.ok) {
+        return NextResponse.json(
+          { ok: false, error: result?.error || 'failed', already: false },
+          { status: result?.error === 'invalid_token' ? 404 : 400 },
+        );
+      }
+      return NextResponse.json({
+        ok: true,
+        reply: result.reply,
+        already: result.already === true,
+      });
+    }
 
     if (!result?.ok && result?.error === 'invalid_token') {
       return NextResponse.redirect(new URL(`${base}?err=invalid`, request.url), 303);
@@ -70,6 +92,9 @@ export async function POST(request) {
       303,
     );
   } catch (error) {
+    if (json) {
+      return NextResponse.json({ ok: false, error: error?.message || 'error' }, { status: 500 });
+    }
     return NextResponse.redirect(
       new URL(`/c?err=${encodeURIComponent(error?.message || 'error')}`, request.url),
       303,

@@ -1,10 +1,11 @@
 import { getSupabaseAdmin } from '../lib/supabaseAdmin.js';
 import { CLINIC_OXYGENDGL, CLINIC_SHENANDOAH } from '../lib/clinicRegistry.js';
 import { CONFIRMATION_STATUS } from '../lib/appointmentConfirmation.js';
+import AutoConfirmSi from './AutoConfirmSi.js';
 
 /**
- * Shared SI/NO confirm gate.
- * GET never applies the reply (SMS/WhatsApp previews must not mutate).
+ * SI → one-tap auto-confirm (no extra button).
+ * NO → ask “¿seguro?” + button (GET never cancels — previews must not mutate).
  */
 export default async function ShortConfirmReplyView({ code, replyRaw, done = false, already = false }) {
   const reply = String(replyRaw || '').trim().toLowerCase();
@@ -42,19 +43,23 @@ export default async function ShortConfirmReplyView({ code, replyRaw, done = fal
 
   let summary = '';
   let alreadyStatus = null;
+  let cancelled = false;
   try {
     for (const clinic of [CLINIC_OXYGENDGL, CLINIC_SHENANDOAH]) {
       try {
         const supabase = getSupabaseAdmin(clinic);
         const { data: appt } = await supabase
           .from('appointments')
-          .select('patient, full_date, time, confirmation_status')
+          .select('patient, full_date, time, confirmation_status, check_in_status')
           .eq('confirmation_code', code)
           .maybeSingle();
         if (!appt) continue;
         const status = appt.confirmation_status || CONFIRMATION_STATUS.NONE;
         if (status === CONFIRMATION_STATUS.CONFIRMED || status === CONFIRMATION_STATUS.DECLINED) {
           alreadyStatus = status;
+        }
+        if (String(appt.check_in_status || '') === 'Cancelado') {
+          cancelled = true;
         }
         summary = `${appt.full_date || ''} · ${appt.time || ''}`.trim();
         break;
@@ -63,7 +68,17 @@ export default async function ShortConfirmReplyView({ code, replyRaw, done = fal
       }
     }
   } catch {
-    /* show confirm button anyway */
+    /* show UI anyway */
+  }
+
+  if (cancelled) {
+    return (
+      <Result
+        heading="Esta cita ya fue cancelada"
+        body="Si necesitas un nuevo horario, llama al 33 2166 4083."
+        tone="warn"
+      />
+    );
   }
 
   if (alreadyStatus === CONFIRMATION_STATUS.CONFIRMED && isYes) {
@@ -84,30 +99,27 @@ export default async function ShortConfirmReplyView({ code, replyRaw, done = fal
       />
     );
   }
-  if (alreadyStatus === CONFIRMATION_STATUS.DECLINED && isYes) {
-    return (
-      <ConfirmGate
-        code={code}
-        reply="si"
-        heading="¿Confirmas que SÍ asistes?"
-        body={summary
-          ? `Antes se registró un NO por error. ${summary}`
-          : 'Antes se registró un NO (a veces por vista previa del SMS). Confirma si sí vendrás.'}
-        buttonLabel="Sí, voy a asistir"
-        tone="ok"
-      />
-    );
+
+  // SI: confirm immediately on open (no second tap)
+  if (isYes) {
+    if (alreadyStatus === CONFIRMATION_STATUS.DECLINED) {
+      // Allow SI to override a false prior NO
+      return <AutoConfirmSi code={code} summary={summary} />;
+    }
+    return <AutoConfirmSi code={code} summary={summary} />;
   }
-  if (alreadyStatus === CONFIRMATION_STATUS.CONFIRMED && isNo) {
+
+  // NO: require explicit confirm button
+  if (alreadyStatus === CONFIRMATION_STATUS.CONFIRMED) {
     return (
       <ConfirmGate
         code={code}
         reply="no"
-        heading="¿Confirmas que NO podrás ir?"
+        heading="¿Seguro que deseas cancelar tu cita?"
         body={summary
           ? `Antes se confirmó asistencia. ${summary}`
           : 'Antes se confirmó asistencia. Confirma si quieres cancelar.'}
-        buttonLabel="No, no podré ir"
+        buttonLabel="Sí, cancelar mi cita"
         tone="warn"
       />
     );
@@ -116,11 +128,13 @@ export default async function ShortConfirmReplyView({ code, replyRaw, done = fal
   return (
     <ConfirmGate
       code={code}
-      reply={isNo ? 'no' : 'si'}
-      heading={isNo ? '¿Confirmas que NO podrás ir?' : '¿Confirmas que SÍ asistes?'}
-      body={summary || 'Un toque para registrar tu respuesta.'}
-      buttonLabel={isNo ? 'No, no podré ir' : 'Sí, voy a asistir'}
-      tone={isNo ? 'warn' : 'ok'}
+      reply="no"
+      heading="¿Seguro que deseas cancelar tu cita?"
+      body={summary
+        ? `Vas a indicar que NO asistirás el ${summary}.`
+        : 'Vas a indicar que NO podrás asistir.'}
+      buttonLabel="Sí, cancelar mi cita"
+      tone="warn"
     />
   );
 }
@@ -161,7 +175,7 @@ function ConfirmGate({ code, reply, heading, body, buttonLabel, tone }) {
           </button>
         </form>
         <p style={{ margin: '16px 0 0', fontSize: 12, opacity: 0.75 }}>
-          Si no querías esta opción, cierra esta pantalla. Dudas: 33 2166 4083
+          Si no querías cancelar, cierra esta pantalla. Dudas: 33 2166 4083
         </p>
       </div>
     </main>
