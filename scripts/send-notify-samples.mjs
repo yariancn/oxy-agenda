@@ -32,6 +32,28 @@ async function main() {
     process.exit(1);
   }
 
+  // Reset + send live confirmation for a real appointment (messaging QA)
+  if (flags.resetConfirm || flags['reset-confirm']) {
+    const res = await fetch(`${baseUrl}/api/notify/test-confirmation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pin,
+        clinic,
+        patient: flags.patient || flags.name || 'Yarian',
+        date: flags.date,
+        appointmentId: flags.appointmentId || undefined,
+        phone: phone || undefined,
+        pickFirst: true,
+        send: flags.send !== 'false',
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    console.log(JSON.stringify(data, null, 2));
+    if (!res.ok || data.ok === false) process.exit(1);
+    return;
+  }
+
   const res = await fetch(`${baseUrl}/api/notify/samples`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -46,6 +68,9 @@ async function main() {
       includeConfirmationSms: flags.confirmation !== false && flags.confirmation !== 'false',
       locale: flags.locale || undefined,
       equipment: flags.equipment || undefined,
+      patientTypes: flags.types
+        ? String(flags.types).split(',').map((t) => t.trim()).filter(Boolean)
+        : undefined,
     }),
   });
 

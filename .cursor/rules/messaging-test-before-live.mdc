@@ -1,0 +1,21 @@
+---
+description: Always test SMS/email messaging changes before deploying to production
+globs: lib/**/*{Sms,sms,Notify,notify,Confirmation,confirmation,Messaging,messaging,Reminder,reminder}*
+alwaysApply: true
+---
+
+# Mensajería: probar antes de live
+
+Cuando se cambie **cualquier** mensaje a pacientes o staff (SMS, WhatsApp, correo, confirmación SI/NO, recordatorios, primera cita, tickets):
+
+1. **No dar por terminado el cambio solo con commit/push.** Antes de considerar live OK, enviar una prueba real.
+2. **Prueba obligatoria** al teléfono de revisión `3328332686` (y/o correo de Yarian si aplica):
+   - Samples: `node scripts/send-notify-samples.mjs --phone 3328332686 --clinic Oxygengdl --types first,reminder`
+   - Confirmación real (reset + envío):  
+     `node scripts/send-notify-samples.mjs --reset-confirm --patient Yarian --date YYYY-MM-DD --clinic Oxygengdl`
+3. Para confirmación SI/NO: abrir los enlaces en el celular y verificar que **GET no registre** respuesta (solo el botón Confirmar).
+4. Mostrar en el chat el **texto exacto** enviado (preview) y el resultado ok/error.
+5. Si la prueba falla o el copy confunde, **corregir y volver a probar** antes de pedir al staff que use el flujo con pacientes reales.
+6. **No hacer push a main de cambios de mensajería sin haber corrido al menos una prueba SMS** (salvo que el usuario diga explícitamente lo contrario).
+
+Excepciones: cambios puramente internos sin texto visible al paciente (p. ej. solo logs) no requieren SMS de prueba.

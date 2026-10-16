@@ -44,6 +44,7 @@ export async function POST(request) {
     }
 
     const resend = body.resend === true;
+    const resetReply = body.resetReply === true;
     const supabase = getSupabaseAdmin(clinicName);
     const result = await sendConfirmationSmsForAppointment({
       supabase,
@@ -51,6 +52,7 @@ export async function POST(request) {
       clinicName,
       force: true,
       resend,
+      resetReply,
     });
 
     if (!result.ok) {
