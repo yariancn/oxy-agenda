@@ -27,13 +27,12 @@ async function main() {
   const clinic = flags.clinic || 'Oxygengdl';
   const pin = flags.pin || process.env.STAFF_SUPREME_PIN || '1234567890';
 
-  if (!phone && !email) {
-    console.error('Falta --phone y/o --email (o NOTIFY_SAMPLES_PHONE / NOTIFY_SAMPLES_EMAIL)');
-    process.exit(1);
-  }
-
   // Reset + send live confirmation for a real appointment (messaging QA)
   if (flags.resetConfirm || flags['reset-confirm']) {
+    if (!flags.date && !flags.appointmentId) {
+      console.error('Falta --date YYYY-MM-DD o --appointmentId');
+      process.exit(1);
+    }
     const res = await fetch(`${baseUrl}/api/notify/test-confirmation`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -52,6 +51,11 @@ async function main() {
     console.log(JSON.stringify(data, null, 2));
     if (!res.ok || data.ok === false) process.exit(1);
     return;
+  }
+
+  if (!phone && !email) {
+    console.error('Falta --phone y/o --email (o NOTIFY_SAMPLES_PHONE / NOTIFY_SAMPLES_EMAIL)');
+    process.exit(1);
   }
 
   const res = await fetch(`${baseUrl}/api/notify/samples`, {
