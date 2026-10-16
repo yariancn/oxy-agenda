@@ -74,14 +74,49 @@ export async function POST(request) {
     }
 
     const shouldSend = body.send !== false;
-    const result = await sendConfirmationSmsForAppointment({
-      supabase,
-      appointmentId,
-      clinicName,
-      force: true,
-      resend: true,
-      resetReply: true,
-    });
+    let result = null;
+    if (shouldSend) {
+      result = await sendConfirmationSmsForAppointment({
+        supabase,
+        appointmentId,
+        clinicName,
+        force: true,
+        resend: true,
+        resetReply: true,
+      });
+    } else if (body.resetOnly === true) {
+      result = await sendConfirmationSmsForAppointment({
+        supabase,
+        appointmentId,
+        clinicName,
+        force: true,
+        resend: true,
+        resetReply: true,
+      });
+      // Caller asked preview-only incorrectly; prefer resetWithoutSend below.
+    }
+
+    // Preview-only: reset status without SMS when resetOnly, else leave as-is
+    if (!shouldSend && body.resetOnly === true && result?.ok) {
+      // already reset+sent above — avoid this path; handled by shouldSend
+    }
+
+    if (!shouldSend && body.resetOnly !== true) {
+      // no-op send; only build preview from current row
+    } else if (!shouldSend && body.resetOnly === true) {
+      // Reset without sending SMS
+      await supabase
+        .from('appointments')
+        .update({
+          check_in_status: 'Agendado',
+          confirmation_status: 'none',
+          confirmation_enabled: true,
+          confirmation_sent_at: null,
+          confirmation_replied_at: null,
+          confirmation_reply: null,
+        })
+        .eq('id', appointmentId);
+    }
 
     const { data: appt } = await supabase
       .from('appointments')
@@ -122,8 +157,8 @@ export async function POST(request) {
     }
 
     return NextResponse.json({
-      ok: result.ok,
-      error: result.error || null,
+      ok: result?.ok === true,
+      error: result?.error || null,
       appointment: appt,
       smsPreview: preview,
       sendResult: result,
