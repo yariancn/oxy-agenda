@@ -10,9 +10,9 @@ export async function GET(request) {
   const code = String(url.searchParams.get('code') || url.searchParams.get('t') || '').trim();
   const reply = String(url.searchParams.get('r') || url.searchParams.get('reply') || 'si').trim().toLowerCase();
   if (code) {
-    const path = reply === 'no' || reply === '0' || reply === 'declined'
-      ? `/c/${encodeURIComponent(code)}/no`
-      : `/c/${encodeURIComponent(code)}/si`;
+    const path = reply === 'no' || reply === 'n' || reply === '0' || reply === 'declined'
+      ? `/n/${encodeURIComponent(code)}`
+      : `/s/${encodeURIComponent(code)}`;
     return NextResponse.redirect(new URL(path, request.url), 303);
   }
   return NextResponse.json(
@@ -60,10 +60,10 @@ export async function POST(request) {
     const reply = result.reply === 'declined' ? 'no' : 'si';
     const already = result.already ? '1' : '0';
     if (isShort) {
-      return NextResponse.redirect(
-        new URL(`${base}/${reply}?done=1&already=${already}`, request.url),
-        303,
-      );
+      const shortDone = result.reply === 'declined'
+        ? `/n/${encodeURIComponent(token)}?done=1&already=${already}`
+        : `/s/${encodeURIComponent(token)}?done=1&already=${already}`;
+      return NextResponse.redirect(new URL(shortDone, request.url), 303);
     }
     return NextResponse.redirect(
       new URL(`${base}&r=${reply}&done=1&already=${already}`, request.url),

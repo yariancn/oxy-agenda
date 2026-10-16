@@ -35,6 +35,6 @@ UPDATE company_config
 SET
   confirmation_sms_enabled = true,
   confirmation_hours_before = COALESCE(confirmation_hours_before, 6),
-  confirmation_sms_body = E'Hola {{nombre}}, confirma tu sesión {{cuando}} {{hora}} en OXYGENGDL.\n\n👉 Da click:\n\n✅ SI → {{si_url}}\n\n❌ NO → {{no_url}}\n\nDudas {{telefono}}'
+  confirmation_sms_body = E'Hola {{nombre}}, confirma tu sesión {{cuando}} {{hora}} en OXYGENGDL.\n\n👉 Elige una opción:\n\n✅ SI\n{{si_url}}\n\n❌ NO\n{{no_url}}\n\n(En la pantalla toca Confirmar. Dudas {{telefono}})'
 WHERE clinic IN ('Oxygengdl', 'Guadalajara');
 
