@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '../../../../lib/supabaseAdmin.js';
 import {
+  buildConfirmationReplyReceiptSms,
   buildConfirmationSms,
   DEFAULT_GDL_CONFIRMATION_SMS,
   defaultConfirmationHoursBefore,
@@ -15,14 +16,16 @@ import {
   normalizeClinicId,
   selectCompanyConfigForClinic,
 } from '../../../../lib/clinicRegistry.js';
+import { sendPatientTextMessage } from '../../../../lib/clinicMessaging.js';
 
 const SUPREME_PIN = '1234567890';
 
 /**
- * PIN-protected: reset a confirmation (clear false NO) and send the live SMS.
- * For messaging QA before/after copy changes — not for routine patient ops.
+ * PIN-protected: reset a confirmation (clear false NO) and optionally send SMS.
+ * Messaging QA before/after copy changes.
  *
  * POST { pin, clinic, patient?, date?, appointmentId?, phone?, send?: true }
+ * POST { pin, clinic, receiptSample: true, reply?: 'confirmed'|'declined', phone?, date?, time? }
  */
 export async function POST(request) {
   try {
@@ -34,6 +37,38 @@ export async function POST(request) {
     }
 
     const clinicName = normalizeClinicId(body.clinic || 'Oxygengdl');
+    const locale = localeForClinic(clinicName);
+
+    // Solo acuse SI/NO (sin resetear cita) — para QA de copy
+    if (body.receiptSample === true) {
+      const reply = body.reply === 'confirmed' ? 'confirmed' : 'declined';
+      const phone = String(body.phone || '3328332686').trim();
+      const smsBody = buildConfirmationReplyReceiptSms({
+        reply,
+        patientName: body.patient || 'Yarian',
+        fullDate: body.date || '2026-10-23',
+        time: body.time || '07:30 AM',
+        locale,
+        clinicPhone: body.clinicPhone || GDL_CONFIRMATION_STAFF_PHONE,
+      });
+      if (body.send === false) {
+        return NextResponse.json({ ok: true, dryRun: true, reply, smsPreview: smsBody });
+      }
+      const sendResult = await sendPatientTextMessage({
+        clinicName,
+        phone,
+        smsBody,
+        notifyType: 'confirmation',
+        locale,
+      });
+      return NextResponse.json({
+        ok: sendResult?.ok === true,
+        reply,
+        smsPreview: smsBody,
+        sendResult,
+      });
+    }
+
     const supabase = getSupabaseAdmin(clinicName);
     const date = String(body.date || '').trim();
     const patientQ = String(body.patient || '').trim();
@@ -84,38 +119,6 @@ export async function POST(request) {
         resend: true,
         resetReply: true,
       });
-    } else if (body.resetOnly === true) {
-      result = await sendConfirmationSmsForAppointment({
-        supabase,
-        appointmentId,
-        clinicName,
-        force: true,
-        resend: true,
-        resetReply: true,
-      });
-      // Caller asked preview-only incorrectly; prefer resetWithoutSend below.
-    }
-
-    // Preview-only: reset status without SMS when resetOnly, else leave as-is
-    if (!shouldSend && body.resetOnly === true && result?.ok) {
-      // already reset+sent above — avoid this path; handled by shouldSend
-    }
-
-    if (!shouldSend && body.resetOnly !== true) {
-      // no-op send; only build preview from current row
-    } else if (!shouldSend && body.resetOnly === true) {
-      // Reset without sending SMS
-      await supabase
-        .from('appointments')
-        .update({
-          check_in_status: 'Agendado',
-          confirmation_status: 'none',
-          confirmation_enabled: true,
-          confirmation_sent_at: null,
-          confirmation_replied_at: null,
-          confirmation_reply: null,
-        })
-        .eq('id', appointmentId);
     }
 
     const { data: appt } = await supabase
@@ -127,7 +130,6 @@ export async function POST(request) {
     const cfgRes = await selectCompanyConfigForClinic(supabase, clinicName);
     const cfg = cfgRes.data || {};
     const timezone = getClinicTimezone(clinicName);
-    const locale = localeForClinic(clinicName);
     const shortCode = appt?.confirmation_code
       || await ensureAppointmentConfirmationCode(supabase, appointmentId, '');
     const preview = buildConfirmationSms({
