@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { getSupabaseAdmin } from '../../../lib/supabaseAdmin.js';
 import { CLINIC_OXYGENDGL, CLINIC_SHENANDOAH } from '../../../lib/clinicRegistry.js';
 import { CONFIRMATION_STATUS } from '../../../lib/appointmentConfirmation.js';
@@ -63,15 +62,27 @@ export default async function ShortConfirmChoicePage({ params }) {
   }
   if (alreadyStatus === CONFIRMATION_STATUS.DECLINED) {
     return (
-      <Result
-        heading="Ya habías indicado que no asistes"
-        body="La clínica revisará tu horario. Gracias por avisar."
-        tone="warn"
-      />
+      <main style={shellStyle('#fff7ed')}>
+        <div style={cardStyle('#fdba74', '#9a3412')}>
+          <h1 style={{ margin: '0 0 12px', fontSize: '1.35rem', lineHeight: 1.25 }}>
+            Se registró que no asistes
+          </h1>
+          <p style={{ margin: '0 0 16px', fontSize: '1rem', lineHeight: 1.5 }}>
+            Si fue un error y sí vas a venir, confirma abajo.
+          </p>
+          <form method="POST" action="/api/public/confirm-reply">
+            <input type="hidden" name="code" value={code} />
+            <input type="hidden" name="reply" value="si" />
+            <button type="submit" style={{ ...btnStyle('#059669', '#fff'), width: '100%', border: 'none', cursor: 'pointer' }}>
+              En realidad SÍ asisto
+            </button>
+          </form>
+          <p style={{ margin: '16px 0 0', fontSize: 12, opacity: 0.75 }}>Dudas: 33 2166 4083</p>
+        </div>
+      </main>
     );
   }
 
-  const enc = encodeURIComponent(code);
   return (
     <main style={shellStyle('#eff6ff')}>
       <div style={cardStyle('#93c5fd', '#1e3a8a')}>
@@ -87,12 +98,20 @@ export default async function ShortConfirmChoicePage({ params }) {
           <p style={{ margin: '0 0 20px', fontSize: '0.95rem', opacity: 0.9 }}>Da click en SI o NO.</p>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <Link href={`/c/${enc}/si`} style={btnStyle('#059669', '#fff')}>
-            SI, voy a asistir
-          </Link>
-          <Link href={`/c/${enc}/no`} style={btnStyle('#dc2626', '#fff')}>
-            NO, no podré ir
-          </Link>
+          <form method="POST" action="/api/public/confirm-reply">
+            <input type="hidden" name="code" value={code} />
+            <input type="hidden" name="reply" value="si" />
+            <button type="submit" style={{ ...btnStyle('#059669', '#fff'), width: '100%', border: 'none', cursor: 'pointer' }}>
+              SI, voy a asistir
+            </button>
+          </form>
+          <form method="POST" action="/api/public/confirm-reply">
+            <input type="hidden" name="code" value={code} />
+            <input type="hidden" name="reply" value="no" />
+            <button type="submit" style={{ ...btnStyle('#dc2626', '#fff'), width: '100%', border: 'none', cursor: 'pointer' }}>
+              NO, no podré ir
+            </button>
+          </form>
         </div>
         <p style={{ margin: '18px 0 0', fontSize: 12, opacity: 0.75 }}>
           Dudas: 33 2166 4083
