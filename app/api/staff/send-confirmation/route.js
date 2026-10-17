@@ -10,7 +10,7 @@ const ERROR_MESSAGES = {
   not_houston: 'SMS confirmation is only for Houston and Guadalajara.',
   disabled: 'Confirmation SMS is disabled in Admin → Messages.',
   not_found: 'Appointment not found.',
-  not_eligible: 'This appointment is not eligible (not a first session, no phone, or SMS off).',
+  not_eligible: 'Cannot send: missing phone, appointment cancelled/finished, or confirmation SMS disabled in Admin.',
   outside_window: 'Outside automatic send window.',
   invalid_phone: 'Invalid phone number.',
   invalid_datetime: 'Invalid appointment date or time.',

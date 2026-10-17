@@ -16,7 +16,11 @@ import {
   normalizeClinicId,
   selectCompanyConfigForClinic,
 } from '../../../../lib/clinicRegistry.js';
-import { sendPatientTextMessage } from '../../../../lib/clinicMessaging.js';
+import { sendPatientTextMessage, sendTwilioSms } from '../../../../lib/clinicMessaging.js';
+import { buildPosTicketSmsText } from '../../../../lib/posTicket.js';
+import { saleTxIsoDate } from '../../../../lib/salesReportExport.js';
+import { sendMexicoSms } from '../../../../lib/smsMexico.js';
+import { toE164Phone } from '../../../../lib/appointmentNotify.js';
 
 const SUPREME_PIN = '1234567890';
 
@@ -26,6 +30,7 @@ const SUPREME_PIN = '1234567890';
  *
  * POST { pin, clinic, patient?, date?, appointmentId?, phone?, send?: true }
  * POST { pin, clinic, receiptSample: true, reply?: 'confirmed'|'declined', phone?, date?, time? }
+ * POST { pin, clinic, posTicketToday: true, patient?, phone?, date? }
  */
 export async function POST(request) {
   try {
@@ -38,6 +43,105 @@ export async function POST(request) {
 
     const clinicName = normalizeClinicId(body.clinic || 'Oxygengdl');
     const locale = localeForClinic(clinicName);
+
+    // Ticket POS del día (última venta del paciente) → SMS
+    if (body.posTicketToday === true) {
+      const supabase = getSupabaseAdmin(clinicName);
+      const patientQ = String(body.patient || '').trim();
+      const phoneQ = String(body.phone || '').replace(/\D/g, '').slice(-10);
+      const day = String(body.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+      if (!patientQ && phoneQ.length !== 10) {
+        return NextResponse.json({ ok: false, error: 'patient_or_phone_required' }, { status: 400 });
+      }
+
+      let pq = supabase
+        .from('patients')
+        .select('id, name, phone, email, package_history')
+        .limit(10);
+      if (patientQ) pq = pq.ilike('name', `%${patientQ}%`);
+      if (phoneQ.length === 10) pq = pq.ilike('phone', `%${phoneQ}%`);
+      const { data: pats, error: patErr } = await pq;
+      if (patErr) throw patErr;
+      if (!pats?.length) {
+        return NextResponse.json({ ok: false, error: 'patient_not_found' }, { status: 404 });
+      }
+      const patient = pats[0];
+      const hist = Array.isArray(patient.package_history) ? patient.package_history : [];
+      const todaySales = hist
+        .filter((tx) => saleTxIsoDate(tx) === day)
+        .sort((a, b) => {
+          const ta = Number(a.id) || Date.parse(a.createdAt || a.created_at || a.date || 0) || 0;
+          const tb = Number(b.id) || Date.parse(b.createdAt || b.created_at || b.date || 0) || 0;
+          return tb - ta;
+        });
+      if (!todaySales.length) {
+        return NextResponse.json({
+          ok: false,
+          error: 'no_sale_today',
+          patient: { id: patient.id, name: patient.name, phone: patient.phone },
+          day,
+          historyCount: hist.length,
+        }, { status: 404 });
+      }
+
+      const sale = todaySales[0];
+      const toPhone = String(body.overridePhone || patient.phone || phoneQ).trim();
+      const cfgRes = await selectCompanyConfigForClinic(supabase, clinicName);
+      const cfg = cfgRes.data || {};
+      const smsBody = buildPosTicketSmsText({
+        receipt: {
+          patient: patient.name,
+          phone: toPhone,
+          email: patient.email,
+          date: day,
+          serviceName: sale.serviceName || sale.service || sale.equipment || sale.package || '',
+          sessions: sale.sessions ?? sale.qty ?? 1,
+          price: sale.price ?? sale.total ?? sale.amount ?? 0,
+          unitPrice: sale.unitPrice ?? sale.unit_price,
+          paymentMethod: sale.paymentMethod || sale.payment_method || sale.method || '',
+          paymentSplits: sale.paymentSplits || sale.payment_splits,
+          operator: sale.operator || sale.staff || sale.soldBy || '',
+          ticketNumber: sale.ticketNumber || sale.ticket_number || sale.id,
+          ticketNotes: sale.ticketNotes || sale.notes || '',
+        },
+        companyConfig: cfg,
+        clinicName,
+        locale,
+      });
+
+      if (body.send === false) {
+        return NextResponse.json({
+          ok: true,
+          dryRun: true,
+          smsPreview: smsBody,
+          sale,
+          patient: { id: patient.id, name: patient.name, phone: toPhone },
+        });
+      }
+
+      let sendResult;
+      if (isShenandoah(clinicName)) {
+        const to = toE164Phone(toPhone, clinicName);
+        sendResult = to
+          ? await sendTwilioSms({ to, body: smsBody })
+          : { ok: false, error: 'INVALID_PHONE' };
+      } else {
+        sendResult = await sendMexicoSms({ to: toPhone, body: smsBody, clinicName });
+      }
+
+      return NextResponse.json({
+        ok: sendResult?.ok === true,
+        smsPreview: smsBody,
+        sendResult,
+        saleSummary: {
+          id: sale.id,
+          sessions: sale.sessions ?? sale.qty,
+          price: sale.price ?? sale.total ?? sale.amount,
+          service: sale.serviceName || sale.service || sale.package,
+        },
+        patient: { id: patient.id, name: patient.name, phone: toPhone },
+      });
+    }
 
     // Solo acuse SI/NO (sin resetear cita) — para QA de copy
     if (body.receiptSample === true) {
