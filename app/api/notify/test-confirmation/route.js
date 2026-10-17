@@ -54,18 +54,36 @@ export async function POST(request) {
         return NextResponse.json({ ok: false, error: 'patient_or_phone_required' }, { status: 400 });
       }
 
-      let pq = supabase
-        .from('patients')
-        .select('id, name, phone, email, package_history')
-        .limit(10);
-      if (patientQ) pq = pq.ilike('name', `%${patientQ}%`);
-      if (phoneQ.length === 10) pq = pq.ilike('phone', `%${phoneQ}%`);
-      const { data: pats, error: patErr } = await pq;
+      // GDL legacy: Name/Phone/Email; TX: name/phone/email
+      let pats = null;
+      let patErr = null;
+      const selectAttempts = [
+        { cols: 'id, Name, Phone, Email, package_history', nameCol: 'Name', phoneCol: 'Phone' },
+        { cols: 'id, name, phone, email, package_history', nameCol: 'name', phoneCol: 'phone' },
+      ];
+      for (const attempt of selectAttempts) {
+        let pq = supabase.from('patients').select(attempt.cols).limit(20);
+        if (phoneQ.length === 10) pq = pq.ilike(attempt.phoneCol, `%${phoneQ}%`);
+        else if (patientQ) pq = pq.ilike(attempt.nameCol, `%${patientQ}%`);
+        const res = await pq;
+        if (res.error && /column|schema cache/i.test(res.error.message || '')) continue;
+        patErr = res.error;
+        if (res.error) break;
+        pats = res.data || [];
+        if (patientQ && phoneQ.length === 10) {
+          const q = patientQ.toLowerCase();
+          pats = pats.filter((p) => String(p.Name || p.name || '').toLowerCase().includes(q));
+        }
+        break;
+      }
       if (patErr) throw patErr;
       if (!pats?.length) {
         return NextResponse.json({ ok: false, error: 'patient_not_found' }, { status: 404 });
       }
       const patient = pats[0];
+      const patientName = patient.Name || patient.name || '';
+      const patientPhone = patient.Phone || patient.phone || '';
+      const patientEmail = patient.Email || patient.email || '';
       const hist = Array.isArray(patient.package_history) ? patient.package_history : [];
       const todaySales = hist
         .filter((tx) => saleTxIsoDate(tx) === day)
@@ -78,21 +96,22 @@ export async function POST(request) {
         return NextResponse.json({
           ok: false,
           error: 'no_sale_today',
-          patient: { id: patient.id, name: patient.name, phone: patient.phone },
+          patient: { id: patient.id, name: patientName, phone: patientPhone },
           day,
           historyCount: hist.length,
+          recentDates: hist.slice(-5).map((tx) => saleTxIsoDate(tx)),
         }, { status: 404 });
       }
 
       const sale = todaySales[0];
-      const toPhone = String(body.overridePhone || patient.phone || phoneQ).trim();
+      const toPhone = String(body.overridePhone || patientPhone || phoneQ).trim();
       const cfgRes = await selectCompanyConfigForClinic(supabase, clinicName);
       const cfg = cfgRes.data || {};
       const smsBody = buildPosTicketSmsText({
         receipt: {
-          patient: patient.name,
+          patient: patientName,
           phone: toPhone,
-          email: patient.email,
+          email: patientEmail,
           date: day,
           serviceName: sale.serviceName || sale.service || sale.equipment || sale.package || '',
           sessions: sale.sessions ?? sale.qty ?? 1,
@@ -115,7 +134,7 @@ export async function POST(request) {
           dryRun: true,
           smsPreview: smsBody,
           sale,
-          patient: { id: patient.id, name: patient.name, phone: toPhone },
+          patient: { id: patient.id, name: patientName, phone: toPhone },
         });
       }
 
@@ -139,8 +158,21 @@ export async function POST(request) {
           price: sale.price ?? sale.total ?? sale.amount,
           service: sale.serviceName || sale.service || sale.package,
         },
-        patient: { id: patient.id, name: patient.name, phone: toPhone },
+        patient: { id: patient.id, name: patientName, phone: toPhone },
       });
+    }
+
+    // Repair accidental status change (QA only)
+    if (body.repairAppointmentStatus === true && body.appointmentId && body.status) {
+      const supabase = getSupabaseAdmin(clinicName);
+      const { data, error } = await supabase
+        .from('appointments')
+        .update({ check_in_status: String(body.status) })
+        .eq('id', body.appointmentId)
+        .select('id, patient, check_in_status, confirmation_status')
+        .maybeSingle();
+      if (error) throw error;
+      return NextResponse.json({ ok: true, appointment: data });
     }
 
     // Solo acuse SI/NO (sin resetear cita) — para QA de copy
