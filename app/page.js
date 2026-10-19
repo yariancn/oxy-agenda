@@ -10729,11 +10729,13 @@ export default function AppLayout() {
               broadcastLiveDataUpdated(activeClinic);
               await fetchAllData({ silent: true, patientsOnly: true });
             }}
-            onGroupPurchase={async ({ groupId, wallets, adeudo, transaction, adjustOnly }) => {
+            onGroupPurchase={async ({ groupId, wallets, adeudo, transaction, packageHistory, adjustOnly }) => {
               const group = dbSessionGroups.find((g) => g.id === groupId);
-              const history = adjustOnly || !transaction
-                ? (group?.packageHistory || [])
-                : [transaction, ...(group?.packageHistory || [])];
+              const history = Array.isArray(packageHistory)
+                ? packageHistory
+                : (adjustOnly || !transaction
+                  ? (group?.packageHistory || [])
+                  : [transaction, ...(group?.packageHistory || [])]);
               await activeSupabase.from('session_groups').update({
                 wallets,
                 adeudo,

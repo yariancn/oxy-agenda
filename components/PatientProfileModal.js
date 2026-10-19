@@ -11,6 +11,7 @@ import PatientSessionHistory from './PatientSessionHistory';
 import { paymentMethodOptions, paymentMethodStoredLabel, resolvePaymentMethodKey, formatPaymentSplitsLabel, formatSalePaymentMethod, sumPaymentSplits, validatePaymentSplits } from '../lib/paymentMethod';
 import { preferUnblockedPatient } from '../lib/deletePatientChart';
 import { cancelSaleInHistory, isSaleCancelled } from '../lib/saleCancel';
+import { settlePackageBalanceDue, sumOpenPackageBalanceDue } from '../lib/packageBalance';
 
 export default function PatientProfileModal({
   initialData,
@@ -119,7 +120,7 @@ export default function PatientProfileModal({
   const groupPurchased = sumPurchasedSessions(sessionGroup?.packageHistory || formData.packageHistory);
   const groupPending = sumWalletBalance(sessionGroup?.wallets || (isTitular ? {} : formData.wallets));
   const historyForBalance = (isTitular && sessionGroup ? sessionGroup.packageHistory : formData.packageHistory) || [];
-  const openPackageBalanceDue = historyForBalance.reduce((sum, tx) => sum + (Number(tx.balanceDue) || 0), 0);
+  const openPackageBalanceDue = sumOpenPackageBalanceDue(historyForBalance);
   const memberSearchKey = String(memberSearch || '').trim();
   const searching = Boolean(memberSearchKey);
 
@@ -313,11 +314,20 @@ export default function PatientProfileModal({
         partialPayment: false,
         packageTotalSessions: null,
         balanceDue: 0,
+        /** What actually entered the till on this ticket (corte uses this, not balanceDue). */
+        amountCollected: total,
       };
 
       if (posPartial) {
         const packageTotal = Math.max(sessions, Number(posPackageTotal) || sessions);
         const balanceDue = Math.max(0, parseFloat(posBalanceDue) || 0);
+        if (balanceDue <= 0) {
+          alert(t.balanceDueRequired || (locale === 'en'
+            ? 'Enter the pending balance amount, or turn off partial payment.'
+            : 'Indica el saldo pendiente, o desactiva pago parcial.'));
+          setCharging(false);
+          return;
+        }
         newTransaction.partialPayment = true;
         newTransaction.packageTotalSessions = packageTotal;
         newTransaction.balanceDue = balanceDue;
@@ -342,15 +352,43 @@ export default function PatientProfileModal({
         setLastPurchaseNote(t.purchaseDebtCleared(applied.debtCleared, applied.addedToWallet));
       }
 
-      const nextPackageHistory = [newTransaction, ...(formData.packageHistory || [])];
+      const priorHistory = useGroup
+        ? (sessionGroup.packageHistory || [])
+        : (formData.packageHistory || []);
+      // Paying the rest of a prior partial: clear balanceDue notes (does not count pending as cash).
+      const settled = (!posPartial && openPackageBalanceDue > 0)
+        ? settlePackageBalanceDue(priorHistory, total, {
+          settledBy: currentUserName || 'Staff',
+          settleTicketId: newTransaction.id,
+        })
+        : { history: priorHistory, settled: 0 };
+      if (settled.settled > 0) {
+        newTransaction.settlesBalanceDue = settled.settled;
+        newTransaction.ticketNotes = [
+          newTransaction.ticketNotes,
+          t.settlesBalanceNote?.(settled.settled.toFixed(2))
+            || (locale === 'en'
+              ? `Settles package balance $${settled.settled.toFixed(2)}`
+              : `Liquida saldo pendiente $${settled.settled.toFixed(2)}`),
+        ].filter(Boolean).join(' · ');
+        setLastPurchaseNote((prev) => [
+          prev,
+          t.settlesBalanceNote?.(settled.settled.toFixed(2))
+            || (locale === 'en'
+              ? `Cleared $${settled.settled.toFixed(2)} pending balance`
+              : `Se liquidó $${settled.settled.toFixed(2)} de saldo pendiente`),
+        ].filter(Boolean).join(' · '));
+      }
+
+      const nextPackageHistory = [newTransaction, ...(settled.history || [])];
 
       if (useGroup) {
-        const nextGroupHistory = [newTransaction, ...(sessionGroup.packageHistory || [])];
         await onGroupPurchase({
           groupId: sessionGroup.id,
           wallets: applied.wallets,
           adeudo: applied.adeudo,
           transaction: newTransaction,
+          packageHistory: nextPackageHistory,
         });
         onSessionUpdated?.({
           patientId: formData.id,
@@ -358,7 +396,7 @@ export default function PatientProfileModal({
             ...sessionGroup,
             wallets: applied.wallets,
             adeudo: applied.adeudo,
-            packageHistory: nextGroupHistory,
+            packageHistory: nextPackageHistory,
           },
         });
       } else {
@@ -1290,30 +1328,42 @@ export default function PatientProfileModal({
                 </span>
               </label>
               {posPartial && (
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <div>
-                    <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.packageTotalSessions}</label>
-                    <input
-                      type="number"
-                      min={posQty || 1}
-                      value={posPackageTotal}
-                      onChange={(e) => setPosPackageTotal(e.target.value)}
-                      placeholder={String(posQty || 10)}
-                      className="w-full p-2 font-black border rounded"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.balanceDue}</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={posBalanceDue}
-                      onChange={(e) => setPosBalanceDue(e.target.value)}
-                      className="w-full p-2 font-black border rounded"
-                    />
+                <div className="mt-2 space-y-2">
+                  <p className="text-[8px] font-bold text-amber-800 normal-case leading-snug bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                    {t.partialCashCutHint}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.packageTotalSessions}</label>
+                      <input
+                        type="number"
+                        min={posQty || 1}
+                        value={posPackageTotal}
+                        onChange={(e) => setPosPackageTotal(e.target.value)}
+                        placeholder={String(posQty || 10)}
+                        className="w-full p-2 font-black border rounded"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[8px] font-black uppercase text-blue-700 block mb-0.5">{t.balanceDue}</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={posBalanceDue}
+                        onChange={(e) => setPosBalanceDue(e.target.value)}
+                        className="w-full p-2 font-black border rounded"
+                      />
+                    </div>
                   </div>
                 </div>
+              )}
+              {!posPartial && openPackageBalanceDue > 0 && (
+                <p className="text-[8px] font-bold text-emerald-800 normal-case leading-snug mt-2 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1.5">
+                  {locale === 'en'
+                    ? `Open balance due $${openPackageBalanceDue.toFixed(2)}: this charge will clear it (only today’s tender counts in the cash cut).`
+                    : `Saldo pendiente $${openPackageBalanceDue.toFixed(2)}: este cobro lo liquidará (solo lo cobrado hoy cuenta en el corte).`}
+                </p>
               )}
               {(formData.adeudo || 0) > 0 && (
                 <p className="text-[9px] font-bold text-orange-700 mt-1 normal-case">
