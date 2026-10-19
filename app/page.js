@@ -161,6 +161,7 @@ import {
 import { buildPromoterBookingUrl, normalizePromoCode, resolvePromoterContext } from '../lib/promoters';
 import { resolveNextTicketNumber } from '../lib/ticketNumber';
 import { formatSaleAuditDetail, formatSaleCancelAuditDetail } from '../lib/saleAudit';
+import { cancelSaleInHistory, isSaleCancelled } from '../lib/saleCancel';
 import {
   appendAppointmentChargeVia,
   clearSettledSealCharge,
@@ -3969,9 +3970,29 @@ export default function AppLayout() {
   };
 
   const handleCancelGlobalTransaction = async (tx, patientId, patientName) => {
+    if (isSaleCancelled(tx)) {
+      alert(locale === 'en' ? 'This ticket is already cancelled.' : 'Este ticket ya está cancelado.');
+      return;
+    }
     if (!window.confirm(a('cancelSaleConfirm', patientName, tx.price, tx.sessions, tx.serviceName))) {
       return;
     }
+    const reason = window.prompt(
+      locale === 'en'
+        ? 'Cancellation reason (required):'
+        : 'Motivo de cancelación del ticket (obligatorio):',
+      '',
+    );
+    if (!reason || !String(reason).trim()) {
+      alert(locale === 'en'
+        ? 'A cancellation reason is required.'
+        : 'Debes indicar el motivo de la cancelación.');
+      return;
+    }
+    const cancelMeta = {
+      reason: String(reason).trim(),
+      cancelledBy: currentUser?.name || 'Staff',
+    };
 
     try {
       const p = dbPatients.find(x => String(x.id) === String(patientId));
@@ -3981,7 +4002,12 @@ export default function AppLayout() {
         const group = dbSessionGroups.find((g) => String(g.id) === String(p.sessionGroupId));
         if (!group) return alert(a('saleCancelError'));
         const reversed = reverseGroupPurchase(group, tx);
-        const history = (group.packageHistory || []).filter((t) => String(t.id) !== String(tx.id));
+        const { history, found, alreadyCancelled } = cancelSaleInHistory(group.packageHistory || [], tx.id, cancelMeta);
+        if (!found) return alert(a('saleCancelError'));
+        if (alreadyCancelled) {
+          alert(locale === 'en' ? 'This ticket is already cancelled.' : 'Este ticket ya está cancelado.');
+          return;
+        }
         const { error } = await activeSupabase.from('session_groups').update({
           wallets: reversed.wallets,
           adeudo: reversed.adeudo,
@@ -3999,7 +4025,12 @@ export default function AppLayout() {
         });
       } else {
         const reversed = reversePurchaseSessions(p.wallets, p.adeudo, tx, p.packageHistory);
-        const newHistory = (p.packageHistory || []).filter(t => String(t.id) !== String(tx.id));
+        const { history: newHistory, found, alreadyCancelled } = cancelSaleInHistory(p.packageHistory || [], tx.id, cancelMeta);
+        if (!found) return alert(a('saleCancelError'));
+        if (alreadyCancelled) {
+          alert(locale === 'en' ? 'This ticket is already cancelled.' : 'Este ticket ya está cancelado.');
+          return;
+        }
 
         let res = await activeSupabase.from('patients').update({
            wallets: reversed.wallets,
@@ -4027,7 +4058,7 @@ export default function AppLayout() {
         });
       }
 
-      await logAudit(null, patientName, 'REVERSIÓN DE VENTA', formatSaleCancelAuditDetail(tx, currencyStr));
+      await logAudit(null, patientName, 'REVERSIÓN DE VENTA', formatSaleCancelAuditDetail(tx, currencyStr, cancelMeta.reason));
       alert(a('saleCancelled'));
       fetchAllData();
     } catch (e) {
@@ -7347,7 +7378,7 @@ export default function AppLayout() {
                             endDate: reportEndDate,
                           });
                           return rows
-                            .filter((tx) => Number(tx.price) > 0)
+                            .filter((tx) => Number(tx.price) > 0 && !isSaleCancelled(tx))
                             .reduce((acc, curr) => acc + (Number(curr.price) || 0), 0)
                             .toLocaleString();
                         })()} {currencyStr}
@@ -7381,10 +7412,15 @@ export default function AppLayout() {
                         <tbody className="divide-y divide-slate-100">
                            {dbPatients.flatMap(p => (p.packageHistory || []).map(tx => ({...tx, patientId: p.id, patientName: p.patient})))
                             .sort((a,b) => b.id - a.id).slice(0, 50).map(tx => (
-                              <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
+                              <tr key={tx.id} className={`hover:bg-slate-50 transition-colors ${isSaleCancelled(tx) ? 'bg-red-50/60' : ''}`}>
                                  <td className="p-4 font-bold text-slate-500 text-xs">
                                     <span className="block">#{tx.ticketNumber || tx.ticket_number || String(tx.id).slice(-6)}</span>
                                     <span className="text-[9px] text-slate-400">{tx.date}</span>
+                                    {isSaleCancelled(tx) ? (
+                                      <span className="mt-1 inline-block text-[8px] font-black uppercase text-red-700 bg-red-100 px-1.5 py-0.5 rounded">
+                                        {L.modals.patient.ticketCancelledBadge || 'Cancelado'}
+                                      </span>
+                                    ) : null}
                                  </td>
                                  <td className="p-4 font-black text-slate-800 text-sm uppercase">{tx.patientName}</td>
                                  <td className="p-4">
@@ -7392,9 +7428,12 @@ export default function AppLayout() {
                                     {tx.partialPayment ? (
                                       <p className="text-[9px] font-black text-amber-600 uppercase mt-0.5">Pago parcial</p>
                                     ) : null}
+                                    {isSaleCancelled(tx) && tx.cancelReason ? (
+                                      <p className="text-[9px] font-bold text-red-700 mt-0.5 normal-case leading-snug">Motivo: {tx.cancelReason}</p>
+                                    ) : null}
                                  </td>
                                  <td className="p-4 text-center font-black text-slate-800 text-sm">{tx.sessions ?? '—'}</td>
-                                 <td className="p-4 text-right font-black text-emerald-600 text-sm">${tx.price} {currencyStr}</td>
+                                 <td className={`p-4 text-right font-black text-sm ${isSaleCancelled(tx) ? 'text-red-600 line-through' : 'text-emerald-600'}`}>${tx.price} {currencyStr}</td>
                                  <td className="p-4">
                                     <span className="text-[9px] font-black text-slate-500 uppercase bg-slate-100 inline-block px-2 py-0.5 rounded max-w-[14rem] leading-snug">
                                       {tx.paymentMethod || '—'}
@@ -7409,9 +7448,9 @@ export default function AppLayout() {
                                        const pat = dbPatients.find((p) => String(p.id) === String(tx.patientId));
                                        openSaleReceiptModal(tx, tx.patientName, pat?.phone || '', pat?.email || '');
                                      }} className="bg-slate-100 border border-slate-300 text-slate-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-slate-200 transition shadow-sm w-full max-w-[8rem]">
-                                       {L.modals.patient.receiptGenerated}
+                                       {L.modals.patient.receiptRegenerate || L.modals.patient.receiptGenerated}
                                      </button>
-                                     {currentUserLevel <= 2 && (
+                                     {currentUserLevel <= 3 && !isSaleCancelled(tx) && (
                                        <button type="button" onClick={() => handleCancelGlobalTransaction(tx, tx.patientId, tx.patientName)} className="bg-red-50 border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-red-100 transition shadow-sm w-full max-w-[8rem]">
                                          {L.modals.patient.revert}
                                        </button>
@@ -10711,11 +10750,21 @@ export default function AppLayout() {
               broadcastLiveDataUpdated(activeClinic);
               await fetchAllData({ silent: true, patientsOnly: true });
             }}
-            onGroupCancelSale={async ({ groupId, transaction }) => {
+            onGroupCancelSale={async ({ groupId, transaction, cancelReason, cancelledBy }) => {
               const group = dbSessionGroups.find((g) => g.id === groupId);
               if (!group) return;
+              if (isSaleCancelled(transaction)) {
+                throw new Error(locale === 'en' ? 'This ticket is already cancelled.' : 'Este ticket ya está cancelado.');
+              }
               const reversed = reverseGroupPurchase(group, transaction);
-              const history = (group.packageHistory || []).filter((t) => t.id !== transaction.id);
+              const { history, found, alreadyCancelled } = cancelSaleInHistory(
+                group.packageHistory || [],
+                transaction.id,
+                { reason: cancelReason, cancelledBy: cancelledBy || currentUser?.name || 'Staff' },
+              );
+              if (!found || alreadyCancelled) {
+                throw new Error(locale === 'en' ? 'This ticket is already cancelled.' : 'Este ticket ya está cancelado.');
+              }
               await activeSupabase.from('session_groups').update({
                 wallets: reversed.wallets,
                 adeudo: reversed.adeudo,
@@ -10807,8 +10856,8 @@ export default function AppLayout() {
               });
               broadcastLiveDataUpdated(activeClinic);
             }}
-            onCancelSale={(tx, patientName) => {
-              logAudit(null, patientName, 'REVERSIÓN DE VENTA', formatSaleCancelAuditDetail(tx, currencyStr));
+            onCancelSale={(tx, patientName, reason = '') => {
+              logAudit(null, patientName, 'REVERSIÓN DE VENTA', formatSaleCancelAuditDetail(tx, currencyStr, reason));
             }}
             onSave={async (ud) => {
               const activeSupabase = createStaffDb(activeClinic);

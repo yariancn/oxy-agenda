@@ -10,6 +10,7 @@ import { sanitizePatientNotesForDisplay } from '../lib/patientNotes';
 import PatientSessionHistory from './PatientSessionHistory';
 import { paymentMethodOptions, paymentMethodStoredLabel, resolvePaymentMethodKey, formatPaymentSplitsLabel, formatSalePaymentMethod, sumPaymentSplits, validatePaymentSplits } from '../lib/paymentMethod';
 import { preferUnblockedPatient } from '../lib/deletePatientChart';
+import { cancelSaleInHistory, isSaleCancelled } from '../lib/saleCancel';
 
 export default function PatientProfileModal({
   initialData,
@@ -38,7 +39,7 @@ export default function PatientProfileModal({
 }) {
   const { locale, L } = useStaffLocale();
   const t = L.modals.patient;
-  const canCancelSales = currentUserLevel <= 2;
+  const canCancelSales = currentUserLevel <= 3;
   const canDeleteChart = currentUserLevel <= 2 && typeof onDeletePatient === 'function';
   const [deletingChart, setDeletingChart] = useState(false);
 
@@ -404,16 +405,37 @@ export default function PatientProfileModal({
   };
 
   const handleCancelTransaction = async (txToCancel) => {
+    if (isSaleCancelled(txToCancel)) {
+      alert(t.ticketAlreadyCancelled || (locale === 'en' ? 'This ticket is already cancelled.' : 'Este ticket ya está cancelado.'));
+      return;
+    }
     if (!window.confirm(t.cancelPaymentConfirm(txToCancel.price, txToCancel.sessions, txToCancel.serviceName))) {
       return;
     }
+    const reason = window.prompt(
+      t.cancelReasonPrompt || (locale === 'en' ? 'Cancellation reason (required):' : 'Motivo de cancelación del ticket (obligatorio):'),
+      '',
+    );
+    if (!reason || !String(reason).trim()) {
+      alert(t.cancelReasonRequired || (locale === 'en' ? 'A cancellation reason is required.' : 'Debes indicar el motivo de la cancelación.'));
+      return;
+    }
+    const cancelMeta = {
+      reason: String(reason).trim(),
+      cancelledBy: currentUserName || 'Staff',
+    };
 
-    onCancelSale?.(txToCancel, formData.patient);
+    onCancelSale?.(txToCancel, formData.patient, cancelMeta.reason);
 
     const useGroup = isTitular && sessionGroup?.id && onGroupCancelSale;
     if (useGroup) {
       try {
-        await onGroupCancelSale({ groupId: sessionGroup.id, transaction: txToCancel });
+        await onGroupCancelSale({
+          groupId: sessionGroup.id,
+          transaction: txToCancel,
+          cancelReason: cancelMeta.reason,
+          cancelledBy: cancelMeta.cancelledBy,
+        });
       } catch (err) {
         alert(err?.message || String(err));
       }
@@ -421,7 +443,15 @@ export default function PatientProfileModal({
     }
 
     const reversed = reversePurchaseSessions(formData.wallets, formData.adeudo, txToCancel, formData.packageHistory);
-    const nextHistory = (formData.packageHistory || []).filter((tx) => tx.id !== txToCancel.id);
+    const { history: nextHistory, found, alreadyCancelled } = cancelSaleInHistory(
+      formData.packageHistory || [],
+      txToCancel.id,
+      cancelMeta,
+    );
+    if (!found || alreadyCancelled) {
+      alert(t.ticketAlreadyCancelled || (locale === 'en' ? 'This ticket is already cancelled.' : 'Este ticket ya está cancelado.'));
+      return;
+    }
     setFormData((prev) => ({
       ...prev,
       wallets: reversed.wallets,
@@ -1057,7 +1087,7 @@ export default function PatientProfileModal({
               <span className="text-[10px] font-black text-slate-500 uppercase block mb-2">{t.paymentHistory}</span>
               {(isTitular && sessionGroup ? sessionGroup.packageHistory : formData.packageHistory)?.length ? (
                 (isTitular && sessionGroup ? sessionGroup.packageHistory : formData.packageHistory).map((tx) => (
-                  <div key={tx.id} className="bg-white p-2 rounded border mb-1">
+                  <div key={tx.id} className={`p-2 rounded border mb-1 ${isSaleCancelled(tx) ? 'bg-red-50 border-red-200' : 'bg-white'}`}>
                     <div className="flex justify-between items-start gap-2">
                       <div className="min-w-0">
                         <p className="text-[10px] font-bold uppercase">
@@ -1067,7 +1097,13 @@ export default function PatientProfileModal({
                         <p className="text-[8px] font-bold text-slate-500 uppercase mt-0.5">
                           {formatSalePaymentMethod(tx, locale) || tx.paymentMethod || '—'}
                         </p>
-                        {(Number(tx.balanceDue) || 0) > 0 && (
+                        {isSaleCancelled(tx) && (
+                          <p className="text-[8px] font-black text-red-700 uppercase mt-0.5">
+                            {t.ticketCancelledBadge || 'Cancelado'}
+                            {tx.cancelReason ? `: ${tx.cancelReason}` : ''}
+                          </p>
+                        )}
+                        {!isSaleCancelled(tx) && (Number(tx.balanceDue) || 0) > 0 && (
                           <p className="text-[8px] font-black text-amber-700 uppercase mt-0.5">
                             {t.balanceDueBadge(Number(tx.balanceDue).toFixed(2))}
                             {tx.packageTotalSessions ? ` · ${tx.sessions}/${tx.packageTotalSessions}` : ''}
@@ -1076,9 +1112,9 @@ export default function PatientProfileModal({
                       </div>
                       <div className="flex flex-col gap-1 shrink-0">
                         <button type="button" onClick={() => setReceipt({ ...tx, phone: tx.phone || formData.phone, email: tx.email || formData.email })} className="text-[9px] font-black text-slate-700 uppercase px-2 py-1 border border-slate-200 rounded bg-slate-50">
-                          {t.receiptGenerated}
+                          {t.receiptRegenerate || t.receiptGenerated}
                         </button>
-                        {canCancelSales && (
+                        {canCancelSales && !isSaleCancelled(tx) && (
                           <button type="button" onClick={() => handleCancelTransaction(tx)} className="text-[9px] font-black text-red-600 uppercase px-2 py-1 border border-red-200 rounded">
                             {t.revert}
                           </button>

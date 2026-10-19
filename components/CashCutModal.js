@@ -160,6 +160,7 @@ export default function CashCutModal({
       expectedInDrawer: summary.expectedInDrawer,
       countedCash: counted,
       sales: summary.sales,
+      cancelledSales: summary.cancelledSales || [],
       expenses: summary.expenses,
       closedBy: deliveredTrimmed,
       deliveredBy: deliveredTrimmed,
@@ -358,6 +359,36 @@ export default function CashCutModal({
                           {tx.patientName || tx.patient || ''}
                         </span>
                         <span className="shrink-0">${(Number(tx.cashPortion ?? tx.price) || 0).toFixed(2)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {(summary.cancelledSales || []).length > 0 && (
+                <div className="rounded-xl border border-red-200 max-h-36 overflow-y-auto">
+                  <p className="sticky top-0 bg-red-50 px-3 py-2 text-[10px] font-black uppercase text-red-800">
+                    {es ? 'Tickets cancelados' : 'Cancelled tickets'}
+                    {' · '}
+                    {summary.cancelledSales.length}
+                  </p>
+                  <ul className="divide-y divide-red-100">
+                    {summary.cancelledSales.map((tx) => (
+                      <li key={`c-${String(tx.id)}`} className="px-3 py-2 text-[11px] font-bold text-red-900">
+                        <div className="flex justify-between gap-2">
+                          <span className="truncate">
+                            #{tx.ticketNumber || String(tx.id).slice(-6)}
+                            {' '}
+                            {tx.patientName || tx.patient || ''}
+                          </span>
+                          <span className="shrink-0">${(Number(tx.price) || 0).toFixed(2)}</span>
+                        </div>
+                        <p className="text-[10px] font-bold text-red-700 mt-0.5 normal-case leading-snug">
+                          {es ? 'Motivo' : 'Reason'}
+                          :
+                          {' '}
+                          {tx.cancelReason || '—'}
+                        </p>
                       </li>
                     ))}
                   </ul>

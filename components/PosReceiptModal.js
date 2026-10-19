@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { buildPosTicketHtml } from '../lib/posTicket';
 import { printAgendaReceipt } from '../lib/printReceipt';
+import { isSaleCancelled } from '../lib/saleCancel';
 
 const BUILD_SHA = (process.env.NEXT_PUBLIC_BUILD_SHA || 'dev').slice(0, 7);
 
@@ -164,6 +165,12 @@ export default function PosReceiptModal({
         <p id="pos-receipt-title" className="text-center text-sm font-black text-slate-900 mb-1 uppercase">
           {t.receiptGenerated || 'Ticket generado'}
         </p>
+        {isSaleCancelled(receipt) ? (
+          <p className="text-center text-[11px] font-black text-red-700 mb-2 uppercase leading-snug border-2 border-red-600 rounded-lg px-2 py-1.5 bg-red-50">
+            {t.ticketCancelledBadge || (locale === 'en' ? 'Cancelled' : 'Cancelado')}
+            {receipt.cancelReason ? `: ${receipt.cancelReason}` : ''}
+          </p>
+        ) : null}
         <p className="text-center text-[11px] font-bold text-blue-900 mb-3 normal-case leading-snug">
           {t.receiptChooseDelivery || 'Elige cómo entregar el ticket:'}
         </p>
