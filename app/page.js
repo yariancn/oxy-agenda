@@ -193,6 +193,7 @@ import {
   buildNotifyContent,
   formatBookingNotifyFeedback,
   notifyHadFailure,
+  notifyWasSent,
   sendAppointmentNotification,
   summarizeNotifyReport,
 } from '../lib/appointmentNotify';
@@ -5504,7 +5505,7 @@ export default function AppLayout() {
 
       let createdCount = 0;
       let skippedCount = 0;
-      let firstCreated = null;
+      const createdRows = [];
 
       for (const dateIso of occurrenceDates) {
         if (checkOverlap(
@@ -5541,7 +5542,7 @@ export default function AppLayout() {
 
         if (na?.[0]) {
           createdCount += 1;
-          if (!firstCreated) firstCreated = na[0];
+          createdRows.push(na[0]);
           const flags = [
             slot.outside_normal_hours ? L.p.appt.badgeOutsideHours : '',
             isExtendedSession(slot) ? L.p.appt.badgeExtended : '',
@@ -5563,20 +5564,36 @@ export default function AppLayout() {
         return;
       }
 
+      const firstCreated = createdRows[0] || null;
       let notifySummary = '';
       if (firstCreated) {
-        const patientNotifyResult = await notifyPatientFromSlot({
-          ...basePayload,
-          id: firstCreated.id,
-          full_date: firstCreated.full_date || apptDate,
-          fullDate: firstCreated.full_date || apptDate,
-          phone: canonicalPhone,
-          email: canonicalEmail,
-          prefers_email: slot.prefers_email ?? resolvedContact.prefers_email,
-          prefers_sms: slot.prefers_sms ?? resolvedContact.prefers_sms,
-          prefers_sms_reminder: slot.prefers_sms_reminder ?? resolvedContact.prefers_sms_reminder,
-          is_new_patient: isNewForAppointment,
-        }, { reportResult: true });
+        // Email/SMS for every occurrence (repeat mode used to notify only the first date).
+        let patientNotifyResult = null;
+        let notifyFailCount = 0;
+        let notifyOkCount = 0;
+        for (let i = 0; i < createdRows.length; i += 1) {
+          const row = createdRows[i];
+          const rowDate = row.full_date || occurrenceDates[i] || apptDate;
+          const result = await notifyPatientFromSlot({
+            ...basePayload,
+            id: row.id,
+            full_date: rowDate,
+            fullDate: rowDate,
+            phone: canonicalPhone,
+            email: canonicalEmail,
+            prefers_email: true,
+            prefers_sms: slot.prefers_sms ?? resolvedContact.prefers_sms,
+            prefers_sms_reminder: slot.prefers_sms_reminder ?? resolvedContact.prefers_sms_reminder,
+            // Only the first occurrence can carry first-visit copy; the rest are booking.
+            is_new_patient: i === 0 ? isNewForAppointment : false,
+          }, {
+            reportResult: true,
+            ...(i === 0 ? {} : { notifyType: 'booking' }),
+          });
+          if (i === 0) patientNotifyResult = result;
+          if (result?.skipped || notifyHadFailure(result?.report)) notifyFailCount += 1;
+          else if (notifyWasSent(result?.report) || result?.report) notifyOkCount += 1;
+        }
         const staffNotifyResult = await alertStaffNewBooking({
           ...basePayload,
           full_date: firstCreated.full_date || apptDate,
@@ -5599,7 +5616,15 @@ export default function AppLayout() {
           staffResult: staffNotifyResult,
           locale,
         });
-        if (notifyHadFailure(patientNotifyResult?.report)) {
+        if (createdRows.length > 1) {
+          notifySummary = [
+            notifySummary,
+            locale === 'en'
+              ? `Notices for ${createdRows.length} appointments (${notifyOkCount} ok${notifyFailCount ? `, ${notifyFailCount} issue(s)` : ''}).`
+              : `Avisos de ${createdRows.length} citas (${notifyOkCount} ok${notifyFailCount ? `, ${notifyFailCount} con detalle` : ''}).`,
+          ].filter(Boolean).join('\n');
+        }
+        if (notifyFailCount > 0 || notifyHadFailure(patientNotifyResult?.report)) {
           notifySummary = a('notifyFailed', notifySummary || '');
         } else {
           notifySummary = a('notifySent', notifySummary || '');
