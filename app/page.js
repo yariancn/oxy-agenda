@@ -3719,8 +3719,9 @@ export default function AppLayout() {
 
   const notifyPatientFromSlot = async (slot, { showSuccess = false, notifyReason, notifyType: notifyTypeOverride, reportResult = false, forceNotify = false } = {}) => {
     const contact = resolveSlotContact(slot);
-    const email = contact.email;
-    const phone = contact.phone;
+    // Prefer chart contact, but keep email/phone passed on the slot (new charts / just typed).
+    const email = String(contact.email || slot.email || '').trim();
+    const phone = String(contact.phone || slot.phone || '').trim();
 
     const notifyType = notifyTypeOverride || resolveEffectiveNotifyType({
       notifyReason,
@@ -3754,18 +3755,30 @@ export default function AppLayout() {
       return reportResult ? { skipped: true, reason } : null;
     }
 
-    const prefersEmail = contact.prefers_email;
+    const prefersEmail = contact.prefers_email !== false;
     const prefersSms = contact.prefers_sms;
     const prefersSmsReminder = contact.prefers_sms_reminder;
-    const { sendEmail, sendSms } = resolveNotifyChannelsForPatient(dbCompanyConfig, notifyType, {
+    const channels = resolveNotifyChannelsForPatient(dbCompanyConfig, notifyType, {
       prefers_email: prefersEmail,
       prefers_sms: prefersSms,
       prefers_sms_reminder: prefersSmsReminder,
     });
+    const clinicEmailOn = dbCompanyConfig.notify_channel_email !== false;
+    // Always send email on schedule messages when an address exists (SMS alone is not enough).
+    const sendEmail = Boolean(email) && clinicEmailOn && (
+      forceNotify
+      || channels.sendEmail
+      || ['first', 'booking', 'reschedule', 'cancel'].includes(notifyType)
+    );
+    const sendSms = Boolean(phone) && channels.sendSms;
     if (!sendEmail && !sendSms) {
-      const reason = locale === 'en'
-        ? 'Patient opted out of SMS and email (or clinic-wide channels are off).'
-        : 'El paciente desactivó SMS y correo (o los canales de clínica están apagados).';
+      const reason = !email && clinicEmailOn
+        ? (locale === 'en'
+          ? 'No email on file (and SMS is off for this patient). Add an email to notify by correo.'
+          : 'Sin correo en el expediente (y SMS apagado para este paciente). Agrega un email para avisar por correo.')
+        : (locale === 'en'
+          ? 'Patient opted out of SMS and email (or clinic-wide channels are off).'
+          : 'El paciente desactivó SMS y correo (o los canales de clínica están apagados).');
       if (showSuccess) alert(reason);
       return reportResult ? { skipped: true, reason } : null;
     }
