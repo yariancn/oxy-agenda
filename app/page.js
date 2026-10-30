@@ -3764,7 +3764,7 @@ export default function AppLayout() {
       prefers_sms_reminder: prefersSmsReminder,
     });
     const clinicEmailOn = dbCompanyConfig.notify_channel_email !== false;
-    // Always send email on schedule messages when an address exists (SMS alone is not enough).
+    // New bookings / force: always email when address exists. SMS alone is never enough.
     const sendEmail = Boolean(email) && clinicEmailOn && (
       forceNotify
       || channels.sendEmail
@@ -5580,10 +5580,12 @@ export default function AppLayout() {
       const firstCreated = createdRows[0] || null;
       let notifySummary = '';
       if (firstCreated) {
-        // Email/SMS for every occurrence (repeat mode used to notify only the first date).
+        // Always notify every created date (individual or repeat). Email is required when on file.
+        const hasPatientEmail = Boolean(String(canonicalEmail || '').trim());
         let patientNotifyResult = null;
         let notifyFailCount = 0;
         let notifyOkCount = 0;
+        let emailSentCount = 0;
         for (let i = 0; i < createdRows.length; i += 1) {
           const row = createdRows[i];
           const rowDate = row.full_date || occurrenceDates[i] || apptDate;
@@ -5601,9 +5603,12 @@ export default function AppLayout() {
             is_new_patient: i === 0 ? isNewForAppointment : false,
           }, {
             reportResult: true,
+            forceNotify: true,
             ...(i === 0 ? {} : { notifyType: 'booking' }),
           });
           if (i === 0) patientNotifyResult = result;
+          const emailStatus = String(result?.report?.email || '');
+          if (/Enviado correctamente|Sent successfully/i.test(emailStatus)) emailSentCount += 1;
           if (result?.skipped || notifyHadFailure(result?.report)) notifyFailCount += 1;
           else if (notifyWasSent(result?.report) || result?.report) notifyOkCount += 1;
         }
@@ -5629,7 +5634,15 @@ export default function AppLayout() {
           staffResult: staffNotifyResult,
           locale,
         });
-        if (createdRows.length > 1) {
+        if (hasPatientEmail) {
+          notifySummary = [
+            notifySummary,
+            locale === 'en'
+              ? `Email sent for ${emailSentCount}/${createdRows.length} appointment(s).`
+              : `Correo enviado en ${emailSentCount}/${createdRows.length} cita(s).`,
+          ].filter(Boolean).join('\n');
+          if (emailSentCount < createdRows.length) notifyFailCount += 1;
+        } else if (createdRows.length > 1) {
           notifySummary = [
             notifySummary,
             locale === 'en'

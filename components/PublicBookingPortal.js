@@ -335,22 +335,27 @@ export default function PublicBookingPortal({
 
       const includeFirstSessionNotes = notifyType === 'first';
 
-      if (isAutoNotifyEnabled(dbConfig || {}, notifyType)) {
-        try {
-          const patientNotifyPrefs = {
-            prefers_email: true,
-            prefers_sms: formData.smsConsent === true,
-            prefers_sms_reminder: true,
-          };
-          const notifyChannels = resolveNotifyChannelsForPatient(
-            dbConfig || {},
-            notifyType,
-            patientNotifyPrefs,
-          );
+      // Always notify on public book; email is required whenever the guest provided one.
+      try {
+        const bookingEmail = (formData.email || result.patient.email || '').trim();
+        const patientNotifyPrefs = {
+          prefers_email: true,
+          prefers_sms: formData.smsConsent === true,
+          prefers_sms_reminder: true,
+        };
+        const notifyChannels = resolveNotifyChannelsForPatient(
+          dbConfig || {},
+          notifyType,
+          patientNotifyPrefs,
+        );
+        const clinicEmailOn = dbConfig?.notify_channel_email !== false;
+        const sendEmail = Boolean(bookingEmail) && clinicEmailOn;
+        const sendSms = notifyChannels.sendSms;
+        if (sendEmail || sendSms || isAutoNotifyEnabled(dbConfig || {}, notifyType)) {
           const notifyData = await sendAppointmentNotification({
             patientName: result.patient.displayName,
             phone: result.patient.phone,
-            email: (formData.email || result.patient.email || '').trim(),
+            email: bookingEmail,
             date: selectedDate,
             time: selectedTime,
             equipment: selectedService.name,
@@ -375,17 +380,17 @@ export default function PublicBookingPortal({
             emailTemplates: dbConfig || {},
             appointmentId: result.appointment?.id || '',
             cancelLimitHours: Number(dbConfig?.cancel_limit_hours) || 24,
-            sendEmail: notifyChannels.sendEmail,
-            sendSms: notifyChannels.sendSms,
-            prefers_email: patientNotifyPrefs.prefers_email,
+            sendEmail,
+            sendSms,
+            prefers_email: true,
             prefers_sms: patientNotifyPrefs.prefers_sms,
           });
           if (notifyHadFailure(notifyData.report)) {
             console.warn('Booking notify partial failure', notifyData.report);
           }
-        } catch (notifyError) {
-          console.warn('Booking notify failed', notifyError);
         }
+      } catch (notifyError) {
+        console.warn('Booking notify failed', notifyError);
       }
 
       if (dbConfig?.notify_staff_on_booking === true) {
